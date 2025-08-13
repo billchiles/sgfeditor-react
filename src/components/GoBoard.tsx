@@ -75,7 +75,7 @@ const stoneFill = (c: StoneColor) => (c === "black" ? "#111" : "#f2f2f2");
 export default function GoBoard({
   boardSize = 19,
   cellSize = 32,
-  padding = 24,
+  padding = 36,
   showCoords = false,
   onPlaceStone,
   alertOnOccupied = true,
@@ -211,16 +211,17 @@ export default function GoBoard({
   const renderCoords = () => {
     if (!showCoords) return null;
     const fontSize = 12;
-    const top = geom.gridStart - 6;
-    const bottom = geom.gridEnd + 16;
-    const left = geom.gridStart - 12;
-    const right = geom.gridEnd + 8;
+    const labelGridPad = geom.radius + fontSize / 2; // padding for labels
+    const top = geom.gridStart - labelGridPad; // -10: need enough space that stones don't crowd labels
+    const bottom = geom.gridEnd + labelGridPad + fontSize / 2; //<text> coords are left,bottom
+    const left = geom.gridStart - labelGridPad; // ditto
+    const right = geom.gridEnd + labelGridPad; // ditto
     return (
       <g fontSize={fontSize} fill="#222" textAnchor="middle">
         {/* Column letters */}
         {coords.xs.map((x, i) => (
           <>
-            <text key={`top-${i}`} x={x} y={top}>{LETTERS[i] || i + 1}</text>
+            <text key={`top-${i}`} x={x} y={top + 4}>{LETTERS[i] || i + 1}</text>
             <text key={`bottom-${i}`} x={x} y={bottom}>{LETTERS[i] || i + 1}</text>
           </>
         ))}
