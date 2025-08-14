@@ -26,6 +26,7 @@ export interface GoBoardProps {
 }
 
 // ---------- Visual constants ----------
+//
 const LINE_THICKNESS = 1.5;
 const HOSHI_RADIUS = 3;
 const STONE_OUTLINE = 0.75; // stroke width around stones so they appear crisp
@@ -44,6 +45,7 @@ const LETTERS = "ABCDEFGHJKLMNOPQRSTUVWXYZ".split("");
 // Object ID's for UIElt lookup were formed as follows, hence the unpacking in the snippet above
 //const keyFor = (x: number, y: number) => `${x},${y}`;
 
+// GPT5 generated this, not sure why not use #000000 and #FFFFFF, so will keep for a while.
 const stoneFill = (c: StoneColor) => (c === "black" ? "#111" : "#f2f2f2");
 
 export default function GoBoard({
@@ -54,11 +56,12 @@ export default function GoBoard({
   onPlaceStone,
   alertOnOccupied = true,
 }: GoBoardProps) {
-  const [stones] = useState<(StoneColor | null)[][]>(
+  const [stones] = useState<(Move | null)[][]>(
     Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
+    //Array.from({ length: boardSize }, () => Array.from({ length: boardSize }, () => null))
   const [boardVersion, setBoardVersion] = useState(0);
 
-  const [nextColor, setnextColor] = useState<StoneColor>("black");
+  const [nextColor, setnextColor] = useState<StoneColor>(StoneColor.Black);
 
   // ---------- Derived geometry (memoized) ----------
   const geom = useMemo(() => {
@@ -71,7 +74,9 @@ export default function GoBoard({
   }, [boardSize, cellSize, padding]);
 
   const coords = useMemo(() => {
-    // Lists of pixel centers for each intersection
+    // Lists of pixel centers for each intersection, which seems silly to precompute as premature
+    // optimization, but for now, it is used in several places.  Will consider removing it later.
+    // NOTE, in xaml, UI elts had same indexes as view model types, but react is hand rendered by pixels.
     const xs = Array.from({ length: boardSize }, (_, i) => geom.gridStart + i * cellSize);
     const ys = xs; // symmetric
     return { xs, ys };
@@ -101,16 +106,14 @@ export default function GoBoard({
       const grid = pixelToGrid(sx, sy);
       if (!grid) return;
 
-      //const k = keyFor(grid.x, grid.y);
       if (stones[grid.x][grid.y] !== null) {
         if (alertOnOccupied) alert("You can't play on an occupied point.");
         return;
       }
-      stones[grid.x][grid.y] = nextColor;
+      const newMove = new Move({row: grid.y, column: grid.x, color: nextColor,});
+      stones[grid.x][grid.y] = newMove;
+      setnextColor(c => (c === StoneColor.Black ? StoneColor.White : StoneColor.Black));
       setBoardVersion(v => (v + 1) % 2); // toggle between 0 and 1 to cause board to render
-
-      onPlaceStone?.(grid.x, grid.y, nextColor);
-      setnextColor((c) => (c === "black" ? "white" : "black"));
     },
     [stones, nextColor, onPlaceStone, alertOnOccupied, cellSize, boardSize, geom.gridStart]
   );
@@ -195,12 +198,16 @@ export default function GoBoard({
   const renderStones = useMemo(() => {
     const circles: React.ReactNode[] = [];
     stones.forEach((col, x) => {
-      col.forEach((color, y) => {
-        if (color !== null) {
-          const cx = coords.xs[x]; // Change this to compute, silly to have this when math is cheap
+      col.forEach((m, y) => {
+    // for (let x = 0; x < boardSize; x++) {
+    //   for (let y = 0; y < boardSize; y++) {
+         //const m = stones[x][y];
+         //if (m === null) continue; can't continue .foreeach, need to use for loops
+        if (m !== null) {
+          const cx = coords.xs[x]; 
           const cy = coords.ys[y];
           circles.push(
-            <circle key={`stone-${x}-${y}`} cx={cx} cy={cy} r={geom.radius} fill={stoneFill(color)} 
+            <circle key={`stone-${x}-${y}`} cx={cx} cy={cy} r={geom.radius} fill={stoneFill(m.color)} 
                     stroke="#000" strokeWidth={STONE_OUTLINE} />
           );
         }
@@ -269,6 +276,52 @@ function hoshiPoints(_size: number): Array<{ x: number; y: number }> {
   return pts.flatMap((a) => pts.map((b) => ({ x: a, y: b })));
 }
 
+export interface INextMove {
+     IMNColor: StoneColor;
+     IMNNext: Move | null;
+     IMNBranches: Move[] | null;
+   }
+
+export class Move implements INextMove {
+  row: number;
+  column: number;
+  color: StoneColor;
+  IMNColor: StoneColor;
+  IMNNext: Move | null;
+  IMNBranches: Move[] | null;
+  number: number;
+  previous: Move | null;
+  next: Move | null;
+  adornments: Adornment[];
+  deadStones: Move[];
+  comment: string;
+
+  constructor(params: {
+      row: number;
+      column: number;
+      color: StoneColor;}) {
+    this.row = params.row;
+    this.column = params.column;
+    this.color = params.color;
+    this.number = 0;
+    this.IMNColor = params.color;
+    this.previous = null;
+    this.next = null;
+    this.IMNNext = null;
+    this.IMNBranches = null;
+    this.adornments = [];
+    this.deadStones = [];
+    this.comment = "";
+  }
+
+  addBranch(m: Move) {
+    if (this.IMNBranches === null) this.IMNBranches = [];
+    this.IMNBranches.push(m);
+  }
+  addAdornment(a: Adornment) {
+    this.adornments.push(a);
+  }
+}
 
 
 type Adornment =
