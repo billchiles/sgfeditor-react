@@ -68,7 +68,7 @@ export default function GoBoard({
     return { sizePx, gridStart, gridEnd, inner, radius };
   }, [boardSize, cellSize, padding]);
 
-  const coords = useMemo(() => {
+  const boardToPx = useMemo(() => {
     // Lists of pixel centers for each intersection, which seems silly to precompute as premature
     // optimization, but for now, it is used in several places.  Will consider removing it later.
     // NOTE, in xaml, UI elts had same indexes as view model types, but react is hand rendered by pixels.
@@ -125,7 +125,7 @@ export default function GoBoard({
   const renderGrid = () => (
     <g>
       {/* vertical lines */}
-      {coords.xs.map((x, i) => (
+      {boardToPx.xs.map((x, i) => (
         <line
           key={`vLine-${i}`}
           x1={x}
@@ -138,7 +138,7 @@ export default function GoBoard({
         />
       ))}
       {/* horizontal lines */}
-      {coords.ys.map((y, i) => (
+      {boardToPx.ys.map((y, i) => (
         <line
           key={`hLine-${i}`}
           x1={geom.gridStart}
@@ -158,8 +158,8 @@ export default function GoBoard({
       {hoshi.map(({ x, y }, i) => (
         <circle
           key={`hoshi-${i}`}
-          cx={coords.xs[x]}
-          cy={coords.ys[y]}
+          cx={boardToPx.xs[x]}
+          cy={boardToPx.ys[y]}
           r={HOSHI_RADIUS}
           fill="#000"
         />
@@ -177,7 +177,7 @@ export default function GoBoard({
     return (
       <g fontSize={fontSize} fill="#222" textAnchor="middle">
         {/* Column letters */}
-        {coords.xs.map((x, i) => (
+        {boardToPx.xs.map((x, i) => (
           <>
             <text key={`colTopLabel-${i}`} x={x} y={top + 4}>{LETTERS[i] || i + 1}</text>
             <text key={`colBottomLabel-${i}`} x={x} y={bottom}>{LETTERS[i] || i + 1}</text>
@@ -188,7 +188,7 @@ export default function GoBoard({
             Then we override each row's end label with textAnchor="start".
             GPT5 randomly decided to key the column letters but not the row numbers, but I think
             we could have used no grid immediately around labels and put textAnchor in each.*/}
-        {coords.ys.map((y, i) => (
+        {boardToPx.ys.map((y, i) => (
           <g key={`row-${i}`} textAnchor="end">
             <text x={left} y={y + 4}>{i + 1}</text>
             <text x={right} y={y + 4} textAnchor="start">{i + 1}</text>
@@ -207,8 +207,8 @@ export default function GoBoard({
          //const m = stones[x][y];
          //if (m === null) continue; can't continue .foreeach, need to use for loops
         if (m !== null) {
-          const cx = coords.xs[x]; 
-          const cy = coords.ys[y];
+          const cx = boardToPx.xs[x]; 
+          const cy = boardToPx.ys[y];
           circles.push(
             <circle key={`stone-${x}-${y}`} cx={cx} cy={cy} r={geom.radius} fill={stoneFill(m.color)} 
                     stroke="#000" strokeWidth={STONE_OUTLINE} />
