@@ -70,6 +70,19 @@ LATER ...
  */
  
  
+ THEN got IMoveNext and linking moves and currentMove and fixed up all rendering.
  
+
+Now have Move[][], currentMove, prev/next ptr mgt, etc.
+
+https://react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary
+c-s-j shows chrome dbg log, so can see component that threw an error
+
+
+
+ 
+Tomorrow: ask gpt5 to create basic UI panels -- gobard, command buttons, title telemetry, comment, and canvas for drawing a tree
+Then ask it to add previous and next buttons that I can wire up to affect Move[][] and board version to move around
+
  
  

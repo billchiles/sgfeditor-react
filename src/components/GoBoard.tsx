@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import styles from "./goboard.module.css";
 
 
@@ -17,12 +17,6 @@ export interface GoBoardProps {
   cellSize?: number;
   /** Extra padding around the grid for labels (default 24) */
   padding?: number;
-  /** Show A–T and 1–19 coordinate labels (default false) */
-  showCoords?: boolean;
-  /** Called whenever a stone is successfully placed */
-  onPlaceStone?: (x: number, y: number, color: StoneColor) => void;
-  /** If true, clicking an occupied point shows a message */
-  alertOnOccupied?: boolean;
 }
 
 // ---------- Visual constants ----------
@@ -48,17 +42,18 @@ const LETTERS = "ABCDEFGHJKLMNOPQRSTUVWXYZ".split("");
 // GPT5 generated this, not sure why not use #000000 and #FFFFFF, so will keep for a while.
 const stoneFill = (c: StoneColor) => (c === "black" ? "#111" : "#f2f2f2");
 
+
+/// GoBoard -- Big Entry Point to render board
+///
 export default function GoBoard({
   boardSize = 19,
   cellSize = 32,
   padding = 36,
-  showCoords = false,
-  onPlaceStone,
-  alertOnOccupied = true,
 }: GoBoardProps) {
   const [stones] = useState<(Move | null)[][]>(
     Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
     //Array.from({ length: boardSize }, () => Array.from({ length: boardSize }, () => null))
+  const currentMove = useRef<Move | null>(null);
   const [boardVersion, setBoardVersion] = useState(0);
 
   const [nextColor, setnextColor] = useState<StoneColor>(StoneColor.Black);
@@ -107,15 +102,20 @@ export default function GoBoard({
       if (!grid) return;
 
       if (stones[grid.x][grid.y] !== null) {
-        if (alertOnOccupied) alert("You can't play on an occupied point.");
+        alert("You can't play on an occupied point.");
         return;
       }
       const newMove = new Move({row: grid.y, column: grid.x, color: nextColor,});
+      newMove.number = (currentMove.current?.number ?? 0) + 1;
+      newMove.previous = currentMove.current ?? null;
+      if (newMove.previous !== null) {
+        newMove.previous.next = newMove;
+      }
       stones[grid.x][grid.y] = newMove;
       setnextColor(c => (c === StoneColor.Black ? StoneColor.White : StoneColor.Black));
       setBoardVersion(v => (v + 1) % 2); // toggle between 0 and 1 to cause board to render
     },
-    [stones, nextColor, onPlaceStone, alertOnOccupied, cellSize, boardSize, geom.gridStart]
+    [stones, nextColor, cellSize, boardSize, geom.gridStart]
   );
 
 
@@ -127,7 +127,7 @@ export default function GoBoard({
       {/* vertical lines */}
       {coords.xs.map((x, i) => (
         <line
-          key={`v-${i}`}
+          key={`vLine-${i}`}
           x1={x}
           y1={geom.gridStart}
           x2={x}
@@ -140,7 +140,7 @@ export default function GoBoard({
       {/* horizontal lines */}
       {coords.ys.map((y, i) => (
         <line
-          key={`h-${i}`}
+          key={`hLine-${i}`}
           x1={geom.gridStart}
           y1={y}
           x2={geom.gridEnd}
@@ -168,7 +168,6 @@ export default function GoBoard({
   );
 
   const renderCoords = () => {
-    if (!showCoords) return null;
     const fontSize = 12;
     const labelGridPad = geom.radius + fontSize / 2; // padding for labels
     const top = geom.gridStart - labelGridPad; // -10: need enough space that stones don't crowd labels
@@ -180,11 +179,15 @@ export default function GoBoard({
         {/* Column letters */}
         {coords.xs.map((x, i) => (
           <>
-            <text key={`top-${i}`} x={x} y={top + 4}>{LETTERS[i] || i + 1}</text>
-            <text key={`bottom-${i}`} x={x} y={bottom}>{LETTERS[i] || i + 1}</text>
+            <text key={`colTopLabel-${i}`} x={x} y={top + 4}>{LETTERS[i] || i + 1}</text>
+            <text key={`colBottomLabel-${i}`} x={x} y={bottom}>{LETTERS[i] || i + 1}</text>
           </>
         ))}
-        {/* Row numbers */}
+        {/* Row numbers 
+            Above textAnchor property covers columns and rows, then below we override with "end" for all rows.
+            Then we override each row's end label with textAnchor="start".
+            GPT5 randomly decided to key the column letters but not the row numbers, but I think
+            we could have used no grid immediately around labels and put textAnchor in each.*/}
         {coords.ys.map((y, i) => (
           <g key={`row-${i}`} textAnchor="end">
             <text x={left} y={y + 4}>{i + 1}</text>
@@ -276,22 +279,20 @@ function hoshiPoints(_size: number): Array<{ x: number; y: number }> {
   return pts.flatMap((a) => pts.map((b) => ({ x: a, y: b })));
 }
 
-export interface INextMove {
-     IMNColor: StoneColor;
-     IMNNext: Move | null;
-     IMNBranches: Move[] | null;
+export interface IMoveNext {
+     readonly IMNColor: StoneColor;
+     readonly IMNNext: IMoveNext | null;
+     readonly IMNBranches: IMoveNext[] | null;
    }
 
-export class Move implements INextMove {
+export class Move implements IMoveNext {
   row: number;
   column: number;
   color: StoneColor;
-  IMNColor: StoneColor;
-  IMNNext: Move | null;
-  IMNBranches: Move[] | null;
-  number: number;
+  number: number; // move count, from 1.  All alternate moves in variation tree have the same number.
   previous: Move | null;
-  next: Move | null;
+  next: Move | null; // null when no next move (same if start node of empty board)
+  branches: Move[] | null;
   adornments: Adornment[];
   deadStones: Move[];
   comment: string;
@@ -304,22 +305,33 @@ export class Move implements INextMove {
     this.column = params.column;
     this.color = params.color;
     this.number = 0;
-    this.IMNColor = params.color;
     this.previous = null;
     this.next = null;
-    this.IMNNext = null;
-    this.IMNBranches = null;
+    this.branches = null;
     this.adornments = [];
     this.deadStones = [];
     this.comment = "";
   }
 
   addBranch(m: Move) {
-    if (this.IMNBranches === null) this.IMNBranches = [];
-    this.IMNBranches.push(m);
+    if (this.branches === null) this.branches = [];
+    this.branches.push(m);
   }
+
   addAdornment(a: Adornment) {
     this.adornments.push(a);
+  }
+
+  // IMoveNext:
+  //
+  get IMNColor (): StoneColor {
+    return this.color;
+  }
+  get IMNNext (): IMoveNext | null {
+    return this.next;
+  }
+  get IMNBranches (): IMoveNext[] | null {
+    return (this.branches == null) ? null : this.branches;
   }
 }
 
