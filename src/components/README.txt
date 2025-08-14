@@ -51,3 +51,25 @@ Here’s where you can see my earlier suggestions and what they affect:
 
 If you want, I can rewrite `goboard.tsx` now with these improvements so it’s ready for the features you plan to add.
 
+
+
+
+
+
+LATER ...
+/**
+ * GoBoard (Vite + React + TypeScript)
+ * - Extracted visual constants for maintainability
+ * - Memoized geometry values with useMemo
+ * - Memoized click handler with useCallback
+ * - Uses CSS module for container styling
+ * - Keeps stable React keys for stones as "stone-x-y" (as requested)
+ *
+ * Drop-in usage:
+ *   <GoBoard boardSize={19} cellSize={32} showCoords />
+ */
+ 
+ 
+ 
+ 
+ 

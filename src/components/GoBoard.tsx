@@ -1,19 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import styles from "./goboard.module.css";
 
-/**
- * GoBoard (Vite + React + TypeScript)
- * - Extracted visual constants for maintainability
- * - Memoized geometry values with useMemo
- * - Memoized click handler with useCallback
- * - Uses CSS module for container styling
- * - Keeps stable React keys for stones as "stone-x-y" (as requested)
- *
- * Drop-in usage:
- *   <GoBoard boardSize={19} cellSize={32} showCoords />
- */
 
-//type StoneColor = "black" | "white";
 const StoneColor = {
   Black: "black",
   White: "white",
@@ -37,38 +25,24 @@ export interface GoBoardProps {
   alertOnOccupied?: boolean;
 }
 
-//type StonesState = Map<string, StoneColor>;
-
-// ---------- Visual constants (extracted) ----------
+// ---------- Visual constants ----------
 const LINE_THICKNESS = 1.5;
 const HOSHI_RADIUS = 3;
 const STONE_OUTLINE = 0.75; // stroke width around stones so they appear crisp
 
-// Coordinate letters typically skip "I" in many Go programs, but
-// to keep things simple we include it here; you can swap this out later.
+// Coordinate letters skip "I" for readabily and usability.
 const LETTERS = "ABCDEFGHJKLMNOPQRSTUVWXYZ".split("");
 
-//BRing this back when I kill the cached board indexes to pixel map
+// This used to be used to render stones when computing the pixel center from board coordinates.
 //const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
-
+// ...
+    // for (const [k, color] of stones) {
+    //   const [sx, sy] = k.split(",").map((n) => parseInt(n, 10));
+    //   const cx = coords.xs[clamp(sx, 0, boardSize - 1)];
+    //   const cy = coords.ys[clamp(sy, 0, boardSize - 1)];
+    //   circles.push(
+// Object ID's for UIElt lookup were formed as follows, hence the unpacking in the snippet above
 //const keyFor = (x: number, y: number) => `${x},${y}`;
-
-/** Return standard 9x9/13x13/19x19 hoshi points */
-function hoshiPoints(_size: number): Array<{ x: number; y: number }> {
-  // if (size === 9) {
-  //   const pts = [2, 4, 6];
-  //   return pts
-  //     .flatMap((a) => pts.map((b) => ({ x: a, y: b })))
-  //     .filter((p, i) => i % 2 === 0); // common 5-point layout
-  // }
-  // if (size === 13) {
-  //   const pts = [3, 6, 9];
-  //   return pts.flatMap((a) => pts.map((b) => ({ x: a, y: b })));
-  // }
-  // default to 19-style
-  const pts = [3, 9, 15];
-  return pts.flatMap((a) => pts.map((b) => ({ x: a, y: b })));
-}
 
 const stoneFill = (c: StoneColor) => (c === "black" ? "#111" : "#f2f2f2");
 
@@ -80,14 +54,11 @@ export default function GoBoard({
   onPlaceStone,
   alertOnOccupied = true,
 }: GoBoardProps) {
-  // Stones keyed by "x,y" (x and y are 0..boardSize-1)
-  // const [stones, setStones] = useState<(StoneColor | null)[][]>(
-  //   Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
   const [stones] = useState<(StoneColor | null)[][]>(
     Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
   const [boardVersion, setBoardVersion] = useState(0);
 
-  const [current, setCurrent] = useState<StoneColor>("black");
+  const [nextColor, setnextColor] = useState<StoneColor>("black");
 
   // ---------- Derived geometry (memoized) ----------
   const geom = useMemo(() => {
@@ -131,38 +102,23 @@ export default function GoBoard({
       if (!grid) return;
 
       //const k = keyFor(grid.x, grid.y);
-      if (stones[grid.x][grid.y]) {
+      if (stones[grid.x][grid.y] !== null) {
         if (alertOnOccupied) alert("You can't play on an occupied point.");
         return;
       }
-      stones[grid.x][grid.y] = current;
+      stones[grid.x][grid.y] = nextColor;
       setBoardVersion(v => (v + 1) % 2); // toggle between 0 and 1 to cause board to render
 
-      //const newStones = stones.map(row => [...row]);
-      //newStones[grid.x][grid.y] = current;
-      //setStones(newStones);
-
-      // if (stones.has(k)) {
-      //   if (alertOnOccupied) {
-      //     // In the future we can swap this for a UI toast/modal
-      //     // eslint-disable-next-line no-alert
-      //     alert("You can't play on an occupied point.");
-      //   }
-      //   return;
-      // }
-
-      // setStones((prev) => {
-      //   const next = new Map(prev);
-      //   next.set(k, current);
-      //   return next;
-      // });
-      onPlaceStone?.(grid.x, grid.y, current);
-      setCurrent((c) => (c === "black" ? "white" : "black"));
+      onPlaceStone?.(grid.x, grid.y, nextColor);
+      setnextColor((c) => (c === "black" ? "white" : "black"));
     },
-    [stones, current, onPlaceStone, alertOnOccupied, cellSize, boardSize, geom.gridStart]
+    [stones, nextColor, onPlaceStone, alertOnOccupied, cellSize, boardSize, geom.gridStart]
   );
 
-  // ---------- Renders ----------
+
+  ///
+  /// ---------- Renders ----------
+  ///
   const renderGrid = () => (
     <g>
       {/* vertical lines */}
@@ -240,7 +196,7 @@ export default function GoBoard({
     const circles: React.ReactNode[] = [];
     stones.forEach((col, x) => {
       col.forEach((color, y) => {
-        if (color) {
+        if (color !== null) {
           const cx = coords.xs[x]; // Change this to compute, silly to have this when math is cheap
           const cy = coords.ys[y];
           circles.push(
@@ -293,3 +249,32 @@ export default function GoBoard({
     </div>
   );
 }
+
+
+/// hoshiPoints returns standard hoshi points
+///
+function hoshiPoints(_size: number): Array<{ x: number; y: number }> {
+  // if (size === 9) {
+  //   const pts = [2, 4, 6];
+  //   return pts
+  //     .flatMap((a) => pts.map((b) => ({ x: a, y: b })))
+  //     .filter((p, i) => i % 2 === 0); // common 5-point layout
+  // }
+  // if (size === 13) {
+  //   const pts = [3, 6, 9];
+  //   return pts.flatMap((a) => pts.map((b) => ({ x: a, y: b })));
+  // }
+  // default to 19-style
+  const pts = [3, 9, 15];
+  return pts.flatMap((a) => pts.map((b) => ({ x: a, y: b })));
+}
+
+
+
+type Adornment =
+  | { kind: "triangle"; row: number, column: number }
+  | { kind: "square"; row: number, column: number }
+  | { kind: "letter"; row: number, column: number; text: string }
+  | { kind: "currentMove"; row: number, column: number };
+
+
