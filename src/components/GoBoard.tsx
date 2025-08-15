@@ -1,13 +1,8 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState, useContext } from "react";
 import styles from "./goboard.module.css";
-
-
-const StoneColor = {
-  Black: "black",
-  White: "white",
-} as const;
-
-type StoneColor = typeof StoneColor[keyof typeof StoneColor];
+import type { Move, StoneColor } from "../models/Game";
+import { StoneColors } from "../models/Game";
+import { GameContext } from "../models/AppGlobals";
 
 
 export interface GoBoardProps {
@@ -40,7 +35,7 @@ const LETTERS = "ABCDEFGHJKLMNOPQRSTUVWXYZ".split("");
 //const keyFor = (x: number, y: number) => `${x},${y}`;
 
 // GPT5 generated this, not sure why not use #000000 and #FFFFFF, so will keep for a while.
-const stoneFill = (c: StoneColor) => (c === "black" ? "#111" : "#f2f2f2");
+const stoneFill = (c: StoneColor) => (c === StoneColors.Black ? "#111" : "#f2f2f2");
 
 
 /// GoBoard -- Big Entry Point to render board
@@ -50,13 +45,13 @@ export default function GoBoard({
   cellSize = 32,
   padding = 36,
 }: GoBoardProps) {
+  const appGlobals = useContext(GameContext);
   const [stones] = useState<(Move | null)[][]>(
     Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
-    //Array.from({ length: boardSize }, () => Array.from({ length: boardSize }, () => null))
-  const currentMove = useRef<Move | null>(null);
+  //const currentMove = useRef<Move | null>(null);  Moved to Game
   const [boardVersion, setBoardVersion] = useState(0);
 
-  const [nextColor, setnextColor] = useState<StoneColor>(StoneColor.Black);
+//  const [nextColor, setnextColor] = useState<StoneColor>(StoneColors.Black);
 
   // ---------- Derived geometry (memoized) ----------
   const geom = useMemo(() => {
@@ -105,17 +100,22 @@ export default function GoBoard({
         alert("You can't play on an occupied point.");
         return;
       }
-      const newMove = new Move({row: grid.y, column: grid.x, color: nextColor,});
-      newMove.number = (currentMove.current?.number ?? 0) + 1;
-      newMove.previous = currentMove.current ?? null;
-      if (newMove.previous !== null) {
-        newMove.previous.next = newMove;
+      // Make move in central model via context and render it locally
+      if (appGlobals) {//appGlobals?.game
+        const m = appGlobals.game.makeMove(grid.x, grid.y);
+        if (m !== null) {
+          // THIS SHOULD BE done in a boardmodel.tx with other operations (moveat, colorat, gotostart, etc)
+          // Somewhere in game logic we need to reset board when it is appropriate, not every operation
+          stones[grid.x][grid.y] = m;
+          setBoardVersion(v => (v + 1) % 2); // toggle between 0 and 1 to cause board to render
+        }
+      } else {
+        console.warn("AppGlobals missing: how could someone click before we're ready?!.");
       }
-      stones[grid.x][grid.y] = newMove;
-      setnextColor(c => (c === StoneColor.Black ? StoneColor.White : StoneColor.Black));
-      setBoardVersion(v => (v + 1) % 2); // toggle between 0 and 1 to cause board to render
+      
     },
-    [stones, nextColor, cellSize, boardSize, geom.gridStart]
+    // Weird to add appData to dependencies since the object should never change
+    [cellSize, boardSize, geom.gridStart] // shouldn't need stones or nextColor dependency unless closes over them
   );
 
 
@@ -170,7 +170,7 @@ export default function GoBoard({
   const renderCoords = () => {
     const fontSize = 12;
     const labelGridPad = geom.radius + fontSize / 2; // padding for labels
-    const top = geom.gridStart - labelGridPad; // -10: need enough space that stones don't crowd labels
+    const top = geom.gridStart - labelGridPad; // need enough space that stones don't crowd labels
     const bottom = geom.gridEnd + labelGridPad + fontSize / 2; //<text> coords are left,bottom
     const left = geom.gridStart - labelGridPad; // ditto
     const right = geom.gridEnd + labelGridPad; // ditto
@@ -219,25 +219,6 @@ export default function GoBoard({
     return <g>{circles}</g>;
   }, [boardVersion]);
 
-    // for (const [k, color] of stones) {
-    //   const [sx, sy] = k.split(",").map((n) => parseInt(n, 10));
-    //   const cx = coords.xs[clamp(sx, 0, boardSize - 1)];
-    //   const cy = coords.ys[clamp(sy, 0, boardSize - 1)];
-    //   circles.push(
-    //     <g key={`stone-${sx}-${sy}`}>
-    //       <circle
-    //         cx={cx}
-    //         cy={cy}
-    //         r={geom.radius}
-    //         fill={stoneFill(color)}
-    //         stroke="#000"
-    //         strokeWidth={STONE_OUTLINE}
-    //       />
-    //     </g>
-    //   );
-    // }
-  //};
-
   return (
     <div className={styles.boardWrap}>
       <svg
@@ -278,68 +259,5 @@ function hoshiPoints(_size: number): Array<{ x: number; y: number }> {
   const pts = [3, 9, 15];
   return pts.flatMap((a) => pts.map((b) => ({ x: a, y: b })));
 }
-
-export interface IMoveNext {
-     readonly IMNColor: StoneColor;
-     readonly IMNNext: IMoveNext | null;
-     readonly IMNBranches: IMoveNext[] | null;
-   }
-
-export class Move implements IMoveNext {
-  row: number;
-  column: number;
-  color: StoneColor;
-  number: number; // move count, from 1.  All alternate moves in variation tree have the same number.
-  previous: Move | null;
-  next: Move | null; // null when no next move (same if start node of empty board)
-  branches: Move[] | null;
-  adornments: Adornment[];
-  deadStones: Move[];
-  comment: string;
-
-  constructor(params: {
-      row: number;
-      column: number;
-      color: StoneColor;}) {
-    this.row = params.row;
-    this.column = params.column;
-    this.color = params.color;
-    this.number = 0;
-    this.previous = null;
-    this.next = null;
-    this.branches = null;
-    this.adornments = [];
-    this.deadStones = [];
-    this.comment = "";
-  }
-
-  addBranch(m: Move) {
-    if (this.branches === null) this.branches = [];
-    this.branches.push(m);
-  }
-
-  addAdornment(a: Adornment) {
-    this.adornments.push(a);
-  }
-
-  // IMoveNext:
-  //
-  get IMNColor (): StoneColor {
-    return this.color;
-  }
-  get IMNNext (): IMoveNext | null {
-    return this.next;
-  }
-  get IMNBranches (): IMoveNext[] | null {
-    return (this.branches == null) ? null : this.branches;
-  }
-}
-
-
-type Adornment =
-  | { kind: "triangle"; row: number, column: number }
-  | { kind: "square"; row: number, column: number }
-  | { kind: "letter"; row: number, column: number; text: string }
-  | { kind: "currentMove"; row: number, column: number };
 
 

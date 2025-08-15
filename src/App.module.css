@@ -1,0 +1,103 @@
+
+.appShell {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  height: 100vh;        /* full height for a tidy split view */
+  box-sizing: border-box;
+}
+
+.leftPane {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  /* GoBoard goes here and defines its own size; keep left flexible */
+  overflow: auto;
+}
+
+.rightPane {
+  width: 360px;         /* sidebar width */
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;     /* children can manage scroll themselves */
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panelHeader {
+  font-weight: 600;
+  font-size: 14px;
+  color: #111827;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  cursor: pointer;
+}
+.btn:hover {
+  background: #f3f4f6;
+}
+
+.status {
+  display: grid;
+  grid-template-rows: auto auto;
+  row-gap: 4px;
+  line-height: 1.2;
+}
+.statusTop {
+  font-weight: 600;
+  color: #111827;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statusBottom {
+  color: #374151;
+  font-size: 13px;
+}
+
+.commentBox {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.treeArea {
+  flex: 1;
+  min-height: 0; /* enables scroll in child */
+  overflow: auto;
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fafafa;
+}
+
+.treePlaceholder {
+  color: #6b7280;
+  font-size: 13px;
+}
