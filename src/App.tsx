@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef } from "react";
 import GoBoard from "./components/GoBoard";
 import type { StoneColor } from "./models/Game";
 import styles from "./App.module.css";
@@ -14,7 +14,6 @@ export default function App() {
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   // Provide Game via context; App only supplies how to read the comment string
   const getComment = () => commentRef.current?.value ?? "";
-  const gameRef = useRef<Game>(new Game(19));
 
   // BOGUS place holder, reminder to set version when filenname, move number, capture count, etc., change.
   const handlePlaceStone = (_x: number, _y: number, _color: StoneColor) => {

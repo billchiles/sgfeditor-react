@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState, useContext } from "react";
+import React, { useCallback, useMemo, useState, useContext } from "react";
 import styles from "./goboard.module.css";
 import type { Move, StoneColor } from "../models/Game";
 import { StoneColors } from "../models/Game";
@@ -46,7 +46,7 @@ export default function GoBoard({
   padding = 36,
 }: GoBoardProps) {
   const appGlobals = useContext(GameContext);
-  const [stones] = useState<(Move | null)[][]>(
+  const [board] = useState<(Move | null)[][]>(
     Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
   //const currentMove = useRef<Move | null>(null);  Moved to Game
   const [boardVersion, setBoardVersion] = useState(0);
@@ -96,7 +96,7 @@ export default function GoBoard({
       const grid = pixelToGrid(sx, sy);
       if (!grid) return;
 
-      if (stones[grid.x][grid.y] !== null) {
+      if (board[grid.x][grid.y] !== null) {
         alert("You can't play on an occupied point.");
         return;
       }
@@ -106,7 +106,7 @@ export default function GoBoard({
         if (m !== null) {
           // THIS SHOULD BE done in a boardmodel.tx with other operations (moveat, colorat, gotostart, etc)
           // Somewhere in game logic we need to reset board when it is appropriate, not every operation
-          stones[grid.x][grid.y] = m;
+          board[grid.x][grid.y] = m;
           setBoardVersion(v => (v + 1) % 2); // toggle between 0 and 1 to cause board to render
         }
       } else {
@@ -200,7 +200,7 @@ export default function GoBoard({
 
   const renderStones = useMemo(() => {
     const circles: React.ReactNode[] = [];
-    stones.forEach((col, x) => {
+    board.forEach((col, x) => {
       col.forEach((m, y) => {
     // for (let x = 0; x < boardSize; x++) {
     //   for (let y = 0; y < boardSize; y++) {

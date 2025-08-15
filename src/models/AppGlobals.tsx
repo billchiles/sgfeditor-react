@@ -1,5 +1,5 @@
 import React, { useMemo, useRef } from "react";
-import { Game, Move } from "./Game";
+import { Game } from "./Game";
 //import type { StoneColor } from "./Game";
 
 
@@ -20,6 +20,9 @@ type ProviderProps = {
 };
 
 export function GameProvider({ children, getComment, size = 19 }: ProviderProps) {
+  if (size !== 19) {
+    alert("Only support 19x19 games currently.")
+  }
   const gameRef = useRef<Game>(new Game(size));
   const api: AppGlobals = useMemo(
     () => ({ game: gameRef.current, getComment }),
