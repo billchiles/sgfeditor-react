@@ -28,6 +28,9 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
     () => ({ game: gameRef.current, getComment }),
     [getComment, size]
   );
+  // Instead of the following line that requires this file be a .tsx file, I could have used this
+  // commented out code:
+  //return React.createElement(GameContext.Provider, { value: api }, children);
   return <GameContext.Provider value={api}>{children}</GameContext.Provider>;
 }
 

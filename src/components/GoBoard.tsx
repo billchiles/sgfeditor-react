@@ -1,17 +1,19 @@
 import React, { useCallback, useMemo, useState, useContext } from "react";
 import styles from "./goboard.module.css";
-import type { Move, StoneColor } from "../models/Game";
+import type { StoneColor } from "../models/Game";
 import { StoneColors } from "../models/Game";
 import { GameContext } from "../models/AppGlobals";
+import { debugAssert } from "../debug-assert";
 
 
 export interface GoBoardProps {
-  /** Number of lines (and intersections) along one edge (default 19) */
+  // Number of lines (and intersections) along one edge (default 19)
   boardSize?: number;
-  /** Distance in pixels between adjacent intersections (default 32) */
+  // Distance in pixels between adjacent intersections (default 32)
   cellSize?: number;
-  /** Extra padding around the grid for labels (default 24) */
+  // Extra padding around the grid for labels (default 24)
   padding?: number;
+  redrawBoardToken : number;
 }
 
 // ---------- Visual constants ----------
@@ -44,10 +46,14 @@ export default function GoBoard({
   boardSize = 19,
   cellSize = 32,
   padding = 36,
+  redrawBoardToken = 0,
 }: GoBoardProps) {
   const appGlobals = useContext(GameContext);
-  const [board] = useState<(Move | null)[][]>(
-    Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
+  debugAssert(appGlobals !== null, "WTF?! Why would this ever be null?  Race condition?");
+  const board = appGlobals.game.board;
+  //const currentMove = useRef<Move | null>(null);
+  //const [board] = useState<(Move | null)[][]>(
+  //  Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
   //const currentMove = useRef<Move | null>(null);  Moved to Game
   const [boardVersion, setBoardVersion] = useState(0);
 
@@ -88,25 +94,26 @@ export default function GoBoard({
     (e: React.MouseEvent<SVGSVGElement>) => {
       const svg = e.currentTarget;
       const pt = svg.createSVGPoint();
-      pt.x = e.clientX;
-      pt.y = e.clientY;
+      pt.x = e.clientX; // pixels from left
+      pt.y = e.clientY; // pixels from top
       const ctm = svg.getScreenCTM();
       if (!ctm) return;
       const { x: sx, y: sy } = pt.matrixTransform(ctm.inverse());
       const grid = pixelToGrid(sx, sy);
       if (!grid) return;
-
-      if (board[grid.x][grid.y] !== null) {
+      //alert(`ptx: ${pt.x}, pty: ${pt.y}, sx: ${sx}, sy: ${sy}, gridx: ${grid.x}, gridy: ${grid.y} `)
+      // graphics X is actually our columns, and graphics Y is the row, so switch them for view model.
+      if (board.moveAt(grid.y, grid.x) !== null) {
         alert("You can't play on an occupied point.");
         return;
       }
       // Make move in central model via context and render it locally
-      if (appGlobals) {//appGlobals?.game
-        const m = appGlobals.game.makeMove(grid.x, grid.y);
+      if (appGlobals !== null) {//appGlobals?.game
+        const m = appGlobals.game.makeMove(grid.y, grid.x);
         if (m !== null) {
           // THIS SHOULD BE done in a boardmodel.tx with other operations (moveat, colorat, gotostart, etc)
           // Somewhere in game logic we need to reset board when it is appropriate, not every operation
-          board[grid.x][grid.y] = m;
+          board.addStone(m);
           setBoardVersion(v => (v + 1) % 2); // toggle between 0 and 1 to cause board to render
         }
       } else {
@@ -114,7 +121,11 @@ export default function GoBoard({
       }
       
     },
-    // Weird to add appData to dependencies since the object should never change
+    // gpt5 thinks this is right:
+    //    [stones, nextColor, cellSize, boardSize, geom.gridStart, appGlobals]
+    // Weird to add appData, appGlobals, color, cell size, boardsize and various things that don't
+    // change the behavior of adding a stone.  Maybe I'm not understanding something, closing over shit, etc.
+    // So far it is working fine.
     [cellSize, boardSize, geom.gridStart] // shouldn't need stones or nextColor dependency unless closes over them
   );
 
@@ -200,24 +211,24 @@ export default function GoBoard({
 
   const renderStones = useMemo(() => {
     const circles: React.ReactNode[] = [];
-    board.forEach((col, x) => {
-      col.forEach((m, y) => {
-    // for (let x = 0; x < boardSize; x++) {
-    //   for (let y = 0; y < boardSize; y++) {
-         //const m = stones[x][y];
-         //if (m === null) continue; can't continue .foreeach, need to use for loops
+    // board.forEach((col, x) => {
+    //   col.forEach((m, y) => {
+    for (let row = 0; row < boardSize; row++) {
+      for (let col = 0; col < boardSize; col++) {
+        const m = board.moveAt(row, col);
         if (m !== null) {
-          const cx = boardToPx.xs[x]; 
-          const cy = boardToPx.ys[y];
+          // Board/Move model is rows go down, columns go across, but graphics is X goes across, Y goes down.
+          const cx = boardToPx.xs[col]; 
+          const cy = boardToPx.ys[row];
           circles.push(
-            <circle key={`stone-${x}-${y}`} cx={cx} cy={cy} r={geom.radius} fill={stoneFill(m.color)} 
+            <circle key={`stone-${row}-${col}`} cx={cx} cy={cy} r={geom.radius} fill={stoneFill(m.color)} 
                     stroke="#000" strokeWidth={STONE_OUTLINE} />
           );
         }
-      });
-    });
+      };
+    };
     return <g>{circles}</g>;
-  }, [boardVersion]);
+  }, [boardVersion, redrawBoardToken]);
 
   return (
     <div className={styles.boardWrap}>

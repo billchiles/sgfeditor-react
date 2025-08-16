@@ -1,7 +1,11 @@
+import { debugAssert } from '../debug-assert';
+import { Board } from './Board';
+
 
 export const StoneColors = {
   Black: "black",
   White: "white",
+  NoColor: "Pass"
 } as const;
 
 export type StoneColor = typeof StoneColors[keyof typeof StoneColors];
@@ -11,6 +15,7 @@ export class Game {
   firstMove: Move | null;
   currentMove: Move | null;
   size: number;
+  board: Board;
   nextColor: StoneColor;
   moveCount: number;
   komi: string;
@@ -19,6 +24,7 @@ export class Game {
 
   constructor(size = 19, handicap = 0, komi = "6.5") {
     this.size = size;
+    this.board = new Board(size);
     this.firstMove = null;
     this.currentMove = null;
     this.moveCount = 0;
@@ -29,16 +35,29 @@ export class Game {
     this.komi = komi;
   }
 
-  makeMove(row: number, column: number) : Move {
+  
+  /// makeMove adds a move in sequence to the game and board at row, col. Row, col index from the
+  /// top left corner. This handles clicking and adding moves to a game (UI code applies the
+  /// current move adornment based on Game.currentMove). This handles branching if the current move
+  /// already has next moves and displays a message if the row, col already has a move at that
+  /// location. If this is the first move, this function sets Game.firstMove, and updates
+  /// moveCount, nextColor, etc. This returns the new move (or an existing move if the user
+  /// clicked on a location where there is a move on another branch following the current move).
+  /// This returns null if there are any problems playing at this location or rendering a
+  /// pre-existing found move here. This assumes it was called because the user clicked. Passing
+  /// in Board's NoIndex for row and col creates a pass move.
+  ///
+  makeMove(row: number, column: number) : Move | null {
     const move = new Move({row, column, color: this.nextColor});
     move.number = this.moveCount + 1;
-    if (!this.firstMove) this.firstMove = move;
-    if (this.currentMove) this.currentMove.next = move;
+    if (this.firstMove === null) this.firstMove = move;
+    if (this.currentMove !== null) this.currentMove.next = move;
     move.previous = this.currentMove;
     if (this.currentMove) {
         this.currentMove.comment = ""; // get from UI elt when have access
         // else set comment for game
     }
+    this.board.addStone(move);
     // REMEMBER to not increment counter and color until we know we're returning non-null
     this.moveCount++;
     this.nextColor = this.nextColor === StoneColors.Black ? StoneColors.White : StoneColors.Black;
@@ -46,7 +65,44 @@ export class Game {
 
     return move;
   }
-}
+
+  /// Move the current pointer one step *back* along the main line.
+  /// Returns the move that was unwound, or undefined if at the beginning.
+  /// Note: This just moves the pointer and unlinks forward; your UI
+  /// may also want to update the board view separately.
+  ///
+  unwindMove(): Move | null {
+    const current = this.currentMove;
+    debugAssert(current !== null, "Prev button should be disabled if there is no current move.")
+    // if (current === null) {
+    //   alert("");
+    //   return undefined;
+    //}
+    // FOR NOW GoBoard sets board[][], same with makeMove
+    alert(`${current}`);
+    this.currentMove = current.previous;
+    alert(`prev ${this.currentMove}`);
+    this.board.removeStone(current);
+    return current;
+  }
+
+  /// Move the current pointer one step *forward* along the main line.
+  /// Returns the newly current move, or undefined if there is no next.
+  ///
+  replayMove(): Move | null {
+    const current = this.currentMove;
+    if (current === null) {
+      this.currentMove = this.firstMove;
+      debugAssert(this.currentMove !== null, "Next button should be disabled if no first move.");
+    } else {
+      debugAssert(current.next !== null, "Next button should be disabled if there is no next move.");
+      this.currentMove = current.next;
+    }
+    this.board.addStone(this.currentMove);
+    return this.currentMove;
+ }
+
+} // Game class
 
 
 export interface IMoveNext {
@@ -71,6 +127,7 @@ export class Move implements IMoveNext {
       row: number;
       column: number;
       color: StoneColor;}) {
+
     this.row = params.row;
     this.column = params.column;
     this.color = params.color;
@@ -103,7 +160,7 @@ export class Move implements IMoveNext {
   get IMNBranches (): IMoveNext[] | null {
     return (this.branches == null) ? null : this.branches;
   }
-}
+} // Move class
 
 
 type Adornment =
