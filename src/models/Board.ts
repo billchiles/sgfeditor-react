@@ -14,7 +14,7 @@ export class Board {
   }
 
   removeStone (move: Move) {// NEED TO FIX, moves have 1 based, model is zero-based
-    this.moves[move.row][move.column] = move;
+    this.moves[move.row][move.column] = null;
   }
 
   removeStoneAt (x: number, y: number) {

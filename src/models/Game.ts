@@ -74,14 +74,7 @@ export class Game {
   unwindMove(): Move | null {
     const current = this.currentMove;
     debugAssert(current !== null, "Prev button should be disabled if there is no current move.")
-    // if (current === null) {
-    //   alert("");
-    //   return undefined;
-    //}
-    // FOR NOW GoBoard sets board[][], same with makeMove
-    alert(`${current}`);
     this.currentMove = current.previous;
-    alert(`prev ${this.currentMove}`);
     this.board.removeStone(current);
     return current;
   }
