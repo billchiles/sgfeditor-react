@@ -21,7 +21,8 @@ export class Game {
   komi: string;
   handicap: number;
   handicapStones: Move[] | null;
-  // Set by GameProvider in AppGlobals, called from model to signal re-render
+  // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
+  // to bumpVersion, keeping model / UI isolation.
   onChange?: () => void;
 
   constructor(size = 19, handicap = 0, komi = "6.5") {
