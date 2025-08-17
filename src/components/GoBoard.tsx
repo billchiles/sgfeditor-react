@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useContext } from "react";
+import React, { useCallback, useMemo, useContext } from "react";
 import styles from "./goboard.module.css";
 import type { StoneColor } from "../models/Game";
 import { StoneColors } from "../models/Game";
@@ -13,7 +13,6 @@ export interface GoBoardProps {
   cellSize?: number;
   // Extra padding around the grid for labels (default 24)
   padding?: number;
-  redrawBoardToken : number;
 }
 
 // ---------- Visual constants ----------
@@ -46,7 +45,6 @@ export default function GoBoard({
   boardSize = 19,
   cellSize = 32,
   padding = 36,
-  redrawBoardToken = 0,
 }: GoBoardProps) {
   const appGlobals = useContext(GameContext);
   debugAssert(appGlobals !== null, "WTF?! Why would this ever be null?  Race condition?");
@@ -55,7 +53,6 @@ export default function GoBoard({
   //const [board] = useState<(Move | null)[][]>(
   //  Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
   //const currentMove = useRef<Move | null>(null);  Moved to Game
-  const [boardVersion, setBoardVersion] = useState(0); // Local ticks for this component
 
 //  const [nextColor, setnextColor] = useState<StoneColor>(StoneColors.Black);
 
@@ -111,10 +108,8 @@ export default function GoBoard({
       if (appGlobals !== null) {//appGlobals?.game
         const m = appGlobals.game.makeMove(grid.y, grid.x);
         if (m !== null) {
-          // THIS SHOULD BE done in a boardmodel.ts with other operations (moveat, colorat, gotostart, etc)
-          // Somewhere in game logic we need to reset board when it is appropriate, not every operation
-          //board.addStone(m);
-          setBoardVersion(v => v + 1); // toggle between 0 and 1 to cause board to render
+          // Game.makeMove updates the model & provider bumps version -> memo below will re-run
+          appGlobals.bumpVersion()
         }
       } else {
         console.warn("AppGlobals missing: how could someone click before we're ready?!.");
@@ -228,7 +223,7 @@ export default function GoBoard({
       };
     };
     return <g>{circles}</g>;
-  }, [boardVersion, redrawBoardToken]); // no more boardVersion
+  }, [appGlobals?.version]); // redraw when global version changes
 
   return (
     <div className={styles.boardWrap}>

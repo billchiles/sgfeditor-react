@@ -21,6 +21,8 @@ export class Game {
   komi: string;
   handicap: number;
   handicapStones: Move[] | null;
+  // Set by GameProvider in AppGlobals, called from model to signal re-render
+  onChange?: () => void;
 
   constructor(size = 19, handicap = 0, komi = "6.5") {
     this.size = size;
@@ -62,7 +64,8 @@ export class Game {
     this.moveCount++;
     this.nextColor = this.nextColor === StoneColors.Black ? StoneColors.White : StoneColors.Black;
     this.currentMove = move;
-
+    debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
+    this.onChange!();
     return move;
   }
 
@@ -76,6 +79,8 @@ export class Game {
     debugAssert(current !== null, "Prev button should be disabled if there is no current move.")
     this.currentMove = current.previous;
     this.board.removeStone(current);
+    debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
+    this.onChange!();
     return current;
   }
 
@@ -92,6 +97,9 @@ export class Game {
       this.currentMove = current.next;
     }
     this.board.addStone(this.currentMove);
+    debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
+    this.onChange!();
+
     return this.currentMove;
  }
 

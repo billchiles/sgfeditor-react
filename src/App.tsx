@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useContext } from "react";
+import { useMemo, useRef, useContext } from "react";
 import GoBoard from "./components/GoBoard";
 import styles from "./App.module.css";
 import { GameProvider, GameContext } from "./models/AppGlobals";
@@ -60,27 +60,22 @@ function AppContent({
   // could write this: <AppContent commentRef={commentRef as React.RefObject<HTMLTextAreaElement>} />
   commentRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
-  //const [statusVersion, setStatusVersion] = useState(0);
-  //const [redrawBoardToken, setRedrawBoardToken] = useState(0);
-  // single version counter that bumps whenever game state changes -> redraw all, 
-  // gpt5 says plenty fast for scale
-  const [gameVersion, setGameVersion] = useState(0);
   const appGlobals = useContext(GameContext);
 
   //const moveNumber = 10;
   const blackCaptures = 3;
   const whiteCaptures = 5;
-  const statusTop = useMemo(() => "SGF Editor -- " + "foo", [gameVersion]);
+  const statusTop = useMemo(() => "SGF Editor -- " + "foo", [appGlobals?.version]);
   const statusBottom = useMemo(
-    () => `Move: ${appGlobals?.game.currentMove !== null ? appGlobals?.game.currentMove?.number : ""}   Black captures: ${blackCaptures}   White captures: ${whiteCaptures}`,
-    [gameVersion]
+    () => `Move: ${appGlobals?.game.currentMove !== null ? appGlobals?.game.currentMove?.number : "   "}   Black captures: ${blackCaptures}   White captures: ${whiteCaptures}`,
+    [appGlobals?.version]
   );
 
   return (
     <div className={styles.appShell}>
       {/* Go Board */}
       <div className={styles.leftPane}>
-        <GoBoard boardSize={19} redrawBoardToken={gameVersion} />
+        <GoBoard boardSize={19} />
       </div>
 
       {/* RIGHT: Sidebar */}
@@ -98,7 +93,7 @@ function AppContent({
               onClick={() => {
                 if (appGlobals !== null) {
                   appGlobals.game.unwindMove();
-                  setGameVersion((v) => v + 1);
+                  // unwindMove calls game.onchange to bump version and trigger re-rendering
                 } else {
                   console.warn("AppGlobals missing: how could someone click before we're ready?!.");
                 }
@@ -111,8 +106,7 @@ function AppContent({
               onClick={() => {
                 if (appGlobals !== null) {
                   appGlobals.game.replayMove();
-                  setGameVersion((v) => v + 1);
-
+                  // unwindMove calls game.onchange to bump version and trigger re-rendering
                 } else {
                   console.warn("AppGlobals missing: how could someone click before we're ready?!.");
                 }
