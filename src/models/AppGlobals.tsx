@@ -19,6 +19,8 @@ export type AppGlobals = {
   // Manually force a redraw from any UI or model code
   bumpVersion: () => void;
   // File I/O provided by src/platforms/bridges.ts declarations
+  // Promise<void> is style choice because it feels like a command, not a query, and the caller
+  // doesn't need the file contents because the openSGF handler creates the new game and model state.
   openSgf: () => Promise<void>;
   saveSgf: () => Promise<void>;
 };
@@ -49,6 +51,12 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
   if (size !== 19) {
     alert("Only support 19x19 games currently.")
   }
+  // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
+  // render, which would replace game an all the move state.  When we have multiple games, this will
+  // change to be about the games collection and active game.  At that time, we need to update the
+  // ref'ed values, update the game.onchange callbacks for all games because state will change that
+  // will cause that closure to re-eval, which I think means the bumpVersion function will mutate
+  // objects no longer referenced by the UI, and therefore the UI won't re-render.
   const gameRef = useRef<Game>(new Game(size));
   const [version, setVersion] = useState(0);
   const bumpVersion = useCallback(() => setVersion(v => v + 1), []);
@@ -105,7 +113,8 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
     const data = toSgf();
     const hint = gameRef.current.filename ?? "game.sgf";
     const written = await fileBridge.save(hint, data);
-    // WHY SAVE filename?  Compare if different, bump version if different?
+    // Some platforms (fallback download?) can write and return an different path than suggested.
+    // If just c-s, then it shouldn't change, so could compare against stored name and save if diff.
     gameRef.current.filename = written;
     bumpVersion(); // so the status line can reflect the new name
   }, [fileBridge, toSgf, bumpVersion]);
@@ -130,6 +139,7 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
       }
     };
     hotkeys.on(handler);
+    // return function to remove handler when useEffect re-runs to avoid collecting a chain of them.
     return () => hotkeys.off(handler);
   }, [hotkeys, saveSgf]);
   // Code to provide the values when the UI rendering code runs

@@ -19,6 +19,10 @@ export const browserFileBridge: FileBridge = {
 
     // Fallback: <input type="file">
     return await new Promise<OpenResult>((resolve) => {
+      // resolve is provided by js to complete the promise.  Resolve takes a result value.
+      // Js also provides a reject function that takes an error argument.
+      // We don't use reject because we just return null for any errors.
+      // FileReader.onload calls resolve(reader.result) to pass the file contents to a promise.then()
       const input = document.createElement("input");
       input.type = "file";
       input.accept = ".sgf,text/plain";
