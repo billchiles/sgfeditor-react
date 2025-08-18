@@ -37,9 +37,9 @@ export default function App() {
   );
 } // App function
 
-function setFileName(name: string) {
-  return name;
-}
+// function setFileName(name: string) {
+//   return name;
+// }
 
 
 
@@ -65,7 +65,8 @@ function AppContent({
   //const moveNumber = 10;
   const blackCaptures = 3;
   const whiteCaptures = 5;
-  const statusTop = useMemo(() => "SGF Editor -- " + "foo", [appGlobals?.version]);
+  const statusTop = useMemo(() => `SGF Editor -- ${appGlobals?.game.filename ?? ""}`,
+                            [appGlobals?.version, appGlobals?.game.filename]);
   const statusBottom = useMemo(
     () => `Move: ${appGlobals?.game.currentMove !== null ? appGlobals?.game.currentMove?.number : "   "}   Black captures: ${blackCaptures}   White captures: ${whiteCaptures}`,
     [appGlobals?.version]
@@ -83,10 +84,21 @@ function AppContent({
         {/* 1) Command buttons panel */}
         <div className={styles.panel}>
           <div className={styles.buttonRow}>
-            <button className={styles.btn} onClick={() => setFileName("(unsaved).sgf")}>New</button>
-            <button className={styles.btn}>Open…</button>
-            <button className={styles.btn}>Save</button>
-          </div>
+            <button className={styles.btn} 
+                    onClick={() => "do nothing now"}>New</button>
+            <button
+              className={styles.btn}
+              onClick={() => { appGlobals?.openSgf(); }}
+            >
+              Open…
+            </button>
+            <button
+              className={styles.btn}
+              onClick={() => { appGlobals?.saveSgf(); }}
+              title="c-s"
+            >
+              Save
+            </button>          </div>
           <div className={styles.buttonRow}>
             <button
               className={styles.btn}
