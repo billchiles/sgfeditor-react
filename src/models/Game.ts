@@ -66,7 +66,7 @@ export class Game {
     this.nextColor = this.nextColor === StoneColors.Black ? StoneColors.White : StoneColors.Black;
     this.currentMove = move;
     debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
-    this.onChange!();
+    //this.onChange!();
     return move;
   }
 

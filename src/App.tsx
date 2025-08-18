@@ -1,4 +1,4 @@
-import { useMemo, useRef, useContext } from "react";
+import { useMemo, useRef, useContext, useCallback } from "react";
 import GoBoard from "./components/GoBoard";
 import styles from "./App.module.css";
 import { GameProvider, GameContext } from "./models/AppGlobals";
@@ -9,7 +9,7 @@ import { GameProvider, GameContext } from "./models/AppGlobals";
 ///
 export default function App() {
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
-  const getComment = () => commentRef.current?.value ?? "";
+  const getComment = useCallback(() => commentRef.current?.value ?? "", []);
 
   // BOGUS place holder, reminder to set version when filenname, move number, capture count, etc., change.
   // const handlePlaceStone = (_x: number, _y: number, _color: StoneColor) => {

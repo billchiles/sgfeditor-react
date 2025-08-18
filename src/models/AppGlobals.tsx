@@ -54,7 +54,7 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
 
   const api: AppGlobals = useMemo(
     () => ({ game: gameRef.current, getComment, version, bumpVersion }),
-    [getComment, version]
+    [version, bumpVersion, getComment]
   );
   // Instead of the following line that requires this file be a .tsx file, I could have used this
   // commented out code:
