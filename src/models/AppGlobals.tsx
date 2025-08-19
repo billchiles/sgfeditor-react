@@ -10,6 +10,8 @@ import { Game } from "./Game";
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
 import { browserFileBridge, browserHotkeys } from "../platforms/browser-bridges";
 import type { FileBridge, HotkeyBridge } from "../platforms/bridges";
+import {parseFile} from "./sgfparser";
+
 
 export type AppGlobals = {
   game: Game;
@@ -141,6 +143,13 @@ async function openSgfCmd({ gameRef, bumpVersion, fileBridge }: CmdDependencies)
   const res = await fileBridge.open();
   if (!res) return; // user cancelled
   const { path, data, cookie } = res;
+  const pg = parseFile(data);
+  alert(`${pg.nodes?.next?.properties["B"]}`);
+  //create game
+  //update replaymove to stage moves, add rendered flag
+  // get game.firstmove and currentmove 
+  // get comment box content mgt
+  //test moving through, ignoring branches
   // TODO: parse SGF into model instead of clearing
   const g = gameRef.current;
   // g.board.clear();
