@@ -23,6 +23,7 @@ export type AppGlobals = {
   // doesn't need the file contents because the openSGF handler creates the new game and model state.
   openSgf: () => Promise<void>;
   saveSgf: () => Promise<void>;
+  saveSgfAs: () => Promise<void>;
 };
 
 // Keeping Game[] MRU and knowing the first game in the list is the current.
@@ -93,10 +94,10 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
   const openSgf = useCallback(async () => {
     const res = await fileBridge.open();
     if (!res) return;
-    const { path, data } = res;
+    const { path, data, cookie } = res;
     // TODO: parse SGF -> model. For now, just clear board and reset pointers.
     // Make a new game, add to games list, etc.
-    //const g = gameRef.current;
+    const g = gameRef.current;
     // Do LOTS OF CLEANUP -- save game/move comment, prompt to save, etc.
     //g.board.clear();
     //g.firstMove = null;    This is totally wrong, when go back to this game, should show current
@@ -104,6 +105,9 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
     //g.moveCount = 0;       This is right if no games list, but could make new game
     //g.nextColor = "black";
     //g.filename(path ?? "(opened).sgf");
+    // Store filename and opaque cookie for future saves without prompting user.
+    g.filename = path ?? g.filename ?? null;
+    g.saveCookie = cookie ?? null;
     bumpVersion();
     // NOTE: parsing will be added later; bridge is in place.
     console.log("Opened SGF bytes:", data.length);
@@ -111,12 +115,26 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
   // Saving SGF file
   const saveSgf = useCallback(async () => {
     const data = toSgf();
-    const hint = gameRef.current.filename ?? "game.sgf";
-    const written = await fileBridge.save(hint, data);
-    // Some platforms (fallback download?) can write and return an different path than suggested.
-    // If just c-s, then it shouldn't change, so could compare against stored name and save if diff.
-    gameRef.current.filename = written;
-    bumpVersion(); // so the status line can reflect the new name
+    const g = gameRef.current;
+    const hint = g.filename ?? "game.sgf";
+    const { fileName, cookie } = await fileBridge.save(g.saveCookie ?? null, hint, data);
+    // Update only if changed
+    if (fileName !== g.filename || cookie !== g.saveCookie) {
+      g.filename = fileName;
+      g.saveCookie = cookie;
+      bumpVersion();
+    }
+  }, [fileBridge, toSgf, bumpVersion]);
+  // Save As
+  const saveSgfAs = useCallback(async () => {
+    const data = toSgf();
+    const g = gameRef.current;
+    const { fileName, cookie } = await fileBridge.saveAs("game.sgf", data);
+    if (fileName !== g.filename || cookie !== g.saveCookie) {
+      g.filename = fileName;
+      g.saveCookie = cookie;
+      bumpVersion();
+    }
   }, [fileBridge, toSgf, bumpVersion]);
   // Providing Hotkeys ...
   // leftarrow/rightarrow for Prev/Next; c-s for Save
@@ -151,8 +169,9 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
       bumpVersion,
       openSgf,
       saveSgf,
+      saveSgfAs,
     }),
-    [version, bumpVersion, getComment, openSgf, saveSgf]
+    [version, bumpVersion, getComment, openSgf, saveSgf, saveSgfAs]
   );
   // Instead of the following line that requires this file be a .tsx file, I could have used this
   // commented out code:

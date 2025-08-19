@@ -14,9 +14,9 @@ export const browserFileBridge: FileBridge = {
       });
       const file = await handle.getFile();
       const data = await file.text();
-      return { path: file.name, data };
+      // Return the handle as the cookie, IS NAME PATH OR BASE ???????????????????
+      return { path: (handle as any).name ?? file.name, data, cookie: handle };
     }
-
     // Fallback: <input type="file">
     return await new Promise<OpenResult>((resolve) => {
       // resolve is provided by js to complete the promise.  Resolve takes a result value.
@@ -36,25 +36,56 @@ export const browserFileBridge: FileBridge = {
     });
   },
 
-  async save(pathHint: string | undefined, data: string): Promise<string> {
+  async save(cookie: unknown | null, suggestedName: string, data: string): 
+      Promise<{ fileName: string; cookie: unknown | null }> {
+    // If we have a file handle, don't prompt user for name.
+    if (cookie && typeof (cookie as any).createWritable === "function") {
+      const handle = cookie as FileSystemFileHandle;
+      const w = await handle.createWritable();
+      await w.write(data);
+      await w.close();
+      const name = (handle as any).name ?? ""; //suggestedName;
+      return { fileName: name, cookie: handle };
+    }
+    // Otherwise, prompt user if can for where to write.
     if ("showSaveFilePicker" in window) {
-      const handle = await (window as any).showSaveFilePicker({
-        suggestedName: pathHint ?? "game.sgf",
+      const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
+        suggestedName,
         types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }],
       });
       const w = await handle.createWritable();
       await w.write(data);
       await w.close();
-      return (handle as any).name ?? pathHint ?? "game.sgf";
+      const name = (handle as any).name ?? suggestedName;
+      return { fileName: name, cookie: handle };
     }
-
-    // Fallback: download
-    const name = pathHint ?? "game.sgf";
+    // Fallback: no handle support -> download
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([data], { type: "text/plain" }));
-    a.download = name;
+    a.download = suggestedName;
     a.click();
-    return name;
+    return { fileName: suggestedName, cookie: null };
+  },
+
+  async saveAs(suggestedName: string, data: string): 
+      Promise<{ fileName: string; cookie: unknown | null }> {
+    if ("showSaveFilePicker" in window) {
+      const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
+        suggestedName,
+        types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }],
+      });
+      const w = await handle.createWritable();
+      await w.write(data);
+      await w.close();
+      const name = (handle as any).name ?? suggestedName;
+      return { fileName: name, cookie: handle };
+    }
+    // Fallback: download (no persistent cookie possible)
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([data], { type: "text/plain" }));
+    a.download = suggestedName;
+    a.click();
+    return { fileName: suggestedName, cookie: null };
   },
 };
 

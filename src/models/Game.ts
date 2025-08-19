@@ -22,7 +22,8 @@ export class Game {
   handicap: number;
   handicapStones: Move[] | null;
   filename: string | null; // fullpath
-  filebase: string | null; // no path or ext
+  filebase: string | null; // <name>.<ext>
+  saveCookie: unknown | null;
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion, keeping model / UI isolation.
   onChange?: () => void;
@@ -38,7 +39,7 @@ export class Game {
     // Full pathname
     this.filename = null;
     this.filebase = null;
-
+    this.saveCookie = null;
     this.nextColor = StoneColors.Black;
     this.moveCount = 0;
     this.komi = komi;
