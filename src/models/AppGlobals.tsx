@@ -70,96 +70,20 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
     const game = gameRef.current;
     game.onChange = bumpVersion;
   }, [bumpVersion]);
-  // This will call src/parser.ts to convert to parsenodes and serialize to string.
-  const toSgf = useCallback((): string => {
-    // EXAMPLE CODE ONLY from gpt5
-    // Translate 0-based (row,col) to SGF coords: a..s (skip 'i')
-    const toSgfCoord = (row: number, col: number) => {
-      const letters = "abcdefghjklmnopqrstuvwxyz"; // 'i' skipped
-      return letters[col] + letters[row];
-    };
-    let parts: string[] = [`(;GM[1]FF[4]CA[UTF-8]AP[SGFEditor:1.1.0]ST[2]RU[Japanese]SZ[${size}]`];
-    // Walk main line only
-    let m = gameRef.current.firstMove;
-    while (m !== null) {
-      const abbr = m.color === "black" ? "B" : "W";
-      parts.push(`;${abbr}[${toSgfCoord(m.row, m.column)}]`);
-      m = m.next;
-    }
-    parts.push(")");
-    return parts.join("");
-  }, [size]);
-  // Providing file i/o ...
-  // Opening SGF file
-  const openSgf = useCallback(async () => {
-    const res = await fileBridge.open();
-    if (!res) return;
-    const { path, data, cookie } = res;
-    // TODO: parse SGF -> model. For now, just clear board and reset pointers.
-    // Make a new game, add to games list, etc.
-    const g = gameRef.current;
-    // Do LOTS OF CLEANUP -- save game/move comment, prompt to save, etc.
-    //g.board.clear();
-    //g.firstMove = null;    This is totally wrong, when go back to this game, should show current
-    //g.currentMove = null;  state
-    //g.moveCount = 0;       This is right if no games list, but could make new game
-    //g.nextColor = "black";
-    //g.filename(path ?? "(opened).sgf");
-    // Store filename and opaque cookie for future saves without prompting user.
-    g.filename = path ?? g.filename ?? null;
-    g.saveCookie = cookie ?? null;
-    bumpVersion();
-    // NOTE: parsing will be added later; bridge is in place.
-    console.log("Opened SGF bytes:", data.length);
-  }, [fileBridge, bumpVersion]);
-  // Saving SGF file
-  const saveSgf = useCallback(async () => {
-    const data = toSgf();
-    const g = gameRef.current;
-    const hint = g.filename ?? "game.sgf";
-    const { fileName, cookie } = await fileBridge.save(g.saveCookie ?? null, hint, data);
-    // Update only if changed
-    if (fileName !== g.filename || cookie !== g.saveCookie) {
-      g.filename = fileName;
-      g.saveCookie = cookie;
-      bumpVersion();
-    }
-  }, [fileBridge, toSgf, bumpVersion]);
+  // One small deps object to pass to top-level commands
+  const deps = useMemo<CmdDependencies>(() => ({ gameRef, bumpVersion, fileBridge, size }), 
+                                        [gameRef, bumpVersion, fileBridge, size]);
+  const openSgf   = useCallback(() => openSgfCmd(deps),   [deps]);
+  const saveSgf   = useCallback(() => saveSgfCmd(deps),   [deps]);
+  const saveSgfAs = useCallback(() => saveSgfAsCmd(deps), [deps]);
+  const onKey     = useCallback((e: KeyboardEvent) => handleHotkeyCmd(deps, e), [deps]);
   // Save As
-  const saveSgfAs = useCallback(async () => {
-    const data = toSgf();
-    const g = gameRef.current;
-    const { fileName, cookie } = await fileBridge.saveAs("game.sgf", data);
-    if (fileName !== g.filename || cookie !== g.saveCookie) {
-      g.filename = fileName;
-      g.saveCookie = cookie;
-      bumpVersion();
-    }
-  }, [fileBridge, toSgf, bumpVersion]);
   // Providing Hotkeys ...
   // leftarrow/rightarrow for Prev/Next; c-s for Save
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const lower = e.key.toLowerCase();
-      const metaS = (e.ctrlKey || e.metaKey) && lower === "s";
-      if (metaS) {
-        e.preventDefault();
-        void saveSgf();
-        return;
-      }
-      if (lower === "arrowleft") {
-        gameRef.current.unwindMove(); // calls onChange -> bumpVersion
-        return;
-      }
-      if (lower === "arrowright") {
-        gameRef.current.replayMove(); // calls onChange -> bumpVersion
-        return;
-      }
-    };
-    hotkeys.on(handler);
-    // return function to remove handler when useEffect re-runs to avoid collecting a chain of them.
-    return () => hotkeys.off(handler);
-  }, [hotkeys, saveSgf]);
+    hotkeys.on(onKey);
+    return () => hotkeys.off(onKey);
+  }, [hotkeys, onKey]);
   // Code to provide the values when the UI rendering code runs
   const api: AppGlobals = useMemo(
     () => ({
@@ -179,3 +103,94 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
   return <GameContext.Provider value={api}>{children}</GameContext.Provider>;
 } // GameProvider function 
 
+
+/// CmdDependencies
+///
+type CmdDependencies = {
+  gameRef: React.MutableRefObject<Game>;
+  bumpVersion: () => void;
+  fileBridge: FileBridge;
+  size: number;
+};
+
+function toSgf(gameRef: React.MutableRefObject<Game>, size: number): string {
+  // Minimal: (;GM[1]SZ[19];B[dd];W[pp]...)
+  const letters = "abcdefghjklmnopqrstuvwxyz"; // 'i' skipped
+  const toCoord = (row: number, col: number) => letters[col] + letters[row];
+  const parts: string[] = [`(;GM[1]SZ[${size}]`];
+  let m = gameRef.current.firstMove;
+  while (m) {
+    const abbr = m.color === "black" ? "B" : "W";
+    parts.push(`;${abbr}[${toCoord(m.row, m.column)}]`);
+    m = m.next ?? null;
+  }
+  parts.push(")");
+  return parts.join("");
+}
+
+  // This will call src/parser.ts to convert to parsenodes and serialize to string.
+
+async function openSgfCmd({ gameRef, bumpVersion, fileBridge }: CmdDependencies): Promise<void> {
+  const res = await fileBridge.open();
+  if (!res) return;
+  const { path, data, cookie } = res;
+  // TODO: parse SGF into model instead of clearing
+  const g = gameRef.current;
+  g.board.clear();
+  g.firstMove = null;
+  g.currentMove = null;
+  g.moveCount = 0;
+  g.nextColor = "black";
+  g.filename   = path ?? g.filename ?? "(opened).sgf";
+  g.saveCookie = cookie ?? null;
+  bumpVersion();
+  console.log("Opened SGF bytes:", data.length);
+}
+
+async function saveSgfCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
+  const g = gameRef.current;
+  const data = toSgf(gameRef, size);
+  const hint = g.filename ?? "game.sgf";
+  const { fileName, cookie } = await fileBridge.save(g.saveCookie ?? null, hint, data);
+  if (fileName !== g.filename || cookie !== g.saveCookie) {
+    g.filename = fileName;
+    g.saveCookie = cookie;
+    bumpVersion();
+  }
+}
+
+async function saveSgfAsCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
+  const g = gameRef.current;
+  const data = toSgf(gameRef, size);
+  const { fileName, cookie } = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
+  if (fileName !== g.filename || cookie !== g.saveCookie) {
+    g.filename = fileName;
+    g.saveCookie = cookie;
+    bumpVersion();
+  }
+}
+
+
+function handleHotkeyCmd(deps: CmdDependencies, e: KeyboardEvent): void {
+  const lower = e.key.toLowerCase();
+  const metaS = (e.ctrlKey || e.metaKey) && lower === "s";
+  const metaShiftS = (e.ctrlKey || e.metaKey) && e.shiftKey && lower === "s";
+  if (metaShiftS) {
+    e.preventDefault();
+    void saveSgfAsCmd(deps);
+    return;
+  }
+  if (metaS) {
+    e.preventDefault();
+    void saveSgfCmd(deps);
+    return;
+  }
+  if (lower === "arrowleft") {
+    deps.gameRef.current.unwindMove(); // model fires onChange → provider bumps version
+    return;
+  }
+  if (lower === "arrowright") {
+    deps.gameRef.current.replayMove();
+    return;
+  }
+}
