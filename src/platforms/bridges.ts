@@ -12,9 +12,10 @@ export interface FileBridge {
   // Save to an existing target if cookie is recognized by the platform.
   // Without cookie, platform may always prompt user to save, possibly returning a pathname or name.
   save(cookie: unknown | null, suggestedName: string, data: string): 
-    Promise<{ fileName: string; cookie: unknown | null }>;
+      Promise<{ fileName: string; cookie: unknown | null } | null>;
   // Always prompt the user and return any cookie, pathname, or name.
-  saveAs(suggestedName: string, data: string): Promise<{ fileName: string; cookie: unknown | null }>;
+  saveAs(suggestedName: string, data: string): 
+      Promise<{ fileName: string; cookie: unknown | null } | null>;
 }
 
 /// HotkeyBridge is needed because when we support electron shell, key input could come from the

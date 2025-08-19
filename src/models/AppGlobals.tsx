@@ -64,6 +64,8 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
   // For now, provide browser impls of file i/o and keybindings.
   const fileBridge: FileBridge = browserFileBridge;
   const hotkeys: HotkeyBridge = browserHotkeys;
+  // Add next line if want to avoid deprecated MutableRefObject warning
+  //const getGame = useCallback(() => gameRef.current, []);
   // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
   // This way the model and UI are isolated, but the model can signal model changes for re-rendering.
   useEffect(() => {
@@ -77,7 +79,6 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
   const saveSgf   = useCallback(() => saveSgfCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveSgfAsCmd(deps), [deps]);
   const onKey     = useCallback((e: KeyboardEvent) => handleHotkeyCmd(deps, e), [deps]);
-  // Save As
   // Providing Hotkeys ...
   // leftarrow/rightarrow for Prev/Next; c-s for Save
   useEffect(() => {
@@ -104,15 +105,21 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
 } // GameProvider function 
 
 
-/// CmdDependencies
+/// CmdDependencies collects arguments that command implementations need.  Typescript / React style
+/// here is to use these property bags to pass things "commonly" used, and implementations can
+/// name what they use for clarity and destructured binding.
 ///
 type CmdDependencies = {
-  gameRef: React.MutableRefObject<Game>;
+  // MutableRefObject is deprecated, but it is the type returned by useRef.
+  // Could pass a closure (defined in GameProvider) that returns game
+  // Then change cmd implementers to getGame: () => Game instead of gameref param
+  gameRef: React.MutableRefObject<Game>; 
   bumpVersion: () => void;
   fileBridge: FileBridge;
   size: number;
 };
 
+/// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
 function toSgf(gameRef: React.MutableRefObject<Game>, size: number): string {
   // Minimal: (;GM[1]SZ[19];B[dd];W[pp]...)
   const letters = "abcdefghjklmnopqrstuvwxyz"; // 'i' skipped
@@ -128,30 +135,36 @@ function toSgf(gameRef: React.MutableRefObject<Game>, size: number): string {
   return parts.join("");
 }
 
-  // This will call src/parser.ts to convert to parsenodes and serialize to string.
-
+/// This will call src/parser.ts to convert to parsenodes and serialize to string.
+/// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
 async function openSgfCmd({ gameRef, bumpVersion, fileBridge }: CmdDependencies): Promise<void> {
   const res = await fileBridge.open();
-  if (!res) return;
+  if (!res) return; // user cancelled
   const { path, data, cookie } = res;
   // TODO: parse SGF into model instead of clearing
   const g = gameRef.current;
-  g.board.clear();
-  g.firstMove = null;
-  g.currentMove = null;
-  g.moveCount = 0;
-  g.nextColor = "black";
-  g.filename   = path ?? g.filename ?? "(opened).sgf";
+  // g.board.clear();
+  // g.firstMove = null;
+  // g.currentMove = null;
+  // g.moveCount = 0;
+  // g.nextColor = "black";
+  // No filename if user abort dialog.  Browser fileBridge may provide base name only.
+  if (path) g.filename = path;
   g.saveCookie = cookie ?? null;
   bumpVersion();
   console.log("Opened SGF bytes:", data.length);
 }
 
-async function saveSgfCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
+async function saveSgfCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies):
+    Promise<void> {
+  // GATHER STATE FIRST -- commit dirty comment to game or move, then save
   const g = gameRef.current;
   const data = toSgf(gameRef, size);
   const hint = g.filename ?? "game.sgf";
-  const { fileName, cookie } = await fileBridge.save(g.saveCookie ?? null, hint, data);
+  const res = await fileBridge.save(g.saveCookie ?? null, hint, data);
+  focusOnRoot(); // call before returning to ensure back at top
+  if (!res) return; // user cancelled dialog when there was no saveCookie or filename.
+  const { fileName, cookie } = res;
   if (fileName !== g.filename || cookie !== g.saveCookie) {
     g.filename = fileName;
     g.saveCookie = cookie;
@@ -162,7 +175,9 @@ async function saveSgfCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDepende
 async function saveSgfAsCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
   const g = gameRef.current;
   const data = toSgf(gameRef, size);
-  const { fileName, cookie } = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
+  const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
+  if (!res) return; // cancelled
+  const { fileName, cookie } = res;
   if (fileName !== g.filename || cookie !== g.saveCookie) {
     g.filename = fileName;
     g.saveCookie = cookie;
@@ -171,26 +186,66 @@ async function saveSgfAsCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDepen
 }
 
 
-function handleHotkeyCmd(deps: CmdDependencies, e: KeyboardEvent): void {
+function handleHotkeyCmd (deps: CmdDependencies, e: KeyboardEvent): void {
   const lower = e.key.toLowerCase();
-  const metaS = (e.ctrlKey || e.metaKey) && lower === "s";
+  const ctrl_s = e.ctrlKey && lower === "s";
   const metaShiftS = (e.ctrlKey || e.metaKey) && e.shiftKey && lower === "s";
+  // ESC: alway move focus to root so all keybindings work.
+  if (lower === "escape" ) { //&& isEditingTarget(e.target)) { maybe always, what about dialogs?
+    e.preventDefault();
+    // GPT5 gen, of course, don't blur comment 1) Blur the current editable element
+    //(document.activeElement as HTMLElement | null)?.blur();
+    // Move focus to a safe, focusable container so arrows work immediately
+    focusOnRoot();
+    return;
+  }
   if (metaShiftS) {
     e.preventDefault();
     void saveSgfAsCmd(deps);
     return;
   }
-  if (metaS) {
+  if (ctrl_s) {
     e.preventDefault();
     void saveSgfCmd(deps);
     return;
   }
+  // If the user is editing text (e.g., the comment textarea), don't further process arrows.
+  if (isEditingTarget(e.target) && (lower === "arrowleft" || lower === "arrowright")) {
+    return; // let the content-editable elt handle cursor movement
+  }
   if (lower === "arrowleft") {
-    deps.gameRef.current.unwindMove(); // model fires onChange → provider bumps version
+      deps.gameRef.current.unwindMove(); // model fires onChange → provider bumps version
     return;
   }
   if (lower === "arrowright") {
     deps.gameRef.current.replayMove();
     return;
   }
+}
+
+/// isEditingTarget return true if the element that sourced the event has user editable content,
+/// as text boxes, <p>'s where iscontenteditable=true is set, <div>'s, etc.
+///
+function isEditingTarget (t: EventTarget | null): boolean {
+  const elt = t as HTMLElement | null;
+  if (!elt) return false; // default is not editing target
+  if (elt.isContentEditable) return true;
+  const tag = elt.tagName;
+  if (tag === "TEXTAREA") return true;
+  if (tag === "INPUT") {
+    const type = (elt as HTMLInputElement).type?.toLowerCase?.() ?? "text";
+    // Common text inputs are editable, but gpt5 generated this list, likely don't need a lot of it.
+    return ["text", "search", "url", "tel", "password", "email", "number"].includes(type);
+  }
+  return false;
+}
+
+/// focusOnRoot called from input handling on esc to make sure all keybindings work.
+/// May need to call this if, for example, user uses c-s in comment box, that is, command impls
+/// may need to call at end to ensure all keys are working.
+///
+function focusOnRoot () {
+  const root = document.getElementById("app-focus-root") as HTMLElement | null;
+  root?.focus();
+
 }

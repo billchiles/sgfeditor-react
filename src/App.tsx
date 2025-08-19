@@ -74,6 +74,15 @@ function AppContent({
 
   return (
     <div className={styles.appShell}>
+      {/* Focus target used when pressing Esc to ensure all keybindings are working.
+          I could add to GoBoard tabIndex={-1} and an id instead of this div. 
+          Tabindex -1 programmatically sets focus but user can't tab-nav to it */}
+      <div
+        id="app-focus-root"
+        tabIndex={-1} 
+        style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", outline: "none" }}
+        aria-hidden="true"
+      />
       {/* Go Board */}
       <div className={styles.leftPane}>
         <GoBoard boardSize={19} />

@@ -54,8 +54,6 @@ export default function GoBoard({
   //  Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
   //const currentMove = useRef<Move | null>(null);  Moved to Game
 
-//  const [nextColor, setnextColor] = useState<StoneColor>(StoneColors.Black);
-
   // ---------- Derived geometry (memoized) ----------
   const geom = useMemo(() => {
     const inner = cellSize * (boardSize - 1);
@@ -69,7 +67,8 @@ export default function GoBoard({
   const boardToPx = useMemo(() => {
     // Lists of pixel centers for each intersection, which seems silly to precompute as premature
     // optimization, but for now, it is used in several places.  Will consider removing it later.
-    // NOTE, in xaml, UI elts had same indexes as view model types, but react is hand rendered by pixels.
+    // NOTE, in xaml, UI elts had same indexes as view model types, but react is hand rendered by
+    // pixels.
     const xs = Array.from({ length: boardSize }, (_, i) => geom.gridStart + i * cellSize);
     const ys = xs; // symmetric
     return { xs, ys };

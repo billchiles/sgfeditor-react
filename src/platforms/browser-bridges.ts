@@ -7,15 +7,19 @@ export const browserFileBridge: FileBridge = {
   async open(): Promise<OpenResult> {
     // Chromium File System Access API
     if ("showOpenFilePicker" in window) {
-      const [handle] = await (window as any).showOpenFilePicker({
-        types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }],
-        excludeAcceptAllOption: false,
-        multiple: false,
-      });
-      const file = await handle.getFile();
-      const data = await file.text();
-      // Return the handle as the cookie, IS NAME PATH OR BASE ???????????????????
-      return { path: (handle as any).name ?? file.name, data, cookie: handle };
+      try {
+        const [handle] = await (window as any).showOpenFilePicker({
+          types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }],
+          excludeAcceptAllOption: false,
+          multiple: false,
+        });
+        const file = await handle.getFile();
+        const data = await file.text();
+        return { path: (handle as any).name ?? file.name, data, cookie: handle };
+      } catch (err: any) {
+        // User cancelled (AbortError) or similar -> treat as no-op
+        return null;
+      }
     }
     // Fallback: <input type="file">
     return await new Promise<OpenResult>((resolve) => {
@@ -37,7 +41,7 @@ export const browserFileBridge: FileBridge = {
   },
 
   async save(cookie: unknown | null, suggestedName: string, data: string): 
-      Promise<{ fileName: string; cookie: unknown | null }> {
+      Promise<{ fileName: string; cookie: unknown | null } | null> {
     // If we have a file handle, don't prompt user for name.
     if (cookie && typeof (cookie as any).createWritable === "function") {
       const handle = cookie as FileSystemFileHandle;
@@ -49,15 +53,20 @@ export const browserFileBridge: FileBridge = {
     }
     // Otherwise, prompt user if can for where to write.
     if ("showSaveFilePicker" in window) {
-      const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
-        suggestedName,
-        types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }],
-      });
-      const w = await handle.createWritable();
-      await w.write(data);
-      await w.close();
-      const name = (handle as any).name ?? suggestedName;
-      return { fileName: name, cookie: handle };
+      try {
+        const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
+          suggestedName,
+          types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }],
+        });
+        const w = await handle.createWritable();
+        await w.write(data);
+        await w.close();
+        const name = (handle as any).name ?? suggestedName;
+        return { fileName: name, cookie: handle };
+      } catch (err: any) {
+        // Cancelled -> null
+        return null;
+      }
     }
     // Fallback: no handle support -> download
     const a = document.createElement("a");
@@ -68,17 +77,21 @@ export const browserFileBridge: FileBridge = {
   },
 
   async saveAs(suggestedName: string, data: string): 
-      Promise<{ fileName: string; cookie: unknown | null }> {
+      Promise<{ fileName: string; cookie: unknown | null } | null> {
     if ("showSaveFilePicker" in window) {
-      const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
-        suggestedName,
-        types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }],
-      });
-      const w = await handle.createWritable();
-      await w.write(data);
-      await w.close();
-      const name = (handle as any).name ?? suggestedName;
-      return { fileName: name, cookie: handle };
+      try {
+        const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
+          suggestedName,
+          types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }],
+        });
+        const w = await handle.createWritable();
+        await w.write(data);
+        await w.close();
+        const name = (handle as any).name ?? suggestedName;
+        return { fileName: name, cookie: handle };
+      } catch (err: any) {
+        return null; // user canceled
+      }
     }
     // Fallback: download (no persistent cookie possible)
     const a = document.createElement("a");
