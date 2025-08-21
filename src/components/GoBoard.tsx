@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useContext } from "react";
+import React, { useCallback, useState, useMemo, useRef, useContext, useEffect } from "react";
 import styles from "./goboard.module.css";
 import type { StoneColor } from "../models/Game";
 import { StoneColors } from "../models/Game";
@@ -6,6 +6,9 @@ import { GameContext } from "../models/AppGlobals";
 import { debugAssert } from "../debug-assert";
 
 
+/// GoBoardProps is bogus param list from UI elements to setting up GoBoard component, but it is
+/// meaningless to pass these in, even 19x19 size should be defaulted for a default lanunch board.
+///
 export interface GoBoardProps {
   // Number of lines (and intersections) along one edge (default 19)
   boardSize?: number;
@@ -13,10 +16,10 @@ export interface GoBoardProps {
   cellSize?: number;
   // Extra padding around the grid for labels (default 24)
   padding?: number;
+  // Auto-fit and keep square using ResizeObserver (default true)
+  responsive?: boolean;  
 }
 
-// ---------- Visual constants ----------
-//
 const LINE_THICKNESS = 1.5;
 const HOSHI_RADIUS = 3;
 const STONE_OUTLINE = 0.75; // stroke width around stones so they appear crisp
@@ -42,47 +45,71 @@ const stoneFill = (c: StoneColor) => (c === StoneColors.Black ? "#111" : "#f2f2f
 /// GoBoard -- Big Entry Point to render board
 ///
 export default function GoBoard({
-  boardSize = 19,
-  // cellSize = 32,
-  // padding = 36,
-}: GoBoardProps) {
+    boardSize = 19,
+    // cellSize = 32,
+    // padding = 36,
+    responsive = true, // can pass as false and cellSize=32 to get original fixed board size behavior.
+  }: GoBoardProps) {
+  // Measure the available space of the wrapper and keep a square side = min(width, height)
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [measuredSide, setMeasuredSide] = useState<number>(0);
+  useEffect(() => {
+    if (!responsive) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (!r) return;
+      const side = Math.floor(Math.min(r.width, r.height));
+      setMeasuredSide(side);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [responsive]);
   const cellSize = 32;
   const padding = 36;
   const appGlobals = useContext(GameContext);
   debugAssert(appGlobals !== null, "WTF?! Why would this ever be null?  Race condition?");
   const board = appGlobals.game.board;
-  //const currentMove = useRef<Move | null>(null);
-  //const [board] = useState<(Move | null)[][]>(
-  //  Array.from({ length: boardSize }, () => Array(boardSize).fill(null)));
-  //const currentMove = useRef<Move | null>(null);  Moved to Game
 
-  // ---------- Derived geometry (memoized) ----------
-  const geom = useMemo(() => {
-    const inner = cellSize * (boardSize - 1);
-    const sizePx = inner + padding * 2;
-    const radius = cellSize / 2 - STONE_OUTLINE; // tangential adjacency
+  /// Memoized geometry globals used for many calculations in this file.
+  ///
+  // const geom = useMemo(() => {
+    // const inner = cellSize * (boardSize - 1);
+    // const sizePx = inner + padding * 2;
+    // const radius = cellSize / 2 - STONE_OUTLINE; // tangential adjacency
+    // be responsive and square ...
+    const geom = useMemo(() => {
+    // If responsive, total square side is controlled by measurement; else use props
+    const sizePx = responsive && measuredSide > 0
+      ? measuredSide
+      : cellSize * (boardSize - 1) + padding * 2;
+    const inner = Math.max(0, sizePx - padding * 2);
+    const effCell = inner / (boardSize - 1);
+    const radius = effCell / 2 - STONE_OUTLINE; // tangential adjacency
+    // end responsive and square new code
     const gridStart = padding;
     const gridEnd = padding + inner;
-    return { sizePx, gridStart, gridEnd, inner, radius };
-  }, [boardSize, cellSize, padding]);
+    return { sizePx, gridStart, gridEnd, inner, radius, effCell };
+  }, [responsive, measuredSide, boardSize, cellSize, padding]);
 
+  /// boardToPx is lists of pixel centers for each Go board intersection, which seems silly to 
+  /// precompute as premature optimization, but gpt5 code uses it a lot and seems nice in the code.
+  /// NOTE, in xaml, UI elts had same indexes as view model types, but react is hand rendered by
+  /// pixels.
   const boardToPx = useMemo(() => {
-    // Lists of pixel centers for each intersection, which seems silly to precompute as premature
-    // optimization, but for now, it is used in several places.  Will consider removing it later.
-    // NOTE, in xaml, UI elts had same indexes as view model types, but react is hand rendered by
-    // pixels.
-    const xs = Array.from({ length: boardSize }, (_, i) => geom.gridStart + i * cellSize);
+    const xs = Array.from({ length: boardSize }, (_, i) => geom.gridStart + i * geom.effCell);
     const ys = xs; // symmetric
     return { xs, ys };
-  }, [boardSize, cellSize, geom.gridStart]);
+  }, [boardSize, geom.gridStart, geom.effCell]);
 
   const hoshi = useMemo(() => hoshiPoints(boardSize), [boardSize]);
 
   // ---------- Helpers ----------
   const pixelToGrid = (px: number, py: number) => {
     // Convert svg pixel to nearest grid index
-    const gx = Math.round((px - geom.gridStart) / cellSize);
-    const gy = Math.round((py - geom.gridStart) / cellSize);
+    const gx = Math.round((px - geom.gridStart) / geom.effCell);
+    const gy = Math.round((py - geom.gridStart) / geom.effCell);
     if (gx < 0 || gy < 0 || gx >= boardSize || gy >= boardSize) return null;
     return { x: gx, y: gy };
   };
@@ -122,7 +149,7 @@ export default function GoBoard({
     // Weird to add appData, appGlobals, color, cell size, boardsize and various things that don't
     // change the behavior of adding a stone.  Maybe I'm not understanding something, closing over shit, etc.
     // So far it is working fine.
-    [cellSize, boardSize, geom.gridStart] // shouldn't need stones or nextColor dependency unless closes over them
+    [geom.effCell, boardSize, geom.gridStart] // shouldn't need stones or nextColor dependency unless closes over them
   );
 
 
@@ -224,10 +251,11 @@ export default function GoBoard({
       };
     };
     return <g>{circles}</g>;
-  }, [appGlobals?.version]); // redraw when global version changes
+    // redraw when global version changes, or things that change on resize
+  }, [appGlobals?.version, boardToPx, geom.radius]);
 
   return (
-    <div className={styles.boardWrap}>
+    <div className={styles.boardWrap} ref={wrapRef}>
       <svg
         className={styles.boardSvg}
         width={geom.sizePx}
@@ -243,6 +271,7 @@ export default function GoBoard({
         {renderHoshi()}
         {renderCoords()}
         {renderStones} // because renderstones is defined with useMemo, it's code is data, don't call it here
+                       // can change this to call syntax and remove usememo, gpt5 sys 361 circles is cheap
       </svg>
     </div>
   );
@@ -266,5 +295,4 @@ function hoshiPoints(_size: number): Array<{ x: number; y: number }> {
   const pts = [3, 9, 15];
   return pts.flatMap((a) => pts.map((b) => ({ x: a, y: b })));
 }
-
 

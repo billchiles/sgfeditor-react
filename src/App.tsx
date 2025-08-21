@@ -85,7 +85,7 @@ function AppContent({
       />
       {/* Go Board */}
       <div className={styles.leftPane}>
-        <GoBoard boardSize={19} />
+        <GoBoard boardSize={19} responsive/>
       </div>
 
       {/* RIGHT: Sidebar */}
