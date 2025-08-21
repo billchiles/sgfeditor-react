@@ -43,9 +43,11 @@ const stoneFill = (c: StoneColor) => (c === StoneColors.Black ? "#111" : "#f2f2f
 ///
 export default function GoBoard({
   boardSize = 19,
-  cellSize = 32,
-  padding = 36,
+  // cellSize = 32,
+  // padding = 36,
 }: GoBoardProps) {
+  const cellSize = 32;
+  const padding = 36;
   const appGlobals = useContext(GameContext);
   debugAssert(appGlobals !== null, "WTF?! Why would this ever be null?  Race condition?");
   const board = appGlobals.game.board;

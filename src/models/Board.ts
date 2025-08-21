@@ -9,6 +9,8 @@ export class Board {
     this.moves = Array.from({ length: size }, () => Array<Move | null>(size).fill(null));
   }
 
+  static readonly NoIndex = -100;
+
   addStone (move: Move) {// NEED TO FIX, moves have 1 based, model is zero-based
     this.moves[move.row][move.column] = move;
   }
@@ -42,4 +44,32 @@ export class Board {
   isEmpty (x: number, y: number) {
     return this.moves[x]?.[y] == null;
   }
+}
+
+
+///
+/// Coordinates Conversions
+///
+
+/// Letters used for translating parsed coordinates to model coordinates.
+/// The first element is bogus because the model is 1 based to match user model.
+///
+const letters: string[] = ["\0",
+                           "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+                           "k", "l", "m", "n", "o", "p", "q", "r", "s"];
+
+/// parsedToModelCoordinates takes a parsed coordinates string and returns as multiple values the 
+// row, col in terms of the model used by board.ts.  This assumes coords is "<letter><letter>" and 
+// valid indexes.
+///
+/// SGF format is col,row (count from left edge, count from top).
+///
+export function parsedToModelCoordinates (coords: string) : {row: number, col: number} {
+    if (coords == "")
+        // Pass move
+        return {row: Board.NoIndex, col: Board.NoIndex};
+    else {
+        coords = coords.toLowerCase();
+        return {row: letters.indexOf(coords[1]), col: letters.indexOf(coords[0])}
+    }
 }

@@ -1,5 +1,6 @@
 import { debugAssert } from '../debug-assert';
 import { Board } from './Board';
+import type { ParsedGame } from './sgfparser';
 
 
 export const StoneColors = {
@@ -16,36 +17,50 @@ export class Game {
   currentMove: Move | null;
   size: number;
   board: Board;
-  nextColor: StoneColor;
+  nextColor!: StoneColor;
   moveCount: number;
   komi: string;
-  handicap: number;
-  handicapStones: Move[] | null;
+  handicap!: number;
+  handicapStones!: Move[] | null;
+  allWhiteMoves: Move[] | null;
   filename: string | null; // fullpath
   filebase: string | null; // <name>.<ext>
   saveCookie: unknown | null;
+  parsedGame: ParsedGame | null;
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion, keeping model / UI isolation.
   onChange?: () => void;
 
-  constructor(size = 19, handicap = 0, komi = "6.5") {
+  constructor(size : number = 19, handicap : number = 0, komi : string = "6.5", 
+              handicapStones: Move[] | null = null, allWhite : Move[] | null = null) {
     this.size = size;
     this.board = new Board(size);
     this.firstMove = null;
     this.currentMove = null;
     this.moveCount = 0;
-    this.handicap = handicap;
-    this.handicapStones = null; // will be set if handicap > 0
+    this.initHandicapNextColor(handicap, handicapStones);
+    // this.handicap = handicap;
+    // this.handicapStones = handicapStones; // will be set if handicap > 0
     // Full pathname
+    if (allWhite !== null)
+      allWhite.forEach(m => {this.board.addStone(m)});
+    this.allWhiteMoves = allWhite
     this.filename = null;
     this.filebase = null;
     this.saveCookie = null;
-    this.nextColor = StoneColors.Black;
+    this.parsedGame = null;
+    //this.nextColor = StoneColors.Black;
     this.moveCount = 0;
     this.komi = komi;
   }
 
-  
+  initHandicapNextColor (handicap : number, handicapStones: Move[] | null = null) {
+    this.handicap = handicap;
+    this.handicapStones = handicapStones;
+    this.nextColor = StoneColors.Black;
+  }
+
+
   /// makeMove adds a move in sequence to the game and board at row, col. Row, col index from the
   /// top left corner. This handles clicking and adding moves to a game (UI code applies the
   /// current move adornment based on Game.currentMove). This handles branching if the current move
@@ -58,7 +73,7 @@ export class Game {
   /// in Board's NoIndex for row and col creates a pass move.
   ///
   makeMove(row: number, column: number) : Move | null {
-    const move = new Move({row, column, color: this.nextColor});
+    const move = new Move(row, column, this.nextColor);
     move.number = this.moveCount + 1;
     if (this.firstMove === null) this.firstMove = move;
     if (this.currentMove !== null) this.currentMove.next = move;
@@ -114,6 +129,29 @@ export class Game {
 } // Game class
 
 
+/// CreateGame in the C# code took the mainwin, but we will finese those references in the ts impl.
+/// handicap stones includes AB stones.
+export function CreateGame (size : number, handicap : number, komi : string, 
+                            handicapStones: Move[] | null = null, all_white : Move[] | null = null):
+        Game {
+    var g = new Game(size, handicap, komi, handicapStones, all_white);
+    // mainwin.SetupBoardDisplay(g);
+    //    extract settings if first time
+    //    draws lines, labels, and any empty board stones
+    //    sets prevsize to not do this part again
+    //    ON SUCCESSIVE CALLS
+    //       cleans current move, adornments, stones
+    //       updates UI like branch combo, comment, button enabled/disabled, 
+    //    initialize tree view
+    // // Must set Game after calling SetupBoardDisplay.
+    // mainwin.AddGame(g);
+    // return g;
+    // TODO: CallbackToSetupBoardDisplay(g); set any model stuff for full redisplay
+    // Must set Game after calling SetupBoardDisplay.
+    // TODO: callback to mainwin.AddGame(g); to games list, re-order it, etc.
+    return g;
+}
+
 export interface IMoveNext {
      readonly IMNColor: StoneColor;
      readonly IMNNext: IMoveNext | null;
@@ -132,14 +170,11 @@ export class Move implements IMoveNext {
   deadStones: Move[];
   comment: string;
 
-  constructor(params: {
-      row: number;
-      column: number;
-      color: StoneColor;}) {
+  constructor(row: number, column: number, color: StoneColor) {
 
-    this.row = params.row;
-    this.column = params.column;
-    this.color = params.color;
+    this.row = row;
+    this.column = column;
+    this.color = color;
     this.number = 0;
     this.previous = null;
     this.next = null;

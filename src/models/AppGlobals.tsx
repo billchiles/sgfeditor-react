@@ -6,15 +6,25 @@
 /// code is in control and calls on the model for each game and its state changes.
 ///
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { Game } from "./Game";
+import { Game, CreateGame, StoneColors, Move } from "./Game";
+import { Board, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
 import { browserFileBridge, browserHotkeys } from "../platforms/browser-bridges";
 import type { FileBridge, HotkeyBridge } from "../platforms/bridges";
-import {parseFile} from "./sgfparser";
+import {ParsedGame, ParsedNode, parseFile} from "./sgfparser";
+import { debugAssert } from "../debug-assert";
 
 
 export type AppGlobals = {
-  game: Game;
+  game: Game; // snapshot of current game (from gameRef.current)
+  getGame: () => Game; // accessor to the live ref
+  setGame: (g: Game) => void; // replace current game and trigger redraw because calls bumpVersion.
+  getGames: () => readonly Game[];
+  setGames: (gs: Game[]) => void;
+  getDefaultGame: () => Game | null;
+  setDefaultGame: (g: Game | null) => void;
+  getLastCreatedGame: () => Game | null;
+  setLastCreatedGame: (g: Game | null) => void;
   getComment?: () => string;
   // Global render tick that increments whenever the model changes
   version: number;
@@ -27,6 +37,7 @@ export type AppGlobals = {
   saveSgf: () => Promise<void>;
   saveSgfAs: () => Promise<void>;
 };
+
 
 // Keeping Game[] MRU and knowing the first game in the list is the current.
 // Find the index of the element to move
@@ -50,7 +61,7 @@ type ProviderProps = {
 };
 
 
-export function GameProvider({ children, getComment, size = 19 }: ProviderProps) {
+export function GameProvider ({ children, getComment, size = 19 }: ProviderProps) {
   if (size !== 19) {
     alert("Only support 19x19 games currently.")
   }
@@ -63,18 +74,29 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
   const gameRef = useRef<Game>(new Game(size));
   const [version, setVersion] = useState(0);
   const bumpVersion = useCallback(() => setVersion(v => v + 1), []);
-  // For now, provide browser impls of file i/o and keybindings.
+  // stable accessors for the single active game
+  const getGame = useCallback(() => gameRef.current, []);
+  const setGame = useCallback((g: Game) => {
+    gameRef.current = g;
+    // ensure model-to-UI notifications still work on the new game object
+    g.onChange = bumpVersion;
+    bumpVersion();
+  }, [bumpVersion]);
+  const [games, setGames] = useState<Game[]>([]);
+  const [defaultGame, setDefaultGame] = useState<Game | null>(null);
+  const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);  
   const fileBridge: FileBridge = browserFileBridge;
   const hotkeys: HotkeyBridge = browserHotkeys;
   // Add next line if want to avoid deprecated MutableRefObject warning
   //const getGame = useCallback(() => gameRef.current, []);
   // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
-  // This way the model and UI are isolated, but the model can signal model changes for re-rendering.
+  // This way the model and UI are isolated, but the model can signal model changes for re-rendering
+  // by saying the game changed.
   useEffect(() => {
     const game = gameRef.current;
     game.onChange = bumpVersion;
   }, [bumpVersion]);
-  // One small deps object to pass to top-level commands
+  // One small deps object to pass to top-level commands that updates if any member changes ref ID.
   const deps = useMemo<CmdDependencies>(() => ({ gameRef, bumpVersion, fileBridge, size }), 
                                         [gameRef, bumpVersion, fileBridge, size]);
   const openSgf   = useCallback(() => openSgfCmd(deps),   [deps]);
@@ -91,6 +113,14 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
   const api: AppGlobals = useMemo(
     () => ({
       game: gameRef.current,
+      getGame,
+      setGame,
+      getGames: () => games,
+      setGames,
+      getDefaultGame: () => defaultGame,
+      setDefaultGame,
+      getLastCreatedGame: () => lastCreatedGame,
+      setLastCreatedGame,
       getComment,
       version,
       bumpVersion,
@@ -98,7 +128,9 @@ export function GameProvider({ children, getComment, size = 19 }: ProviderProps)
       saveSgf,
       saveSgfAs,
     }),
-    [version, bumpVersion, getComment, openSgf, saveSgf, saveSgfAs]
+    [version, bumpVersion, getComment, openSgf, saveSgf, saveSgfAs,
+     games, setGames, defaultGame, setDefaultGame, lastCreatedGame, setLastCreatedGame,
+     getGame, setGame]
   );
   // Instead of the following line that requires this file be a .tsx file, I could have used this
   // commented out code:
@@ -122,7 +154,7 @@ type CmdDependencies = {
 };
 
 /// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
-function toSgf(gameRef: React.MutableRefObject<Game>, size: number): string {
+function toSgf (gameRef: React.MutableRefObject<Game>, size: number): string {
   // Minimal: (;GM[1]SZ[19];B[dd];W[pp]...)
   const letters = "abcdefghjklmnopqrstuvwxyz"; // 'i' skipped
   const toCoord = (row: number, col: number) => letters[col] + letters[row];
@@ -137,14 +169,20 @@ function toSgf(gameRef: React.MutableRefObject<Game>, size: number): string {
   return parts.join("");
 }
 
-/// This will call src/parser.ts to convert to parsenodes and serialize to string.
+///
+/// Open Command
+///
+
 /// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
-async function openSgfCmd({ gameRef, bumpVersion, fileBridge }: CmdDependencies): Promise<void> {
-  const res = await fileBridge.open();
+async function openSgfCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependencies): Promise<void> {
+  checkDirtySave ();
+  const res = await fileBridge.open(); // Essentially my DoOpenGetFile() in C#, has try-catch, etc.
   if (!res) return; // user cancelled
   const { path, data, cookie } = res;
-  const pg = parseFile(data);
-  alert(`${pg.nodes?.next?.properties["B"]}`);
+  // TODO: check if file is already open in games list. goToOpenGame(idx)
+  // Get new open file
+  doOpenGetFileGame(path === undefined ? null : path, data, gameRef);
+  //alert(`${pg.nodes?.next?.properties["B"]}`);
   //create game
   //update replaymove to stage moves, add rendered flag
   // get game.firstmove and currentmove 
@@ -152,7 +190,7 @@ async function openSgfCmd({ gameRef, bumpVersion, fileBridge }: CmdDependencies)
   //test moving through, ignoring branches
   // TODO: parse SGF into model instead of clearing
   const g = gameRef.current;
-  // g.board.clear();
+  g.board.clear();
   // g.firstMove = null;
   // g.currentMove = null;
   // g.moveCount = 0;
@@ -160,11 +198,122 @@ async function openSgfCmd({ gameRef, bumpVersion, fileBridge }: CmdDependencies)
   // No filename if user abort dialog.  Browser fileBridge may provide base name only.
   if (path) g.filename = path;
   g.saveCookie = cookie ?? null;
+  drawGameTree();
+  //focusOnRoot(); // No idea if this is meaningful before bumping the version and re-rendering all.
   bumpVersion();
   console.log("Opened SGF bytes:", data.length);
 }
 
-async function saveSgfCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies):
+function checkDirtySave () {
+
+}
+
+/// This basically covers the UI to stop further input, then calls getFileGameCheckingAutoSave 
+/// to check current game's auto save and parse file to create ParsedGame.  Can snap this linkage
+/// if no UI dike needed.
+function doOpenGetFileGame (path: string | null, data: string, gameRef : React.MutableRefObject<Game>) {
+  const curgame = gameRef.current; // Stash in case we have to undo due to file error.
+  // TODO do I need any UI block while this is doing on to stop user from mutating state?
+  const lastCreatedGame = null;
+  // TODO try-catch for exception throws, such as from setupfirst...
+  // try {
+  //   validateInput("");
+  // } catch (e: unknown) {
+  //   // Narrow the type of 'e' to Error for safe access to 'message'
+  //   if (e instanceof Error) {
+  //     console.error("Caught an error:", e.message);
+  //   } else {
+  //     console.error("Caught an unknown error:", e);
+  //   }
+  // }
+  getFileGameCheckingAutoSave(path === undefined ? null : path, data, gameRef);
+  curgame
+}
+
+function getFileGameCheckingAutoSave (path: string | null, data: string, 
+                                      gameRef : React.MutableRefObject<Game>) {
+  //Check auto save file exisitence and ask user which to use.
+  parseAndCreateGame(path, data, gameRef);
+}
+
+var cheatToTest : Game | null = null;
+
+function parseAndCreateGame (_path: string | null, data: string, 
+                             gameRef : React.MutableRefObject<Game>) : Game {
+  const pg = parseFile(data);
+  cheatToTest = gameRef.current;
+  createGamefromParsedGame(pg);
+  return cheatToTest;
+  // return createGamefromParsedGame(pg);
+}
+
+/// called CreateParsedGame in C# land, and it returns void, storing new game in mainwin.game.
+function createGamefromParsedGame (pg: ParsedGame) {
+  // TODO: Inspect various properties for size, players, game comment, etc., to copy to game.
+  const g = cheatToTest; //CreateGame(19, 0, "6.5");
+  g!.parsedGame = pg;
+  debugAssert(pg.nodes !== null, "WTF, there is always one parsed node.")
+  const m : Move | null = setupFirstParsedMoved(g!, pg!.nodes);
+  g!.firstMove = m;
+  g!.currentMove = null;
+  //g.firstMove = pg.nodes?.next;
+  //TODO: set game comment
+  //appGlobals.game = g;
+  //return g;
+}
+
+function setupFirstParsedMoved (g : Game, pn : ParsedNode) : Move | null {
+  if ("B" in pn.properties || "W" in pn.properties)
+    throw new Error ("Unexpected move in root parsed node.");
+  if ("PL" in pn.properties)
+    throw new Error("Do not support player-to-play for changing start color.");
+  if ("TR" in pn.properties || "SQ" in pn.properties || "LB" in pn.properties)
+    throw new Error("Don't handle adornments on initial board from parsed game yet.");
+  var m : Move | null = null;
+  if (pn.next === null) m = null;
+  else {
+    m = parsedNodeToMove(pn.next, g.size);
+    if (m === null) {
+      debugAssert(pn.next.badNodeMessage != null, 
+                  "Failed to make Move from ParsedNode, but no error message provided.");
+      throw new Error(pn.next.badNodeMessage);
+    }
+    m.number = g.moveCount + 1;
+  }
+  g.firstMove = m;
+  return m;
+}
+
+/// parsedNodeToMove makes the move while checking for bad moves, making a pass move with a big
+/// comment to describe error situations, or setting bad move message in move object.
+/// For now assume unicorns and rainbows.
+///
+function parsedNodeToMove (pn : ParsedNode, _size : number) : Move | null {
+  if ("B" in pn.properties) {
+    const color = StoneColors.Black;
+    console.log(`${pn.properties["B"]} [0]${pn.properties["B"][0]}`);
+    const {row, col} = parsedToModelCoordinates(pn.properties["B"][0]);
+    console.log(`row: ${row} col: ${col}`);
+    const m = new Move(row, col, color);
+    return m;
+  }
+  if ("W" in pn.properties) {
+    const color = StoneColors.White;
+    console.log(`${pn.properties["B"]} [0]${pn.properties["B"][0]}`);
+    const {row, col} = parsedToModelCoordinates(pn.properties["W"][0]);
+    const m = new Move(row, col, color);
+    return m;
+  }
+  return new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
+}
+
+
+
+///
+/// Save Commands
+///
+
+async function saveSgfCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies):
     Promise<void> {
   // GATHER STATE FIRST -- commit dirty comment to game or move, then save
   const g = gameRef.current;
@@ -181,7 +330,7 @@ async function saveSgfCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDepende
   }
 }
 
-async function saveSgfAsCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
+async function saveSgfAsCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
   const g = gameRef.current;
   const data = toSgf(gameRef, size);
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
@@ -194,8 +343,13 @@ async function saveSgfAsCmd({ gameRef, bumpVersion, fileBridge, size }: CmdDepen
   }
 }
 
+///
+/// Keybindings
+///
 
 function handleHotkeyCmd (deps: CmdDependencies, e: KeyboardEvent): void {
+  // console.log("hotkey", { key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, 
+  //                         shift: e.shiftKey, target: e.target });
   const lower = e.key.toLowerCase();
   const ctrl_s = e.ctrlKey && lower === "s";
   const metaShiftS = (e.ctrlKey || e.metaKey) && e.shiftKey && lower === "s";
@@ -256,5 +410,13 @@ function isEditingTarget (t: EventTarget | null): boolean {
 function focusOnRoot () {
   const root = document.getElementById("app-focus-root") as HTMLElement | null;
   root?.focus();
+
+}
+
+///
+/// Game Tree of Variations
+///
+
+function drawGameTree () {
 
 }

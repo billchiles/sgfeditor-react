@@ -17,8 +17,8 @@ export const browserFileBridge: FileBridge = {
         const data = await file.text();
         return { path: (handle as any).name ?? file.name, data, cookie: handle };
       } catch (err: any) {
-        // User cancelled (AbortError) or similar -> treat as no-op
-        return null;
+          // User cancelled (AbortError) or similar -> treat as no-op
+          return null;
       }
     }
     // Fallback: <input type="file">
