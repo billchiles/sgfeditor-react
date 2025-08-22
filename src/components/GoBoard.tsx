@@ -52,26 +52,23 @@ export default function GoBoard({
   }: GoBoardProps) {
   // Measure the available space of the wrapper and keep a square side = min(width, height)
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [measuredSide, setMeasuredSide] = useState<number>(0);
+  const [measuredDims, setMeasuredDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   useEffect(() => {
     if (!responsive) return;
     const el = wrapRef.current;
     if (!el) return;
-    // Seed once so we start at a non-zero size even before the RO callback
+    // Seed
     const rect = el.getBoundingClientRect();
-    const seed = Math.floor(Math.min(rect.width, rect.height));
-    if (seed > 0) setMeasuredSide(seed);
-    // Keep updated as the pane resizes
+    setMeasuredDims({ w: Math.floor(rect.width), h: Math.floor(rect.height) });
+    // Observe
     const ro = new ResizeObserver((entries) => {
       const r = entries[0]?.contentRect;
       if (!r) return;
-      const side = Math.floor(Math.min(r.width, r.height));
-      setMeasuredSide(side);
+      setMeasuredDims({ w: Math.floor(r.width), h: Math.floor(r.height) });
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [responsive]);
-  const cellSize = 32;
+  }, [responsive]);  const cellSize = 32;
   const padding = 36;
   const appGlobals = useContext(GameContext);
   debugAssert(appGlobals !== null, "WTF?! Why would this ever be null?  Race condition?");
@@ -79,16 +76,12 @@ export default function GoBoard({
 
   /// Memoized geometry globals used for many calculations in this file.
   ///
-  // const geom = useMemo(() => {
-    // const inner = cellSize * (boardSize - 1);
-    // const sizePx = inner + padding * 2;
-    // const radius = cellSize / 2 - STONE_OUTLINE; // tangential adjacency
-    // be responsive and square ...
-    const geom = useMemo(() => {
-    // If responsive, total square side is controlled by measurement; else use props
-    const sizePx = responsive && measuredSide > 0
-      ? measuredSide
-      : cellSize * (boardSize - 1) + padding * 2;
+  const geom = useMemo(() => {
+    const fallback = cellSize * (boardSize - 1) + padding * 2;
+    const side = responsive && measuredDims.w > 0 && measuredDims.h > 0
+      ? Math.min(measuredDims.w, measuredDims.h)
+      : fallback;
+    const sizePx = side;
     const inner = Math.max(0, sizePx - padding * 2);
     const effCell = inner / (boardSize - 1);
     const radius = effCell / 2 - STONE_OUTLINE; // tangential adjacency
@@ -96,7 +89,7 @@ export default function GoBoard({
     const gridStart = padding;
     const gridEnd = padding + inner;
     return { sizePx, gridStart, gridEnd, inner, radius, effCell };
-  }, [responsive, measuredSide, boardSize, cellSize, padding]);
+  }, [responsive, measuredDims.w, measuredDims.h, boardSize, cellSize, padding]);
 
   /// boardToPx is lists of pixel centers for each Go board intersection, which seems silly to 
   /// precompute as premature optimization, but gpt5 code uses it a lot and seems nice in the code.
@@ -217,10 +210,10 @@ export default function GoBoard({
       <g fontSize={fontSize} fill="#222" textAnchor="middle">
         {/* Column letters */}
         {boardToPx.xs.map((x, i) => (
-          <>
+          <React.Fragment key={`colLabels-${i}`}>
             <text key={`colTopLabel-${i}`} x={x} y={top + 4}>{LETTERS[i] || i + 1}</text>
             <text key={`colBottomLabel-${i}`} x={x} y={bottom}>{LETTERS[i] || i + 1}</text>
-          </>
+          </React.Fragment>
         ))}
         {/* Row numbers 
             Above textAnchor property covers columns and rows, then below we override with "end" for all rows.

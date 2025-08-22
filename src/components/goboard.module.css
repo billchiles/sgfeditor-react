@@ -1,9 +1,9 @@
 .boardWrap {
   display: flex;
-  width: 100%;
+  width: 100%;          /* fill the left pane */
   height: 100%;
-  align-items: center;   /* center the square if pane isn’t square */
-  justify-content: flex-start; /* push board flush against sidebar */
+  align-items: center;   /* vertical centering */
+  justify-content: flex-start; /* board on the left */
 }
 
 .boardSvg {

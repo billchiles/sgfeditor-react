@@ -3,33 +3,31 @@
   display: flex;
   width: 100vw;
   height: 100vh;
-  gap: 8px; /* 16px; */
-  padding: 8px; /* 16px; */
-  height: 100vh;        /* full height for a tidy split view */
+  gap: 8px;
+  padding: 8px;
   box-sizing: border-box;
 }
 
 .leftPane {
-  /* GoBoard goes here and defines its own size; keep left flexible */
-  align-items: flex-start;
-  justify-content: flex-start;
-  overflow: auto;
-  flex: 1 1 auto;
+  flex: 1 1 auto;       /* take all remaining width */
   min-width: 0;
   min-height: 0;
-  display: flex; /* so boardWrap can be 100% height */
+  display: flex;        /* lets boardWrap be height:100% */
+  align-items: flex-start;
+  justify-content: flex-start; /* board hugs left */
+  overflow: hidden;
 }
 
 .rightPane {
-  flex: 0 0 320px;
-  max-width: 480px;
-  width: 360px;         /* sidebar width */
-  min-width: 280px;
+  /* Sidebar fills the remaining, allow it to shrink fully */
   display: flex;
-  flex-direction: column;
+  flex-direction: column; /* ok I see gpt5 had this already, but still no flexing */
   gap: 12px;
-  overflow: hidden;     /* children can manage scroll themselves */
-}
+  flex: 1 0 450px;      /* fixed sidebar width (tweak to taste), does NOT vary around 450 down to 280 and up to 600 */
+  min-width: 280px;     /* seems to be no op, never shrinks */
+  max-width: 600px;     /* optional cap, none means none, also seems to be no-op, make sure I'm seeing 450 though */
+  overflow: hidden; 
+ }
 
 .panel {
   background: #fff;
