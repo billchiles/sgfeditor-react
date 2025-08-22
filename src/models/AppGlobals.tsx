@@ -199,7 +199,7 @@ async function openSgfCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependencies
   if (path) g.filename = path;
   g.saveCookie = cookie ?? null;
   drawGameTree();
-  //focusOnRoot(); // No idea if this is meaningful before bumping the version and re-rendering all.
+  focusOnRoot(); // No idea if this is meaningful before bumping the version and re-rendering all.
   bumpVersion();
   console.log("Opened SGF bytes:", data.length);
 }
@@ -291,9 +291,7 @@ function setupFirstParsedMoved (g : Game, pn : ParsedNode) : Move | null {
 function parsedNodeToMove (pn : ParsedNode, _size : number) : Move | null {
   if ("B" in pn.properties) {
     const color = StoneColors.Black;
-    console.log(`${pn.properties["B"]} [0]${pn.properties["B"][0]}`);
     const {row, col} = parsedToModelCoordinates(pn.properties["B"][0]);
-    console.log(`row: ${row} col: ${col}`);
     const m = new Move(row, col, color);
     return m;
   }

@@ -57,6 +57,11 @@ export default function GoBoard({
     if (!responsive) return;
     const el = wrapRef.current;
     if (!el) return;
+    // Seed once so we start at a non-zero size even before the RO callback
+    const rect = el.getBoundingClientRect();
+    const seed = Math.floor(Math.min(rect.width, rect.height));
+    if (seed > 0) setMeasuredSide(seed);
+    // Keep updated as the pane resizes
     const ro = new ResizeObserver((entries) => {
       const r = entries[0]?.contentRect;
       if (!r) return;

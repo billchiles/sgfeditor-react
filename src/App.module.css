@@ -1,8 +1,10 @@
 
 .appShell {
   display: flex;
-  gap: 16px;
-  padding: 16px;
+  width: 100vw;
+  height: 100vh;
+  gap: 8px; /* 16px; */
+  padding: 8px; /* 16px; */
   height: 100vh;        /* full height for a tidy split view */
   box-sizing: border-box;
 }
@@ -10,15 +12,17 @@
 .leftPane {
   /* GoBoard goes here and defines its own size; keep left flexible */
   align-items: flex-start;
-  justify-content: center;
+  justify-content: flex-start;
   overflow: auto;
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   display: flex; /* so boardWrap can be 100% height */
 }
 
 .rightPane {
+  flex: 0 0 320px;
+  max-width: 480px;
   width: 360px;         /* sidebar width */
   min-width: 280px;
   display: flex;
