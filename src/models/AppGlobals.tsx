@@ -104,8 +104,8 @@ export function GameProvider ({ children, getComment}: ProviderProps) {
   const deps = useMemo<CmdDependencies>(() => ({ gameRef, bumpVersion, fileBridge, size }), 
                                         [gameRef, bumpVersion, fileBridge, size]);
   const openSgf   = useCallback(() => openSgfCmd(deps),   [deps]);
-  const saveSgf   = useCallback(() => saveSgfCmd(deps),   [deps]);
-  const saveSgfAs = useCallback(() => saveSgfAsCmd(deps), [deps]);
+  const saveSgf   = useCallback(() => writeGameCmd(deps),   [deps]);
+  const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
   const onKey     = useCallback((e: KeyboardEvent) => handleHotkeyCmd(deps, e), [deps]);
   // Providing Hotkeys ...
   // leftarrow/rightarrow for Prev/Next; c-s for Save
@@ -156,22 +156,6 @@ type CmdDependencies = {
   fileBridge: FileBridge;
   size: number;
 };
-
-/// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
-function toSgf (gameRef: React.MutableRefObject<Game>, size: number): string {
-  // Minimal: (;GM[1]SZ[19];B[dd];W[pp]...)
-  const letters = "abcdefghjklmnopqrstuvwxyz"; // 'i' skipped
-  const toCoord = (row: number, col: number) => letters[col] + letters[row];
-  const parts: string[] = [`(;GM[1]SZ[${size}]`];
-  let m = gameRef.current.firstMove;
-  while (m) {
-    const abbr = m.color === "black" ? "B" : "W";
-    parts.push(`;${abbr}[${toCoord(m.row, m.column)}]`);
-    m = m.next ?? null;
-  }
-  parts.push(")");
-  return parts.join("");
-}
 
 ///
 /// Open Command
@@ -321,16 +305,15 @@ function parsedNodeToMove (pn : ParsedNode, _size : number) : Move | null {
 }
 
 
-
 ///
 /// Save Commands
 ///
 
-async function saveSgfCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies):
+async function writeGameCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies):
     Promise<void> {
   // GATHER STATE FIRST -- commit dirty comment to game or move, then save
   const g = gameRef.current;
-  const data = toSgf(gameRef, size);
+  const data = quickieGetSGF(gameRef, size);
   const hint = g.filename ?? "game.sgf";
   const res = await fileBridge.save(g.saveCookie ?? null, hint, data);
   focusOnRoot(); // call before returning to ensure back at top
@@ -343,9 +326,9 @@ async function saveSgfCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDepend
   }
 }
 
-async function saveSgfAsCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
+async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
   const g = gameRef.current;
-  const data = toSgf(gameRef, size);
+  const data = quickieGetSGF(gameRef, size);
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
   if (!res) return; // cancelled
   const { fileName, cookie } = res;
@@ -354,6 +337,22 @@ async function saveSgfAsCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDepe
     g.saveCookie = cookie;
     bumpVersion();
   }
+}
+
+/// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
+function quickieGetSGF (gameRef: React.MutableRefObject<Game>, size: number): string {
+  // Minimal: (;GM[1]SZ[19];B[dd];W[pp]...)
+  const letters = "abcdefghjklmnopqrstuvwxyz"; // 'i' skipped
+  const toCoord = (row: number, col: number) => letters[col] + letters[row];
+  const parts: string[] = [`(;GM[1]SZ[${size}]`];
+  let m = gameRef.current.firstMove;
+  while (m) {
+    const abbr = m.color === "black" ? "B" : "W";
+    parts.push(`;${abbr}[${toCoord(m.row, m.column)}]`);
+    m = m.next ?? null;
+  }
+  parts.push(")");
+  return parts.join("");
 }
 
 ///
@@ -377,12 +376,12 @@ function handleHotkeyCmd (deps: CmdDependencies, e: KeyboardEvent): void {
   }
   if (metaShiftS) {
     e.preventDefault();
-    void saveSgfAsCmd(deps);
+    void saveAsCommand(deps);
     return;
   }
   if (ctrl_s) {
     e.preventDefault();
-    void saveSgfCmd(deps);
+    void writeGameCmd(deps);
     return;
   }
   // If the user is editing text (e.g., the comment textarea), don't further process arrows.

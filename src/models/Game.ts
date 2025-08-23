@@ -64,15 +64,16 @@ export class Game {
 
 
   /// makeMove adds a move in sequence to the game and board at row, col. Row, col index from the
-  /// top left corner. This handles clicking and adding moves to a game (UI code applies the
-  /// current move adornment based on Game.currentMove). This handles branching if the current move
-  /// already has next moves and displays a message if the row, col already has a move at that
-  /// location. If this is the first move, this function sets Game.firstMove, and updates
-  /// moveCount, nextColor, etc. This returns the new move (or an existing move if the user
-  /// clicked on a location where there is a move on another branch following the current move).
-  /// This returns null if there are any problems playing at this location or rendering a
-  /// pre-existing found move here. This assumes it was called because the user clicked. Passing
-  /// in Board's NoIndex for row and col creates a pass move.
+  /// top left corner (1-based so that Moves look like we talk about Go boards). This handles
+  /// clicking and adding moves to a game (UI code applies the current move adornment based on
+  /// Game.currentMove). This handles branching if the current move already has next moves and
+  /// displays a message if the row, col already has a move at that location. If this is the first
+  /// move, this function sets Game.firstMove, and updates moveCount, nextColor, etc. This returns
+  /// the new move (or an existing move if the user clicked on a location where there is a move on
+  /// another branch following the current move). This returns null if there are any problems
+  /// playing at this location or rendering a pre-existing found move here. This assumes it was
+  /// called because the user clicked. Passing in Board's NoIndex for row and col creates a pass
+  /// move.
   ///
   makeMove(row: number, column: number) : Move | null {
     const move = new Move(row, column, this.nextColor);

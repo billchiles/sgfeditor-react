@@ -24,8 +24,8 @@ const LINE_THICKNESS = 1.5;
 const HOSHI_RADIUS = 3;
 const STONE_OUTLINE = 0.75; // stroke width around stones so they appear crisp
 
-// Coordinate letters skip "I" for readabily and usability.
-const LETTERS = "ABCDEFGHJKLMNOPQRSTUVWXYZ".split("");
+// Coordinate letters skip "I" for readabily and usability on the Go board.
+const LABEL_LETTERS = "ABCDEFGHJKLMNOPQRSTUVWXYZ".split("");
 
 // This used to be used to render stones when computing the pixel center from board coordinates.
 //const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -113,7 +113,9 @@ export default function GoBoard({
     return { x: gx, y: gy };
   };
 
-  // ---------- Click handling (memoized) ----------
+  /// handleClick (memoized) converts pixel indexes to Move indexes and determines whether to add
+  /// a move or adornment, or to cut the last move.
+  ///
   const handleClick = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
       const svg = e.currentTarget;
@@ -126,14 +128,17 @@ export default function GoBoard({
       const grid = pixelToGrid(sx, sy);
       if (!grid) return;
       //alert(`ptx: ${pt.x}, pty: ${pt.y}, sx: ${sx}, sy: ${sy}, gridx: ${grid.x}, gridy: ${grid.y} `)
-      // graphics X is actually our columns, and graphics Y is the row, so switch them for view model.
-      if (board.moveAt(grid.y, grid.x) !== null) {
+      // Graphics X is actually our columns, and graphics Y is the row, so switch them for view model.
+      // Also, Move coordinates are 1-based for the vernacular of Go boards.
+      const row = grid.y + 1;
+      const col = grid.x + 1;
+      if (board.moveAt(row, col) !== null) {
         alert("You can't play on an occupied point.");
         return;
       }
-      // Make move in central model via context and render it locally
+      // Make move in the game model via GameContext/appGlobals, bump version to re-render.
       if (appGlobals !== null) {//appGlobals?.game
-        const m = appGlobals.game.makeMove(grid.y, grid.x);
+        const m = appGlobals.game.makeMove(row, col);
         if (m !== null) {
           // Game.makeMove updates the model & provider bumps version -> memo below will re-run
           appGlobals.bumpVersion()
@@ -153,7 +158,7 @@ export default function GoBoard({
 
 
   ///
-  /// ---------- Renders ----------
+  /// Rendering
   ///
   const renderGrid = () => (
     <g>
@@ -212,8 +217,8 @@ export default function GoBoard({
         {/* Column letters */}
         {boardToPx.xs.map((x, i) => (
           <React.Fragment key={`colLabels-${i}`}>
-            <text key={`colTopLabel-${i}`} x={x} y={top + 4}>{LETTERS[i] || i + 1}</text>
-            <text key={`colBottomLabel-${i}`} x={x} y={bottom}>{LETTERS[i] || i + 1}</text>
+            <text key={`colTopLabel-${i}`} x={x} y={top + 4}>{LABEL_LETTERS[i] || i + 1}</text>
+            <text key={`colBottomLabel-${i}`} x={x} y={bottom}>{LABEL_LETTERS[i] || i + 1}</text>
           </React.Fragment>
         ))}
         {/* Row numbers 
@@ -231,17 +236,18 @@ export default function GoBoard({
     );
   };
 
-  const renderStones = useMemo(() => {
+const renderStones = useMemo(() => {
     const circles: React.ReactNode[] = [];
-    // board.forEach((col, x) => {
-    //   col.forEach((m, y) => {
-    for (let row = 0; row < boardSize; row++) {
-      for (let col = 0; col < boardSize; col++) {
+    for (let y = 0; y < boardSize; y++) {
+      for (let x = 0; x < boardSize; x++) {
+        // Model is 1-based for vernacular of Go boards.
+        const row = y + 1;
+        const col = x + 1;
         const m = board.moveAt(row, col);
         if (m !== null) {
           // Board/Move model is rows go down, columns go across, but graphics is X goes across, Y goes down.
-          const cx = boardToPx.xs[col]; 
-          const cy = boardToPx.ys[row];
+          const cx = boardToPx.xs[x]; 
+          const cy = boardToPx.ys[y];
           circles.push(
             <circle key={`stone-${row}-${col}`} cx={cx} cy={cy} r={geom.radius} fill={stoneFill(m.color)} 
                     stroke="#000" strokeWidth={STONE_OUTLINE} />
@@ -252,6 +258,7 @@ export default function GoBoard({
     return <g>{circles}</g>;
     // redraw when global version changes, or things that change on resize
   }, [appGlobals?.version, boardToPx, geom.radius]);
+
 
   return (
     <div className={styles.boardWrap} ref={wrapRef}>
