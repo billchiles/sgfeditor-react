@@ -66,15 +66,11 @@ export function GameProvider ({ children, getComment, size = 19 }: ProviderProps
     alert("Only support 19x19 games currently.")
   }
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
-  // render, which would replace game an all the move state.  When we have multiple games, this will
-  // change to be about the games collection and active game.  At that time, we need to update the
-  // ref'ed values, update the game.onchange callbacks for all games because state will change that
-  // will cause that closure to re-eval, which I think means the bumpVersion function will mutate
-  // objects no longer referenced by the UI, and therefore the UI won't re-render.
+  // render, which would replace game an all the move state.  
   const gameRef = useRef<Game>(new Game(size));
   const [version, setVersion] = useState(0);
   const bumpVersion = useCallback(() => setVersion(v => v + 1), []);
-  // stable accessors for the single active game
+  // stable accessors for the current game
   const getGame = useCallback(() => gameRef.current, []);
   const setGame = useCallback((g: Game) => {
     gameRef.current = g;
@@ -96,6 +92,23 @@ export function GameProvider ({ children, getComment, size = 19 }: ProviderProps
     const game = gameRef.current;
     game.onChange = bumpVersion;
   }, [bumpVersion]);
+  // Setup global state for initial game -- this runs once due to useEffect.
+  // useEffect's run after the DOM has rendered.  useState runs first, when GameProvider runs.
+  useEffect(() => {
+    if (games.length === 0 && defaultGame === null) {
+      const g = gameRef.current;
+      // ensure model-to-UI notifications are wired
+      g.onChange = bumpVersion;
+      setGames([g]);
+      setDefaultGame(g); 
+      // Don't set lastCreatedGame, it is only used when creating a new game throws and needs cleaning up.
+      //setLastCreatedGame(g);
+      // make it the active game (also bumps version)
+      setGame(g);
+    }
+    // run once on mount; guard prevents re-entry
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // One small deps object to pass to top-level commands that updates if any member changes ref ID.
   const deps = useMemo<CmdDependencies>(() => ({ gameRef, bumpVersion, fileBridge, size }), 
                                         [gameRef, bumpVersion, fileBridge, size]);
