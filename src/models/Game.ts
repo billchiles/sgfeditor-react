@@ -3,6 +3,8 @@ import { Board } from './Board';
 import type { ParsedGame } from './sgfparser';
 
 
+export const DEFAULT_BOARD_SIZE = 19;
+
 export const StoneColors = {
   Black: "black",
   White: "white",

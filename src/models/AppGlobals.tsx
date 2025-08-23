@@ -6,7 +6,7 @@
 /// code is in control and calls on the model for each game and its state changes.
 ///
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { Game, CreateGame, StoneColors, Move } from "./Game";
+import { Game, CreateGame, StoneColors, Move, DEFAULT_BOARD_SIZE } from "./Game";
 import { Board, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
 import { browserFileBridge, browserHotkeys } from "../platforms/browser-bridges";
@@ -14,7 +14,8 @@ import type { FileBridge, HotkeyBridge } from "../platforms/bridges";
 import {ParsedGame, ParsedNode, parseFile} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
 
-
+/// AppGlobals is the shape of values bundled together and provided as GameContext to UI handlers.
+///
 export type AppGlobals = {
   game: Game; // snapshot of current game (from gameRef.current)
   getGame: () => Game; // accessor to the live ref
@@ -38,36 +39,26 @@ export type AppGlobals = {
   saveSgfAs: () => Promise<void>;
 };
 
-
-// Keeping Game[] MRU and knowing the first game in the list is the current.
-// Find the index of the element to move
-// const index = myArray.findIndex(item => item === elementToMove);
-// if (index !== -1) {
-//     // Remove the element from its original position
-//     const [removedElement] = myArray.splice(index, 1);
-//     // Add the removed element to the beginning of the array
-//     myArray.unshift(removedElement);
-// }
-
 export const GameContext = React.createContext<AppGlobals | null>(null);
 
 
 type ProviderProps = {
   children: React.ReactNode;
-  /** Return the current comment text from App (uncontrolled textarea) */
+  // Return the current comment text from App (uncontrolled textarea)
   getComment: () => string;
-  /** Board size for the game model (defaults to 19) */
-  size: number;
+  // Board size for the game model (defaults to 19)
+  //size: number;
 };
 
 
-export function GameProvider ({ children, getComment, size = 19 }: ProviderProps) {
-  if (size !== 19) {
-    alert("Only support 19x19 games currently.")
-  }
+export function GameProvider ({ children, getComment}: ProviderProps) {
+  // if (size !== 19) {
+  //   alert("Only support 19x19 games currently.")
+  // }
+  const size = DEFAULT_BOARD_SIZE;
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
   // render, which would replace game an all the move state.  
-  const gameRef = useRef<Game>(new Game(size));
+  const gameRef = useRef<Game>(new Game());
   const [version, setVersion] = useState(0);
   const bumpVersion = useCallback(() => setVersion(v => v + 1), []);
   // stable accessors for the current game
@@ -216,6 +207,17 @@ async function openSgfCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependencies
   bumpVersion();
   console.log("Opened SGF bytes:", data.length);
 }
+
+
+// Keeping Game[] MRU and knowing the first game in the list is the current.
+// Find the index of the element to move
+// const index = myArray.findIndex(item => item === elementToMove);
+// if (index !== -1) {
+//     // Remove the element from its original position
+//     const [removedElement] = myArray.splice(index, 1);
+//     // Add the removed element to the beginning of the array
+//     myArray.unshift(removedElement);
+// }
 
 function checkDirtySave () {
 

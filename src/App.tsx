@@ -31,7 +31,7 @@ export default function App() {
   // };
 
   return (
-    <GameProvider getComment={getComment} size={19}>
+    <GameProvider getComment={getComment}>
       <AppContent commentRef={commentRef} />
     </GameProvider>
   );
@@ -85,7 +85,7 @@ function AppContent({
       />
       {/* Go Board */}
       <div className={styles.leftPane}>
-        <GoBoard boardSize={19} responsive/>
+        <GoBoard responsive/>
       </div>
 
       {/* RIGHT: Sidebar */}

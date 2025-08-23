@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useMemo, useRef, useContext, useEffect } from "react";
 import styles from "./goboard.module.css";
 import type { StoneColor } from "../models/Game";
-import { StoneColors } from "../models/Game";
+import { StoneColors, DEFAULT_BOARD_SIZE } from "../models/Game";
 import { GameContext } from "../models/AppGlobals";
 import { debugAssert } from "../debug-assert";
 
@@ -11,7 +11,7 @@ import { debugAssert } from "../debug-assert";
 ///
 export interface GoBoardProps {
   // Number of lines (and intersections) along one edge (default 19)
-  boardSize?: number;
+  // boardSize?: number;
   // Distance in pixels between adjacent intersections (default 32)
   cellSize?: number;
   // Extra padding around the grid for labels (default 24)
@@ -45,11 +45,12 @@ const stoneFill = (c: StoneColor) => (c === StoneColors.Black ? "#111" : "#f2f2f
 /// GoBoard -- Big Entry Point to render board
 ///
 export default function GoBoard({
-    boardSize = 19,
+    //boardSize = 19,
     // cellSize = 32,
     // padding = 36,
     responsive = true, // can pass as false and cellSize=32 to get original fixed board size behavior.
-  }: GoBoardProps) {
+    }: GoBoardProps) {
+  const boardSize = DEFAULT_BOARD_SIZE;
   // Measure the available space of the wrapper and keep a square side = min(width, height)
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [measuredDims, setMeasuredDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
