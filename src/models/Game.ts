@@ -13,6 +13,13 @@ export const StoneColors = {
 
 export type StoneColor = typeof StoneColors[keyof typeof StoneColors];
 
+function oppositeColor (c: StoneColor): StoneColor { 
+  return c === StoneColors.Black ? StoneColors.White : StoneColors.Black; 
+}
+
+///
+/// Game
+///
 
 export class Game {
   firstMove: Move | null;
@@ -29,9 +36,16 @@ export class Game {
   filebase: string | null; // <name>.<ext>
   saveCookie: unknown | null;
   parsedGame: ParsedGame | null;
+  isDirty: boolean;
+  blackPrisoners: number; // number of white stones captured by black
+  whitePrisoners: number; // number of black stones captured by white
+
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion, keeping model / UI isolation.
-  onChange?: () => void;
+  onChange?: () => void; // GameProvider wires this up to bumpVersion, so model can signal UI
+  message?: MessageOrQuery; // optional sink (alert/confirm etc.)
+  getMoveComment?: () => string; // optional: read current comment from UI
+
 
   constructor(size : number = 19, handicap : number = 0, komi : string = "6.5", 
               handicapStones: Move[] | null = null, allWhite : Move[] | null = null) {
@@ -54,6 +68,9 @@ export class Game {
     //this.nextColor = StoneColors.Black;
     this.moveCount = 0;
     this.komi = komi;
+    this.isDirty = false;
+    this.blackPrisoners = 0;
+    this.whitePrisoners = 0;
   }
 
   initHandicapNextColor (handicap : number, handicapStones: Move[] | null = null) {
@@ -75,8 +92,14 @@ export class Game {
   /// called because the user clicked. Passing in Board's NoIndex for row and col creates a pass
   /// move.
   ///
-  makeMove(row: number, column: number) : Move | null {
+  //makeMove (row: number, column: number) : Move | null {
+  async makeMove (row: number, column: number) : Promise<Move | null> {
     const move = new Move(row, column, this.nextColor);
+    // this.message?.message("Can't play where there already is a stone.");
+    // this.message?.message("You cannot make a move that removes a group's last liberty");
+    // this.message?.message("KO !!  Can't take back the ko.");
+    // const ok = await this.message?.confirm?.("Ok to move?");
+    // if (!ok) return null;
     move.number = this.moveCount + 1;
     if (this.firstMove === null) this.firstMove = move;
     if (this.currentMove !== null) this.currentMove.next = move;
@@ -212,9 +235,26 @@ export class Move implements IMoveNext {
 } // Move class
 
 
+
 type Adornment =
   | { kind: "triangle"; row: number, column: number }
   | { kind: "square"; row: number, column: number }
   | { kind: "letter"; row: number, column: number; text: string }
   | { kind: "currentMove"; row: number, column: number };
+
+
+
+  ///
+/// Enable model to signal UI to interact with user
+///
+
+/// MessageOrQuery is a type for conveying payload to the UI for alerting the user or confirming a
+/// choice -- file moved error (save as/cancel), open autosave / create default board,
+///           open newer auto dave / open older saved file, confirm saving dirty file y/n, 
+///           game already saved, trying to save-as y/n, confirm tree cut
+export interface MessageOrQuery {
+  message (msg: string): Promise<void> | void;
+  // true if OK, false if Cancel/Escape
+  confirm? (msg: string): Promise<boolean> | boolean; 
+};
 

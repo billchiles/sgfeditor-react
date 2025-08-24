@@ -61,17 +61,31 @@ function AppContent({
   commentRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const appGlobals = useContext(GameContext);
-
-  //const moveNumber = 10;
-  const blackCaptures = 3;
-  const whiteCaptures = 5;
-  const statusTop = useMemo(() => `SGF Editor -- ${appGlobals?.game.filename ?? ""}`,
-                            [appGlobals?.version, appGlobals?.game.filename]);
-  const statusBottom = useMemo(
-    () => `Move: ${appGlobals?.game.currentMove !== null ? appGlobals?.game.currentMove?.number : "   "}   Black captures: ${blackCaptures}   White captures: ${whiteCaptures}`,
-    [appGlobals?.version]
+  /// functions to update Title / status area
+  const statusTop = 
+    useMemo(() => {
+              const g = appGlobals?.game;
+              if (!g) return "SGF Editor --";
+              const filebase = g.filebase;
+              return `SGF Editor -- ${g.isDirty ? "[*] " : ""}${filebase !== null ? filebase : ""}`;
+            },
+            [appGlobals?.version, appGlobals?.game, appGlobals?.game.filebase, appGlobals?.game.isDirty]);
+  const statusBottom = 
+    useMemo(() => {
+            const g = appGlobals?.game;
+            if (!g) return "Move 0   Black capturs: 0   White captures: 0";
+            const curMove = g!.currentMove;
+            const num = (curMove === null) ? 0 : curMove?.number;
+            const passStr = (curMove !== null && curMove.isPass) ? "**PASS**" : "";
+            return `Move ${num} ${passStr}  Black captures: ${g.blackPrisoners}   ` +
+                   `White captures: ${g.whitePrisoners}`;
+            },
+            [appGlobals?.version, appGlobals?.game, appGlobals?.game.currentMove, 
+             appGlobals?.game.blackPrisoners, appGlobals?.game.whitePrisoners]
   );
 
+  //
+  // Rendering ...
   return (
     <div className={styles.appShell}>
       {/* Focus target used when pressing Esc to ensure all keybindings are working.

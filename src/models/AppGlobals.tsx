@@ -7,6 +7,7 @@
 ///
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { Game, CreateGame, StoneColors, Move, DEFAULT_BOARD_SIZE } from "./Game";
+import type { MessageOrQuery } from "./Game";
 import { Board, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
 import { browserFileBridge, browserHotkeys } from "../platforms/browser-bridges";
@@ -50,7 +51,9 @@ type ProviderProps = {
   //size: number;
 };
 
-
+/// GameProvider is the big lift here.  It collects all the global state, callbacks for the model
+/// layer, etc., and makes this available to UI content below <GameProvider> under <App>.
+///
 export function GameProvider ({ children, getComment}: ProviderProps) {
   // if (size !== 19) {
   //   alert("Only support 19x19 games currently.")
@@ -59,6 +62,8 @@ export function GameProvider ({ children, getComment}: ProviderProps) {
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
   // render, which would replace game an all the move state.  
   const gameRef = useRef<Game>(new Game());
+  // Wire message sink once (safe on every render if it's the same object)
+  gameRef.current.message = browserMessageOrQuery;
   const [version, setVersion] = useState(0);
   const bumpVersion = useCallback(() => setVersion(v => v + 1), []);
   // stable accessors for the current game
@@ -178,13 +183,17 @@ async function openSgfCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependencies
   //test moving through, ignoring branches
   // TODO: parse SGF into model instead of clearing
   const g = gameRef.current;
-  g.board.clear();
+  g.board.gotoStart();
   // g.firstMove = null;
   // g.currentMove = null;
   // g.moveCount = 0;
   // g.nextColor = "black";
   // No filename if user abort dialog.  Browser fileBridge may provide base name only.
-  if (path) g.filename = path;
+  if (path) {
+    g.filename = path;
+    const parts = path.split(/[/\\]/); 
+    g.filebase = parts[parts.length - 1];
+  }
   g.saveCookie = cookie ?? null;
   drawGameTree();
   focusOnRoot(); // No idea if this is meaningful before bumping the version and re-rendering all.
@@ -203,6 +212,12 @@ async function openSgfCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependencies
 //     myArray.unshift(removedElement);
 // }
 
+
+/// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
+/// game filename, or prompts for one if it is null. This is exported for use in app.tsx or
+/// process kick off code for file activation. It takes a game optionally for checking a game
+/// that is not the current game (when deleting games).
+///
 function checkDirtySave () {
 
 }
@@ -228,6 +243,7 @@ function doOpenGetFileGame (path: string | null, data: string, gameRef : React.M
   getFileGameCheckingAutoSave(path === undefined ? null : path, data, gameRef);
   curgame
 }
+
 
 function getFileGameCheckingAutoSave (path: string | null, data: string, 
                                       gameRef : React.MutableRefObject<Game>) {
@@ -321,6 +337,8 @@ async function writeGameCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDepe
   const { fileName, cookie } = res;
   if (fileName !== g.filename || cookie !== g.saveCookie) {
     g.filename = fileName;
+    const parts = fileName.split(/[/\\]/); 
+    g.filebase = parts[parts.length - 1];
     g.saveCookie = cookie;
     bumpVersion();
   }
@@ -334,6 +352,8 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, size }: CmdDep
   const { fileName, cookie } = res;
   if (fileName !== g.filename || cookie !== g.saveCookie) {
     g.filename = fileName;
+    const parts = fileName.split(/[/\\]/); 
+    g.filebase = parts[parts.length - 1];
     g.saveCookie = cookie;
     bumpVersion();
   }
@@ -432,3 +452,15 @@ function focusOnRoot () {
 function drawGameTree () {
 
 }
+
+///
+/// Messaging for Model
+///
+
+/// Quick and dirty messaging and confirming with user for model code.  Could have better, custom UI,
+/// but maybe good enough is just fine :-).
+///
+const browserMessageOrQuery: MessageOrQuery = {
+   message: (msg) => alert(msg),
+   confirm: async (msg) => window.confirm(msg),
+ };
