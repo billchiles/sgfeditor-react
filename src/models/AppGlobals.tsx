@@ -290,14 +290,14 @@ function setupFirstParsedMoved (g : Game, pn : ParsedNode) : Move | null {
 function parsedNodeToMove (pn : ParsedNode, _size : number) : Move | null {
   if ("B" in pn.properties) {
     const color = StoneColors.Black;
-    const {row, col} = parsedToModelCoordinates(pn.properties["B"][0]);
+    const [row, col] = parsedToModelCoordinates(pn.properties["B"][0]);
     const m = new Move(row, col, color);
     return m;
   }
   if ("W" in pn.properties) {
     const color = StoneColors.White;
     console.log(`${pn.properties["B"]} [0]${pn.properties["B"][0]}`);
-    const {row, col} = parsedToModelCoordinates(pn.properties["W"][0]);
+    const [row, col] = parsedToModelCoordinates(pn.properties["W"][0]);
     const m = new Move(row, col, color);
     return m;
   }

@@ -166,6 +166,7 @@ export class Move implements IMoveNext {
   column: number;
   color: StoneColor;
   number: number; // move count, from 1.  All alternate moves in variation tree have the same number.
+  isPass: boolean; // True when row, col are both Board.NoIndex
   previous: Move | null;
   next: Move | null; // null when no next move (same if start node of empty board)
   branches: Move[] | null;
@@ -179,6 +180,7 @@ export class Move implements IMoveNext {
     this.column = column;
     this.color = color;
     this.number = 0;
+    this.isPass = this.row == Board.NoIndex && this.column == Board.NoIndex;
     this.previous = null;
     this.next = null;
     this.branches = null;
