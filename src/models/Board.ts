@@ -1,5 +1,19 @@
-import { StoneColors, type Move, type StoneColor } from "./Game"
 import { debugAssert } from "../debug-assert";
+import type { ParsedNode } from "./sgfparser";
+
+
+export const StoneColors = {
+  Black: "black",
+  White: "white",
+  NoColor: "Pass"
+} as const;
+
+export type StoneColor = typeof StoneColors[keyof typeof StoneColors];
+
+export function oppositeColor (c: StoneColor): StoneColor { 
+  return c === StoneColors.Black ? StoneColors.White : StoneColors.Black; 
+}
+
 
 export class Board {
   size: number;
@@ -45,9 +59,9 @@ export class Board {
   /// gotoStart removes all stones from model so that going to start of game show empty board.
   ///
   gotoStart (): void {
-    for (let r = 0; r < this.size; r++) {
-      for (let c = 0; c < this.size; c++) {
-        this.moves[r][c] = null;
+    for (let row = 0; row < this.size; row++) {
+      for (let col = 0; col < this.size; col++) {
+        this.moves[row][col] = null;
       }
     }
   }
@@ -118,6 +132,82 @@ export class Board {
   }
 
 } // Board class
+
+///
+/// Moves (and IMoveNext for Adornments too)
+///
+
+export interface IMoveNext {
+     readonly IMNColor: StoneColor;
+     readonly IMNNext: IMoveNext | null;
+     readonly IMNBranches: IMoveNext[] | null;
+   }
+
+export class Move implements IMoveNext {
+  row: number;
+  column: number;
+  color: StoneColor;
+  number: number; // move count, from 1.  All alternate moves in variation tree have the same number.
+  isPass: boolean; // True when row, col are both Board.NoIndex
+  previous: Move | null;
+  next: Move | null; // null when no next move (same if start node of empty board)
+  deadStones : Move[]; // never null
+  branches: Move[] | null; // Branches is null when there is zero or one next move.
+  adornments: Adornment[];
+  comments: string;
+  parsedNode: ParsedNode | null;
+  rendered: boolean;
+
+  constructor(row: number, column: number, color: StoneColor) {
+
+    this.row = row;
+    this.column = column;
+    this.color = color;
+    this.number = 0;
+    this.isPass = this.row == Board.NoIndex && this.column == Board.NoIndex;
+    this.previous = null;
+    this.next = null;
+    this.branches = null;
+    this.adornments = [];
+    this.deadStones = [];
+    this.comments = "";
+    this.parsedNode = null;
+    this.rendered = true; // Assume move rendered, parsed game code sets it to false.
+  }
+
+  addBranch(m: Move) {
+    if (this.branches === null) this.branches = [];
+    this.branches.push(m);
+  }
+
+  addAdornment(a: Adornment) {
+    this.adornments.push(a);
+  }
+
+  // IMoveNext:
+  //
+  get IMNColor (): StoneColor {
+    return this.color;
+  }
+  get IMNNext (): IMoveNext | null {
+    return this.next;
+  }
+  get IMNBranches (): IMoveNext[] | null {
+    return (this.branches == null) ? null : this.branches;
+  }
+} // Move class
+
+///
+/// Adornments
+///
+
+export type Adornment =
+  | { kind: "triangle"; row: number, column: number }
+  | { kind: "square"; row: number, column: number }
+  | { kind: "letter"; row: number, column: number; text: string }
+  | { kind: "currentMove"; row: number, column: number };
+
+
 
 ///
 /// Coordinates Conversions

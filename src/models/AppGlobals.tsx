@@ -6,14 +6,15 @@
 /// code is in control and calls on the model for each game and its state changes.
 ///
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { Game, CreateGame, StoneColors, Move, DEFAULT_BOARD_SIZE } from "./Game";
+import { Game, createGamefromParsedGame, DEFAULT_BOARD_SIZE } from "./Game";
 import type { MessageOrQuery } from "./Game";
-import { Board, parsedToModelCoordinates } from './Board';
+//import { StoneColors, Board, Move, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
 import { browserFileBridge, browserHotkeys } from "../platforms/browser-bridges";
 import type { FileBridge, HotkeyBridge } from "../platforms/bridges";
-import {ParsedGame, ParsedNode, parseFile} from "./sgfparser";
+import {parseFile} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
+//import { debugAssert } from "../debug-assert";
 
 /// AppGlobals is the shape of values bundled together and provided as GameContext to UI handlers.
 ///
@@ -28,6 +29,7 @@ export type AppGlobals = {
   getLastCreatedGame: () => Game | null;
   setLastCreatedGame: (g: Game | null) => void;
   getComment?: () => string;
+  setComment?: (text: string) => void;
   // Global render tick that increments whenever the model changes
   version: number;
   // Manually force a redraw from any UI or model code
@@ -42,11 +44,13 @@ export type AppGlobals = {
 
 export const GameContext = React.createContext<AppGlobals | null>(null);
 
-
+/// ProviderProps just describes the args to GameProvider function.
+///
 type ProviderProps = {
   children: React.ReactNode;
-  // Return the current comment text from App (uncontrolled textarea)
+  // Get/SEt the current comment text from App (uncontrolled textarea)
   getComment: () => string;
+  setComment: (text: string) => void;
   // Board size for the game model (defaults to 19)
   //size: number;
 };
@@ -54,7 +58,7 @@ type ProviderProps = {
 /// GameProvider is the big lift here.  It collects all the global state, callbacks for the model
 /// layer, etc., and makes this available to UI content below <GameProvider> under <App>.
 ///
-export function GameProvider ({ children, getComment}: ProviderProps) {
+export function GameProvider ({ children, getComment, setComment}: ProviderProps) {
   // if (size !== 19) {
   //   alert("Only support 19x19 games currently.")
   // }
@@ -62,6 +66,9 @@ export function GameProvider ({ children, getComment}: ProviderProps) {
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
   // render, which would replace game an all the move state.  
   const gameRef = useRef<Game>(new Game());
+  gameRef.current.getComments = getComment;
+  gameRef.current.setComments = setComment;
+
   // Wire message sink once (safe on every render if it's the same object)
   gameRef.current.message = browserMessageOrQuery;
   const [version, setVersion] = useState(0);
@@ -70,10 +77,12 @@ export function GameProvider ({ children, getComment}: ProviderProps) {
   const getGame = useCallback(() => gameRef.current, []);
   const setGame = useCallback((g: Game) => {
     gameRef.current = g;
-    // ensure model-to-UI notifications still work on the new game object
+    //  g may have already existed and been wired up, but need to set for new games.
     g.onChange = bumpVersion;
+    g.getComments = getComment;
+    g.setComments = setComment;    
     bumpVersion();
-  }, [bumpVersion]);
+  }, [bumpVersion, getComment, setComment]);
   const [games, setGames] = useState<Game[]>([]);
   const [defaultGame, setDefaultGame] = useState<Game | null>(null);
   const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);  
@@ -111,7 +120,7 @@ export function GameProvider ({ children, getComment}: ProviderProps) {
   const openSgf   = useCallback(() => openSgfCmd(deps),   [deps]);
   const saveSgf   = useCallback(() => writeGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
-  const onKey     = useCallback((e: KeyboardEvent) => handleHotkeyCmd(deps, e), [deps]);
+  const onKey     = useCallback((e: KeyboardEvent) => handleKeyPressed(deps, e), [deps]);
   // Providing Hotkeys ...
   // leftarrow/rightarrow for Prev/Next; c-s for Save
   useEffect(() => {
@@ -120,24 +129,13 @@ export function GameProvider ({ children, getComment}: ProviderProps) {
   }, [hotkeys, onKey]);
   // Code to provide the values when the UI rendering code runs
   const api: AppGlobals = useMemo(
-    () => ({
-      game: gameRef.current,
-      getGame,
-      setGame,
-      getGames: () => games,
-      setGames,
-      getDefaultGame: () => defaultGame,
-      setDefaultGame,
-      getLastCreatedGame: () => lastCreatedGame,
-      setLastCreatedGame,
-      getComment,
-      version,
-      bumpVersion,
-      openSgf,
-      saveSgf,
-      saveSgfAs,
-    }),
-    [version, bumpVersion, getComment, openSgf, saveSgf, saveSgfAs,
+    () => ({game: gameRef.current, getGame, setGame, getGames: () => games, setGames,
+            getDefaultGame: () => defaultGame, setDefaultGame,
+            getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
+            getComment, setComment,
+            version, bumpVersion,
+            openSgf, saveSgf, saveSgfAs,}),
+    [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs,
      games, setGames, defaultGame, setDefaultGame, lastCreatedGame, setLastCreatedGame,
      getGame, setGame]
   );
@@ -251,74 +249,14 @@ function getFileGameCheckingAutoSave (path: string | null, data: string,
   parseAndCreateGame(path, data, gameRef);
 }
 
-var cheatToTest : Game | null = null;
-
 function parseAndCreateGame (_path: string | null, data: string, 
                              gameRef : React.MutableRefObject<Game>) : Game {
   const pg = parseFile(data);
-  cheatToTest = gameRef.current;
-  createGamefromParsedGame(pg);
-  return cheatToTest;
-  // return createGamefromParsedGame(pg);
+  const curGame = gameRef.current; // pass in to model code to get UI callbacks for new game.
+  createGamefromParsedGame(pg, curGame);
+  return createGamefromParsedGame(pg, curGame);
 }
 
-/// called CreateParsedGame in C# land, and it returns void, storing new game in mainwin.game.
-function createGamefromParsedGame (pg: ParsedGame) {
-  // TODO: Inspect various properties for size, players, game comment, etc., to copy to game.
-  const g = cheatToTest; //CreateGame(19, 0, "6.5");
-  g!.parsedGame = pg;
-  debugAssert(pg.nodes !== null, "WTF, there is always one parsed node.")
-  const m : Move | null = setupFirstParsedMoved(g!, pg!.nodes);
-  g!.firstMove = m;
-  g!.currentMove = null;
-  //g.firstMove = pg.nodes?.next;
-  //TODO: set game comment
-  //appGlobals.game = g;
-  //return g;
-}
-
-function setupFirstParsedMoved (g : Game, pn : ParsedNode) : Move | null {
-  if ("B" in pn.properties || "W" in pn.properties)
-    throw new Error ("Unexpected move in root parsed node.");
-  if ("PL" in pn.properties)
-    throw new Error("Do not support player-to-play for changing start color.");
-  if ("TR" in pn.properties || "SQ" in pn.properties || "LB" in pn.properties)
-    throw new Error("Don't handle adornments on initial board from parsed game yet.");
-  var m : Move | null = null;
-  if (pn.next === null) m = null;
-  else {
-    m = parsedNodeToMove(pn.next, g.size);
-    if (m === null) {
-      debugAssert(pn.next.badNodeMessage != null, 
-                  "Failed to make Move from ParsedNode, but no error message provided.");
-      throw new Error(pn.next.badNodeMessage);
-    }
-    m.number = g.moveCount + 1;
-  }
-  g.firstMove = m;
-  return m;
-}
-
-/// parsedNodeToMove makes the move while checking for bad moves, making a pass move with a big
-/// comment to describe error situations, or setting bad move message in move object.
-/// For now assume unicorns and rainbows.
-///
-function parsedNodeToMove (pn : ParsedNode, _size : number) : Move | null {
-  if ("B" in pn.properties) {
-    const color = StoneColors.Black;
-    const [row, col] = parsedToModelCoordinates(pn.properties["B"][0]);
-    const m = new Move(row, col, color);
-    return m;
-  }
-  if ("W" in pn.properties) {
-    const color = StoneColors.White;
-    console.log(`${pn.properties["B"]} [0]${pn.properties["B"][0]}`);
-    const [row, col] = parsedToModelCoordinates(pn.properties["W"][0]);
-    const m = new Move(row, col, color);
-    return m;
-  }
-  return new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
-}
 
 
 ///
@@ -379,9 +317,10 @@ function quickieGetSGF (gameRef: React.MutableRefObject<Game>, size: number): st
 /// Keybindings
 ///
 
-function handleHotkeyCmd (deps: CmdDependencies, e: KeyboardEvent): void {
+async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent): Promise<void> {
   // console.log("hotkey", { key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, 
   //                         shift: e.shiftKey, target: e.target });
+  // Handle keys that don't depend on any other UI having focus ...
   const lower = e.key.toLowerCase();
   const ctrl_s = e.ctrlKey && lower === "s";
   const metaShiftS = (e.ctrlKey || e.metaKey) && e.shiftKey && lower === "s";
@@ -404,19 +343,45 @@ function handleHotkeyCmd (deps: CmdDependencies, e: KeyboardEvent): void {
     void writeGameCmd(deps);
     return;
   }
+  // The following depend on what other UI has focus ...
   // If the user is editing text (e.g., the comment textarea), don't further process arrows.
   if (isEditingTarget(e.target) && (lower === "arrowleft" || lower === "arrowright")) {
     return; // let the content-editable elt handle cursor movement
   }
-  if (lower === "arrowleft") {
-      deps.gameRef.current.unwindMove(); // model fires onChange → provider bumps version
+  const curgame = deps.gameRef.current;
+  if (lower === "arrowleft" && curgame.canUnwindMove()) {
+    e.preventDefault();
+    curgame.unwindMove(); // model fires onChange → provider bumps version
     return;
   }
-  if (lower === "arrowright") {
-    deps.gameRef.current.replayMove();
+  if (lower === "arrowright" && curgame.canReplayMove()) {
+    e.preventDefault();
+    const m = curgame.replayMove();
+    if (m !== null) deps.bumpVersion();
+    return;
+  }
+if (lower === "arrowup") {
+    e.preventDefault();
+    handleArrowUpCmd(deps, curgame);
+    return;
+  }
+if (lower === "arrowdown" && curgame.canReplayMove()) {
+    e.preventDefault();
+    handleArrowDownCmd(deps, curgame);
+    return;
+  }
+  if (lower === "home" && curgame.canUnwindMove()) {
+    e.preventDefault();
+    curgame.gotoStart(); // signal onchange
+    return;
+  }
+if (lower === "end" && curgame.canReplayMove()) {
+    e.preventDefault();
+    await curgame.gotoLastMove(); // signal onchange
     return;
   }
 }
+
 
 /// isEditingTarget return true if the element that sourced the event has user editable content,
 /// as text boxes, <p>'s where iscontenteditable=true is set, <div>'s, etc.
@@ -426,14 +391,69 @@ function isEditingTarget (t: EventTarget | null): boolean {
   if (!elt) return false; // default is not editing target
   if (elt.isContentEditable) return true;
   const tag = elt.tagName;
-  if (tag === "TEXTAREA") return true;
-  if (tag === "INPUT") {
-    const type = (elt as HTMLInputElement).type?.toLowerCase?.() ?? "text";
-    // Common text inputs are editable, but gpt5 generated this list, likely don't need a lot of it.
-    return ["text", "search", "url", "tel", "password", "email", "number"].includes(type);
-  }
+  if (tag === "TEXTAREA" || tag === "INPUT") return true;
+  // if (tag === "TEXTAREA") return true;
+  // if (tag === "INPUT") {
+  //   const type = (elt as HTMLInputElement).type?.toLowerCase?.() ?? "text";
+  //   // Common text inputs are editable, but gpt5 generated this list, likely don't need a lot of it.
+  //   return ["text", "search", "url", "tel", "password", "email", "number"].includes(type);
+  // }
   return false;
 }
+
+
+function handleArrowUpCmd (deps: CmdDependencies, curgame: Game) {
+    const curmove = curgame.currentMove;
+    let branches = null;
+    let next = null;
+    if (curmove !== null) {
+      branches = curmove.branches;
+      next = curmove.next;
+    } else {
+      branches = curgame.branches
+      next = curgame.firstMove;
+    }
+    if (branches === null) return;
+    const idx = branches.findIndex(m => m === next);
+    debugAssert(idx != -1, "WTF, next move must be in branches.");
+    if (idx > 0) {
+      if (curmove !== null)
+        curmove.next = branches[idx - 1];
+      else
+        curgame.firstMove = branches[idx - 1]
+      deps.bumpVersion();
+    } else {
+      alert("Already on highest branch.");
+    }
+    return;
+  } // handleArrowUpCmd
+
+function handleArrowDownCmd (deps: CmdDependencies, curgame: Game) {
+    const curmove = curgame.currentMove;
+    let branches = null;
+    let next = null;
+    if (curmove !== null) {
+      branches = curmove.branches;
+      next = curmove.next;
+    } else {
+      branches = curgame.branches
+      next = curgame.firstMove;
+    }
+    if (branches === null) return;
+    const idx = branches.findIndex(m => m === next);
+    debugAssert(idx != -1, "WTF, next move must be in branches.");
+    if (idx < branches.length - 1) {
+      if (curmove !== null)
+        curmove.next = branches[idx + 1];
+      else
+        curgame.firstMove = branches[idx + 1]
+      deps.bumpVersion();
+    } else {
+      alert("Already on highest branch.");
+    }
+    return;
+  } // handleArrowUpCmd
+
 
 /// focusOnRoot called from input handling on esc to make sure all keybindings work.
 /// May need to call this if, for example, user uses c-s in comment box, that is, command impls

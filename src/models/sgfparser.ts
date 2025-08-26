@@ -2,8 +2,8 @@
 /// It says it made the following changes:
 ///    Parse entry is parseText(text) (instead of ParseFile).
 ///
-import { StoneColors } from "./Game";
-import type { IMoveNext, StoneColor } from "./Game";
+import { StoneColors } from "./Board";
+import type { StoneColor, IMoveNext } from "./Board";
 
 
 export class ParsedGame {

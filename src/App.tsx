@@ -10,6 +10,9 @@ import { GameProvider, GameContext } from "./models/AppGlobals";
 export default function App() {
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const getComment = useCallback(() => commentRef.current?.value ?? "", []);
+  const setComment = (text: string) => {
+    if (commentRef.current) commentRef.current.value = text;
+  };
 
   // BOGUS place holder, reminder to set version when filenname, move number, capture count, etc., change.
   // const handlePlaceStone = (_x: number, _y: number, _color: StoneColor) => {
@@ -30,11 +33,9 @@ export default function App() {
   //   // if (commentRef.current) commentRef.current.value = previousMove.comment ?? "";
   // };
 
-  return (
-    <GameProvider getComment={getComment}>
-      <AppContent commentRef={commentRef} />
-    </GameProvider>
-  );
+  return (<GameProvider getComment={getComment} setComment={setComment}>
+            <AppContent commentRef={commentRef} />
+          </GameProvider>);
 } // App function
 
 // function setFileName(name: string) {
@@ -61,18 +62,26 @@ function AppContent({
   commentRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const appGlobals = useContext(GameContext);
+  /// Prev/Next enabling
+  const g = appGlobals?.game;
+  //var prevEnabled = false;
+  //var nextEnabled = true;
+  // if (g) {
+  //   prevEnabled = !!g!.currentMove;
+  //   nextEnabled = (!!g!.currentMove && !!g!.currentMove.next) ||
+  //                 (!g!.currentMove && !!g!.firstMove);
+  // }
   /// functions to update Title / status area
   const statusTop = 
     useMemo(() => {
-              const g = appGlobals?.game;
-              if (!g) return "SGF Editor --";
+              if (!g) return "SGF Editor --"; // First render this is undefined.
               const filebase = g.filebase;
               return `SGF Editor -- ${g.isDirty ? "[*] " : ""}${filebase !== null ? filebase : ""}`;
             },
             [appGlobals?.version, appGlobals?.game, appGlobals?.game.filebase, appGlobals?.game.isDirty]);
   const statusBottom = 
     useMemo(() => {
-            const g = appGlobals?.game;
+            // First render g is undefined.
             if (!g) return "Move 0   Black capturs: 0   White captures: 0";
             const curMove = g!.currentMove;
             const num = (curMove === null) ? 0 : curMove?.number;
@@ -121,35 +130,10 @@ function AppContent({
               title="c-s"
             >
               Save
-            </button>          </div>
+            </button>
+          </div>
           <div className={styles.buttonRow}>
-            <button
-              className={styles.btn}
-              onClick={() => {
-                if (appGlobals !== null) {
-                  appGlobals.game.unwindMove();
-                  // unwindMove calls game.onchange to bump version and trigger re-rendering
-                } else {
-                  console.warn("AppGlobals missing: how could someone click before we're ready?!.");
-                }
-              }}
-            >
-              Prev
-            </button>
-            <button
-              className={styles.btn}
-              onClick={() => {
-                if (appGlobals !== null) {
-                  appGlobals.game.replayMove();
-                  // unwindMove calls game.onchange to bump version and trigger re-rendering
-                } else {
-                  console.warn("AppGlobals missing: how could someone click before we're ready?!.");
-                }
-              }}
-            >
-              Next
-            </button>
-            <button className={styles.btn}>Make Variation</button>
+            <CommandButtons/>
           </div>
         </div>
 
@@ -181,5 +165,75 @@ function AppContent({
         </div>
       </aside>
     </div>
+  );
+}
+
+function CommandButtons() {
+  const app = useContext(GameContext);
+  const game = app?.game;
+  const bumpVersion = app?.bumpVersion;
+  // Guards if context not ready -- not-not if undefined flows out of no game first render.
+  const canPrev = !!game?.canUnwindMove?.(); 
+  const canNext = !!game?.canReplayMove?.();
+  // home, prev, next, end buttons
+  const onHome = useCallback(async () => {
+    // TODO investigate when game and bumpversion really aren't set, seems they should be.
+    // TODO why not using gameref?
+    if (!game?.gotoStart || !bumpVersion) return;
+    //if (!game.canUnwindMove?.()) return;
+    //game.saveCurrentComment?.(); should be done by go to start
+    game.gotoStart(); // signals onchange
+    // bumpVersion();
+  }, [game, bumpVersion]);
+  const onPrev = useCallback(async () => {
+    if (!game?.unwindMove || !bumpVersion) return;
+    if (!game.canUnwindMove?.()) return;
+    //game.saveCurrentComment?.();
+    game.unwindMove();
+    //bumpVersion(); unwindmove call onchange and always returns a move
+  }, [game, bumpVersion]);
+  const onNext = useCallback(async () => {
+    if (!game?.replayMove || !bumpVersion) return;
+    if (!game.canReplayMove?.()) return;
+    //game.saveCurrentComment?.();
+    const m = await game.replayMove();
+    if (m !== null) bumpVersion();
+  }, [game, bumpVersion]);
+  const onEnd = useCallback(async () => {
+    if (!game?.gotoLastMove || !bumpVersion) return;
+    if (!game.canReplayMove?.()) return;
+    //game.saveCurrentComment?.();
+    await game.gotoLastMove(); // signal onchange
+    //bumpVersion();
+  }, [game, bumpVersion]);
+  // Branches reporting button
+  // Need to declare next two vars so they are in scope for branchesLabel computation.
+  let branchesCount = 0;
+  let currentIndex = 0; // 1-based when present for end user model
+  if (game) {
+    const startBoard = game.currentMove === null;
+    const branches = startBoard ? game.branches : game.currentMove!.branches;
+    if (branches !== null) {
+      branchesCount = branches.length;
+      const selectedNext = startBoard ? game.firstMove : game.currentMove!.next;
+      const idx = branches.findIndex((b) => b === selectedNext);
+      currentIndex = idx + 1;
+    }
+  }
+  const hasBranches = branchesCount >= 2; // branches var is not in scope now.
+  const branchesLabel = hasBranches ? `Branches: ${currentIndex}/${branchesCount}` : "Branches: 0";
+  return (
+    <>
+      <button className={styles.btn} onClick={onHome} disabled={!canPrev}>Home</button>
+      <button className={styles.btn} onClick={onPrev} disabled={!canPrev}>Prev</button>
+      <button className={styles.btn} onClick={onNext} disabled={!canNext}>Next</button>
+      <button className={styles.btn} onClick={onEnd} disabled={!canNext}>End</button>
+      <button
+        className={`${styles.btn} ${hasBranches ? styles.btnBranchActive : ""}`}
+        title={hasBranches ? "Current branch position / total branches" : "No branches"}
+      >
+        {branchesLabel}
+      </button>
+    </>
   );
 }

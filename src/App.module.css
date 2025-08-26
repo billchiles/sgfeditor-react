@@ -106,3 +106,15 @@
   color: #6b7280;
   font-size: 13px;
 }
+
+/*
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+*/
+
+.btnBranchActive {
+  background: #fff6bf;
+  border-color: #e0c96a;
+}

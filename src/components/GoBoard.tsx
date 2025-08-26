@@ -1,7 +1,8 @@
 import React, { useCallback, useState, useMemo, useRef, useContext, useEffect } from "react";
 import styles from "./goboard.module.css";
-import type { StoneColor } from "../models/Game";
-import { StoneColors, DEFAULT_BOARD_SIZE } from "../models/Game";
+import  { StoneColors } from "../models/Board";
+import type { StoneColor } from "../models/Board";
+import { DEFAULT_BOARD_SIZE } from "../models/Game";
 import { GameContext } from "../models/AppGlobals";
 import { debugAssert } from "../debug-assert";
 
@@ -117,7 +118,7 @@ export default function GoBoard({
   /// a move or adornment, or to cut the last move.
   ///
   const handleClick = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
+    async (e: React.MouseEvent<SVGSVGElement>) => {
       const svg = e.currentTarget;
       const pt = svg.createSVGPoint();
       pt.x = e.clientX; // pixels from left
@@ -138,7 +139,7 @@ export default function GoBoard({
       }
       // Make move in the game model via GameContext/appGlobals, bump version to re-render.
       if (appGlobals !== null) {//appGlobals?.game
-        const m = appGlobals.game.makeMove(row, col);
+        const m = await appGlobals.game.makeMove(row, col);
         if (m !== null) {
           // Game.makeMove updates the model & provider bumps version -> memo below will re-run
           appGlobals.bumpVersion()
@@ -238,6 +239,11 @@ export default function GoBoard({
 
 const renderStones = useMemo(() => {
     const circles: React.ReactNode[] = [];
+    const current = appGlobals?.game?.currentMove ?? null;
+    // marker sizes scale with stone radius; keeps ring visible at small sizes
+    const markRadius = Math.max(geom.radius * 0.35, 3);
+    const markStroke = Math.max(geom.radius * 0.12, 1);
+
     for (let y = 0; y < boardSize; y++) {
       for (let x = 0; x < boardSize; x++) {
         // Model is 1-based for vernacular of Go boards.
@@ -252,14 +258,25 @@ const renderStones = useMemo(() => {
             <circle key={`stone-${row}-${col}`} cx={cx} cy={cy} r={geom.radius} fill={stoneFill(m.color)} 
                     stroke="#000" strokeWidth={STONE_OUTLINE} />
           );
+          // Concentric ring for the current move: white on black, black on white
+          // const isCurrent = current ? (current === m) ||
+          //                             (current.row === m.row && current.column === m.column)
+          //                           : false;
+          if (current === m) {
+            const ringColor = m.color === StoneColors.Black ? "#fff" : "#000";
+            circles.push(
+              <circle key={`curmark-${x}-${y}`} cx={cx} cy={cy} r={markRadius} fill="none"
+                      stroke={ringColor} strokeWidth={markStroke}
+              />
+            );
+          }
         }
       };
     };
     return <g>{circles}</g>;
     // redraw when global version changes, or things that change on resize
   }, [appGlobals?.version, boardToPx, geom.radius]);
-
-
+  // Now render ...
   return (
     <div className={styles.boardWrap} ref={wrapRef}>
       <svg
