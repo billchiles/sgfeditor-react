@@ -26,6 +26,8 @@ export class Board {
 
   static readonly NoIndex = -100;
 
+  static readonly MaxSize = 19;
+
   /// add_stone adds move to the model, assuming it has valid indexes.
   /// row, col are one-based, as we talk about go boards.
   ///

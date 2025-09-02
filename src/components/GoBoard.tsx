@@ -227,22 +227,24 @@ export default function GoBoard({
             Then we override each row's end label with textAnchor="start".
             GPT5 randomly decided to key the column letters but not the row numbers, but I think
             we could have used no grid immediately around labels and put textAnchor in each.*/}
-        {boardToPx.ys.map((y, i) => (
-          <g key={`row-${i}`} textAnchor="end">
-            <text x={left} y={y + 4}>{i + 1}</text>
-            <text x={right} y={y + 4} textAnchor="start">{i + 1}</text>
-          </g>
-        ))}
+        {boardToPx.ys.map((y, i) => {
+          const rowLabel = boardSize - i; // label 1..19 bottom to top
+          return(<g key={`row-${i}`} textAnchor="end">
+                  <text x={left} y={y + 4}>{rowLabel}</text>
+                  <text x={right} y={y + 4} textAnchor="start">{rowLabel}</text>
+                 </g>);
+          })
+        }
       </g>
     );
   };
 
-const renderStones = useMemo(() => {
+  const renderStones = useMemo(() => {
     const circles: React.ReactNode[] = [];
     const current = appGlobals?.game?.currentMove ?? null;
     // marker sizes scale with stone radius; keeps ring visible at small sizes
-    const markRadius = Math.max(geom.radius * 0.35, 3);
-    const markStroke = Math.max(geom.radius * 0.12, 1);
+    const markRadius = Math.max(geom.radius * 0.4, 3);
+    const markStroke = Math.max(geom.radius * 0.2, 1);
 
     for (let y = 0; y < boardSize; y++) {
       for (let x = 0; x < boardSize; x++) {

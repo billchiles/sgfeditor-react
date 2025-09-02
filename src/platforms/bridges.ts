@@ -16,6 +16,34 @@ export interface FileBridge {
   // Always prompt the user and return any cookie, pathname, or name.
   saveAs(suggestedName: string, data: string): 
       Promise<{ fileName: string; cookie: unknown | null } | null>;
+  // Shows a file-open picker and returns the file handle and a best-effort filename (no path in
+  // in browsers). Returns null if the user cancels.
+  // pickOpenFile(accept?: string[]): Promise<{ cookie: unknown; fileName: string } | null>;
+  pickOpenFile(): Promise<{ cookie: unknown; fileName: string } | null>;
+  // Shows a save-as picker and returns the file handle and name, null if user cancels.
+  pickSaveFile(suggestedName?: string): Promise<{ cookie: unknown; fileName: string } | null>;
+  // Read text from a previously returned cookie/handle. Returns null if unsupported.
+  // Browser (File System Access API): cookie is a FileSystemFileHandle.
+  // Fallback will return null.  Electron can implement.
+  readText(cookie: unknown): Promise<string | null>;
+  // Returns true if this platform supports handle-based open/save file pickers
+  canPickFiles(): boolean;
+  // Return basic file info (null if unsupported or on error). */
+  getWriteDate(cookie: unknown): Promise<number | null>;
+}
+
+/// App-private storage (OPFS when available; falls back to localStorage).
+/// Should always have OPFS in chrome, post-2021 Safari, and Electron.
+///
+export interface AppStorageBridge {
+  writeText(name: string, text: string): Promise<void>;
+  readText(name: string): Promise<string | null>;
+  delete(name: string): Promise<boolean>;
+  exists(name: string): Promise<boolean>;
+  // list(): Promise<string[]>; // best-effort; may be empty in fallback
+  // // helpers
+  // writeJSON<T>(name: string, value: T): Promise<void>;
+  // readJSON<T>(name: string): Promise<T | null>;
 }
 
 /// HotkeyBridge is needed because when we support electron shell, key input could come from the

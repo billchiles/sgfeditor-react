@@ -115,7 +115,7 @@ function parseNodes(lexer: Lexer): ParsedNode {
   while (lexer.hasData()) {
     const ch = lexer.scanFor(";()", undefined);
     if (ch === ";") {
-      if (branchingYet) throw new Error("Found node after branching started.");
+      if (branchingYet) throw new SGFError("Found node after branching started.");
       cur.next = parseNode(lexer);
       cur.next.previous = cur;
       cur = cur.next;
@@ -134,10 +134,10 @@ function parseNodes(lexer: Lexer): ParsedNode {
     } else if (ch === ")") {
       return first;
     } else {
-      throw new Error(`SGF file is malformed at char ${lexer.location}`);
+      throw new SGFError(`SGF file is malformed at char ${lexer.location}`);
     }
   }
-  throw new Error("Unexpectedly hit EOF!");
+  throw new SGFError("Unexpectedly hit EOF!");
 }
 
 function parseNode(lexer: Lexer): ParsedNode {
@@ -151,7 +151,7 @@ function parseNode(lexer: Lexer): ParsedNode {
       return node;
     }
     if (Object.prototype.hasOwnProperty.call(node.properties, id)) {
-      throw new Error(`Encountered ID, ${id}, twice for node -- file location ${lexer.location}.`);
+      throw new SGFError(`Encountered ID, ${id}, twice for node -- file location ${lexer.location}.`);
     }
     lexer.scanFor("[", "Expected property value");
     const values: string[] = [];
@@ -165,7 +165,7 @@ function parseNode(lexer: Lexer): ParsedNode {
       lexer.location = pos;
     }
   }
-  throw new Error("Unexpectedly hit EOF!");
+  throw new SGFError("Unexpectedly hit EOF!");
 }
 
 ///
@@ -193,7 +193,7 @@ class Lexer {
     const [pos, ch] = this.peekFor(chars);
     if (pos === -1) {
       if (errmsg) errmsg = `${errmsg} -- file location ${this.idx}`;
-      throw new Error(errmsg ?? `Expecting one of '${chars}' while scanning -- file location ${this.idx}`);
+      throw new SGFError(errmsg ?? `Expecting one of '${chars}' while scanning -- file location ${this.idx}`);
     }
     this.idx = pos; // pos is AFTER the found char
     return ch;
@@ -262,7 +262,7 @@ class Lexer {
         res += c;
       }
     }
-    throw new Error("Unexpectedly hit EOF!");
+    throw new SGFError("Unexpectedly hit EOF!");
   }
 
   /** CheckPropertyNewline: if c is part of a newline sequence, consume optional second char and report. */
@@ -282,4 +282,15 @@ class Lexer {
 function isWhitespace(c: string): boolean {
   // SGF treats any <space as whitespace; here we keep it simple.
   return c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f" || c === "\v";
+}
+
+
+/// SGFError to give cleaner reading code, but basically typescript doesn't have many pre-defined
+/// Error subtypes and none for IOException.
+///
+export class SGFError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SGF Parser Error";
+  }
 }

@@ -8,40 +8,21 @@ import { GameProvider, GameContext } from "./models/AppGlobals";
 /// from within the context of GameContext where appGlobals is bound and available.
 ///
 export default function App() {
+  // CommentBox is what React calls an uncontrolled or unmanaged component.  The DOM holds its state.
+  // You access it via commentRef.current.value.  React keeps the ref stable across renders.
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const getComment = useCallback(() => commentRef.current?.value ?? "", []);
+  // Why not this?  gpt5 says then def never updates, then setGame never updates, commentRef never
+  // changes gpt5 says because it is 
+  // const setComment = useCallback((s: string) => {if (commentRef.current) 
+  //                                                 commentRef.current.value = s;}, []);
   const setComment = (text: string) => {
     if (commentRef.current) commentRef.current.value = text;
   };
-
-  // BOGUS place holder, reminder to set version when filenname, move number, capture count, etc., change.
-  // const handlePlaceStone = (_x: number, _y: number, _color: StoneColor) => {
-  //   setStatusVersion((v) => (v + 1) % 2);
-  // };
-  //  // Example action that reads the current comment string on demand
-  // const saveCommentForCurrentMove = () => {
-  //   const text = commentRef.current?.value ?? "";
-  //   //currentMove.current?.comment = text; // Attach comment to the current move
-  //   //console.log("Saving comment:", text);
-  // };
-  // // Example navigation that could also read/commit the current textarea value
-  // const goPrev = () => {
-  //   const text = commentRef.current?.value ?? "";
-  //   // commit text if desired before changing current move
-  //   console.log("Commit before Prev:", text);
-  //   // TODO: move to previous node and then update textarea with that node's comment:
-  //   // if (commentRef.current) commentRef.current.value = previousMove.comment ?? "";
-  // };
-
   return (<GameProvider getComment={getComment} setComment={setComment}>
             <AppContent commentRef={commentRef} />
           </GameProvider>);
 } // App function
-
-// function setFileName(name: string) {
-//   return name;
-// }
-
 
 
 /// AppContent provides the UI within App function after App has called useContext, and appGlobals
@@ -170,15 +151,17 @@ function AppContent({
 
 function CommandButtons() {
   const app = useContext(GameContext);
-  const game = app?.game;
+  // ok to use appglobals.game instead of gameref because these callbacks update when game/version
+  // change, so they won't become stale closures binding to an inactive game.  If they might become
+  // stale relative to the active game, we can close over gameref whose contents/current get updated
+  // with game changes.
+  const game = app?.game; 
   const bumpVersion = app?.bumpVersion;
   // Guards if context not ready -- not-not if undefined flows out of no game first render.
   const canPrev = !!game?.canUnwindMove?.(); 
   const canNext = !!game?.canReplayMove?.();
   // home, prev, next, end buttons
   const onHome = useCallback(async () => {
-    // TODO investigate when game and bumpversion really aren't set, seems they should be.
-    // TODO why not using gameref?
     if (!game?.gotoStart || !bumpVersion) return;
     //if (!game.canUnwindMove?.()) return;
     //game.saveCurrentComment?.(); should be done by go to start

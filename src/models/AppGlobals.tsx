@@ -6,20 +6,24 @@
 /// code is in control and calls on the model for each game and its state changes.
 ///
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { Game, createGamefromParsedGame, DEFAULT_BOARD_SIZE } from "./Game";
+import { Game, createDefaultGame, createGameFromParsedGame } from "./Game";
 import type { MessageOrQuery } from "./Game";
 //import { StoneColors, Board, Move, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
-import { browserFileBridge, browserHotkeys } from "../platforms/browser-bridges";
-import type { FileBridge, HotkeyBridge } from "../platforms/bridges";
-import {parseFile} from "./sgfparser";
+import { browserFileBridge, browserAppStorageBridge, browserHotkeys } from "../platforms/browser-bridges";
+import type { AppStorageBridge, FileBridge, HotkeyBridge } from "../platforms/bridges";
+import {parseFile, SGFError} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
 //import { debugAssert } from "../debug-assert";
+
+///
+//// Define types for passing global state to React and command state handlers.
+///
 
 /// AppGlobals is the shape of values bundled together and provided as GameContext to UI handlers.
 ///
 export type AppGlobals = {
-  game: Game; // snapshot of current game (from gameRef.current)
+  game: Game; // snapshot of current game (from gameRef.current), set each render by GameProvider.
   getGame: () => Game; // accessor to the live ref
   setGame: (g: Game) => void; // replace current game and trigger redraw because calls bumpVersion.
   getGames: () => readonly Game[];
@@ -41,41 +45,126 @@ export type AppGlobals = {
   saveSgf: () => Promise<void>;
   saveSgfAs: () => Promise<void>;
 };
-
+///
+/// A bit about appGlobals vs gameref, why two acessors and what about management:
+///    * appGlobals.game is a reactive snapshot used for rendering (it is state/context, so React
+/// will re-render when it changes).
+///    * gameRef.current: a live pointer used for logic/handlers (stable across renders; never 
+/// causes re-renders on its own; never goes stale in async code).
+///
+/// You need the snapshot to paint the UI, and you need the live pointer so long-lived callbacks 
+/// (handleKeyPressed, async operations, timers) always see the current game even if the user 
+/// switches games while that callback is still mounted or referred to.
+///
+/// Render code should use appGlobals.game, and anything in .jsx files that should re-render when
+/// the game changes.
+/// Use gameref in command handler functions, async flows, and gpt5's explanation sounds like the
+/// closure around gameref, but when the closure is not recomputed, gameref.current is always the
+/// current game.  But setting gameref.current causes no re-rendering.
+///
+/// A basic pattern:
+///     const [game, setGame] = useState<Game>(initialGame); // state for selected game (drives UI)
+///     const gameRef = useRef<Game>(game); // ref pointing always to the current for commands/logic
+///
+///     // keep ref in sync when the selected game changes, or a version tick can be added
+///     useEffect(() => { gameRef.current = game; }, [game]); // reassigns ref when game changes
+/// Can expose getgame too in appglobals as optional accessor.
+/// You never set gameRef directly from the UI. You set appGlobals.game, and the provider keeps 
+/// gameRef.current in sync with it.
+///
+/// My code (gpt5 code :-)), but there is dependencies to update on game, version, bumpversion, etc.
+///    // Expose both the snapshot (for rendering) and the ref (for handlers)
+///    const api = useMemo<AppGlobals>(() => ({
+///        game,              // snapshot for JSX
+///        setGame,           // call this to switch games
+///    // Optionally pass the ref to command deps if you use a command layer
+///    const deps = useMemo<CmdDependencies>(() => ({
+///        gameRef, b...
+/// So when do you set things?
+///     To change the selected game (open file, new game, switch tabs, MRU, etc.):
+///        call setGame(newGame) (from a button, a command, or open-file flow).
+///        The useEffect([game]) will run and update gameRef.current = game automatically.
+///     To mutate the current game’s model (makeMove, unwind, replay):
+///        Use gameRef.current inside handlers/commands (hotkeys, async ops), then call 
+///        bumpVersion() to repaint.
+///
 export const GameContext = React.createContext<AppGlobals | null>(null);
+
+/// CmdDependencies collects arguments that command implementations need.  Typescript / React style
+/// here is to use these property bags to pass things "commonly" used, and implementations can
+/// name what they use for clarity and destructured binding.  GameProvider assembles this object
+/// because it can reference appGlobals while rendering and save references into dependencies obj
+/// that gets passed to commands on input events.
+///
+type CmdDependencies = {
+  // MutableRefObject is deprecated, but it is the type returned by useRef.
+  // Could pass a closure (defined in GameProvider) that returns game
+  // Then change cmd implementers to getGame: () => Game instead of gameref param
+  gameRef: React.MutableRefObject<Game>; 
+  bumpVersion: () => void;
+  fileBridge: FileBridge;
+  appStorageBridge: AppStorageBridge;
+  //size: number;
+  getGames: () => readonly Game[];
+  setGames: (gs: Game[]) => void;
+  setGame: (g: Game) => void;
+  getLastCreatedGame: () => Game | null;
+  setLastCreatedGame: (g: Game | null) => void;
+};
 
 /// ProviderProps just describes the args to GameProvider function.
 ///
 type ProviderProps = {
   children: React.ReactNode;
-  // Get/SEt the current comment text from App (uncontrolled textarea)
+  // Get/Set the current comment text from App (uncontrolled textarea, rendering leave alone)
   getComment: () => string;
   setComment: (text: string) => void;
   // Board size for the game model (defaults to 19)
   //size: number;
 };
 
+
+///
+//// Messaging for Model
+///
+
+/// Quick and dirty messaging and confirming with user for model code.  Could have better, custom UI,
+/// but maybe good enough is just fine :-).
+///
+const browserMessageOrQuery: MessageOrQuery = {
+   message: (msg) => alert(msg),
+   confirm: async (msg) => window.confirm(msg),
+ };
+
+///
+/// GameProvider (HUGE function that gathers all state, passes it to children, and loads up
+/// CmdDependencies for command handlers).
+///
+
 /// GameProvider is the big lift here.  It collects all the global state, callbacks for the model
 /// layer, etc., and makes this available to UI content below <GameProvider> under <App>.
 ///
 export function GameProvider ({ children, getComment, setComment}: ProviderProps) {
-  // if (size !== 19) {
-  //   alert("Only support 19x19 games currently.")
-  // }
-  const size = DEFAULT_BOARD_SIZE;
+  //const size = DEFAULT_BOARD_SIZE;
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
-  // render, which would replace game an all the move state.  
-  const gameRef = useRef<Game>(new Game());
+  // render, which would replace game and all the move state (new Game).  This holds it's value
+  const [defaultGame, setDefaultGame] = useState<Game | null>(null);
+  // This is global.currentgame essentially, any new games set this to be current for commands to ref.
+  // useRef exeucutes during first render only.
+  const gameRef = useRef<Game>(new Game()); // net yet current, games, defaultGame.
+  // Enable first game to access comments and messaging/confirming UI.
+  // These execute every render but store teh same functions every time.
   gameRef.current.getComments = getComment;
   gameRef.current.setComments = setComment;
-
-  // Wire message sink once (safe on every render if it's the same object)
   gameRef.current.message = browserMessageOrQuery;
-  const [version, setVersion] = useState(0);
-  const bumpVersion = useCallback(() => setVersion(v => v + 1), []);
-  // stable accessors for the current game
+  // game.onchange = bumpVersion wired up below in a useEffect, same with setting defaultGame and games
+  // useState initial value used first render, same every time unless call setter.
+  const [version, setVersion] = useState(0); 
+  const bumpVersion = useCallback(() => setVersion(v => v + 1), []); // always same function, no deps
+  // stable accessors for the current game, getGame never changes, setGame updates with version
   const getGame = useCallback(() => gameRef.current, []);
   const setGame = useCallback((g: Game) => {
+    g.message = gameRef.current?.message ?? browserMessageOrQuery;
     gameRef.current = g;
     //  g may have already existed and been wired up, but need to set for new games.
     g.onChange = bumpVersion;
@@ -83,16 +172,17 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
     g.setComments = setComment;    
     bumpVersion();
   }, [bumpVersion, getComment, setComment]);
+  // useState initial value used first render, same every time unless call setter.
   const [games, setGames] = useState<Game[]>([]);
-  const [defaultGame, setDefaultGame] = useState<Game | null>(null);
-  const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);  
+  const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);
   const fileBridge: FileBridge = browserFileBridge;
+  const appStorageBridge: AppStorageBridge = browserAppStorageBridge;
   const hotkeys: HotkeyBridge = browserHotkeys;
   // Add next line if want to avoid deprecated MutableRefObject warning
   //const getGame = useCallback(() => gameRef.current, []);
   // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
   // This way the model and UI are isolated, but the model can signal model changes for re-rendering
-  // by saying the game changed.
+  // by signalling the game changed.
   useEffect(() => {
     const game = gameRef.current;
     game.onChange = bumpVersion;
@@ -100,14 +190,13 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
   // Setup global state for initial game -- this runs once due to useEffect.
   // useEffect's run after the DOM has rendered.  useState runs first, when GameProvider runs.
   useEffect(() => {
-    if (games.length === 0 && defaultGame === null) {
+    if (games.length === 0 ) {//&& defaultGame === null) {
       const g = gameRef.current;
-      // ensure model-to-UI notifications are wired
+      // ensure model-to-UI notifications are wired, executes after render, g is default game from above
       g.onChange = bumpVersion;
       setGames([g]);
       setDefaultGame(g); 
-      // Don't set lastCreatedGame, it is only used when creating a new game throws and needs cleaning up.
-      //setLastCreatedGame(g);
+      // Don't set lastCreatedGame (only used when creating a new game throws and needs cleaning up).
       // make it the active game (also bumps version)
       setGame(g);
     }
@@ -115,9 +204,13 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // One small deps object to pass to top-level commands that updates if any member changes ref ID.
-  const deps = useMemo<CmdDependencies>(() => ({ gameRef, bumpVersion, fileBridge, size }), 
-                                        [gameRef, bumpVersion, fileBridge, size]);
-  const openSgf   = useCallback(() => openSgfCmd(deps),   [deps]);
+  // React takes functions anywhere it takes a value and invokes it to get the value if types match.
+  const deps = useMemo<CmdDependencies>(
+      () => ({gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ getGames: () => games, 
+              setGames, setGame, getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,}), 
+             [gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ games, setGames, setGame, 
+              lastCreatedGame, setLastCreatedGame]);
+  const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
   const saveSgf   = useCallback(() => writeGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
   const onKey     = useCallback((e: KeyboardEvent) => handleKeyPressed(deps, e), [deps]);
@@ -145,129 +238,261 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
   return <GameContext.Provider value={api}>{children}</GameContext.Provider>;
 } // GameProvider function 
 
+function createDefaultGameForUI (setDefaultGame: (g: Game | null) => void, setGame: (g: Game) => void,
+                                 getGames: () => readonly Game[], setGames: (gs: Game[]) => void) {
+  const g = createDefaultGame(setGame, getGames, setGames);
+  setDefaultGame(g);
+  setupBoardDisplay(g); // call init tree view model instead
+  // C# code had to setup title and game tree.
+  // TODO:? we need to setup the game tree view model for drawing
+  focusOnRoot();
+  return g;
+}
 
-/// CmdDependencies collects arguments that command implementations need.  Typescript / React style
-/// here is to use these property bags to pass things "commonly" used, and implementations can
-/// name what they use for clarity and destructured binding.
-///
-type CmdDependencies = {
-  // MutableRefObject is deprecated, but it is the type returned by useRef.
-  // Could pass a closure (defined in GameProvider) that returns game
-  // Then change cmd implementers to getGame: () => Game instead of gameref param
-  gameRef: React.MutableRefObject<Game>; 
-  bumpVersion: () => void;
-  fileBridge: FileBridge;
-  size: number;
-};
-
-///
-/// Open Command
-///
-
-/// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
-async function openSgfCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependencies): Promise<void> {
-  checkDirtySave ();
-  const res = await fileBridge.open(); // Essentially my DoOpenGetFile() in C#, has try-catch, etc.
-  if (!res) return; // user cancelled
-  const { path, data, cookie } = res;
-  // TODO: check if file is already open in games list. goToOpenGame(idx)
-  // Get new open file
-  doOpenGetFileGame(path === undefined ? null : path, data, gameRef);
-  //alert(`${pg.nodes?.next?.properties["B"]}`);
-  //create game
-  //update replaymove to stage moves, add rendered flag
-  // get game.firstmove and currentmove 
-  // get comment box content mgt
-  //test moving through, ignoring branches
-  // TODO: parse SGF into model instead of clearing
-  const g = gameRef.current;
-  g.board.gotoStart();
-  // g.firstMove = null;
-  // g.currentMove = null;
-  // g.moveCount = 0;
-  // g.nextColor = "black";
-  // No filename if user abort dialog.  Browser fileBridge may provide base name only.
-  if (path) {
-    g.filename = path;
-    const parts = path.split(/[/\\]/); 
-    g.filebase = parts[parts.length - 1];
-  }
-  g.saveCookie = cookie ?? null;
-  drawGameTree();
-  focusOnRoot(); // No idea if this is meaningful before bumping the version and re-rendering all.
-  bumpVersion();
-  console.log("Opened SGF bytes:", data.length);
+/// setupBoardDisplay in C# created lines, labels, etc., but we don't need to do that here.
+/// Now this just checks settings and clears the comment box.  No need for UI cleanup.
+function setupBoardDisplay (newgame: Game) {
+  newgame
+  // TODO check flag for first run, pull in settings if have settings store.
+  // addInitialStones(newgame); all UI internal stuff, no true model
+  // TODO: initialize tree view
+  // used to set click mode to move, but this version will rely on keybindings, no mode buttons.
 }
 
 
-// Keeping Game[] MRU and knowing the first game in the list is the current.
-// Find the index of the element to move
-// const index = myArray.findIndex(item => item === elementToMove);
-// if (index !== -1) {
-//     // Remove the element from its original position
-//     const [removedElement] = myArray.splice(index, 1);
-//     // Add the removed element to the beginning of the array
-//     myArray.unshift(removedElement);
-// }
+///
+//// Open Command
+///
 
+/// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
+/// Needs to handle all errors and message to user, which it should anyway, but callers don't
+/// await here due to event propagation and whatnot, meaning errors don't appear appropriately to users.
+///
+async function doOpenButtonCmd (
+    {gameRef, bumpVersion, fileBridge, getGames, setGames, setGame, getLastCreatedGame,
+     setLastCreatedGame,}: CmdDependencies): 
+    Promise<void> {
+  checkDirtySave (gameRef.current, fileBridge);
+  // Get file info from user
+  let fileHandle = null;
+  let fileName = "";
+  let data = "";
+  if (fileBridge.canPickFiles()) { // Normal path
+    const res = await fileBridge.pickOpenFile();
+    if (res === null) return;  // User aborted.
+    fileHandle = res.cookie;
+    fileName = res.fileName;
+  } else {
+    // Can't just get file info, prompt user and open file, not normal path, defensive programming.
+    const res = await fileBridge.open();
+    if (res === null) return; // User aborted.
+    fileName = res.path!; // res !== null, path has value.
+    data = res.data;  // Don't bind cookie, we know it is null because can't pick files.
+  }
+  // Now fileHandle is non-null, or data should have contents.  fileName is a path or filebase.
+  // Check if file already open and in Games
+  const games: readonly Game[] = getGames();
+  const openidx = games.findIndex(g => g.filename === fileName);
+  if (openidx != -1) {
+    // Show existing game, updating games MRU and current game.
+    gotoOpenGame(openidx);
+    // Move to function gotoOpenGame
+    moveGameToMRU(games, openidx, setGames, setGame);
+  } else {
+    // TODO consider C# code ignores if a file opened or not, so we shouldn't be making a new Game here
+    // C# code also draws tree, etc., even if nothing changed, but maybe good for cleanup?
+    await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
+                           {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames});
+    // const newGame = new Game();
+    // addGameAsMRU(games, newGame, setGames, setGame);
+    // drawgametree
+    // focus on stones
+    bumpVersion();
+  }
+} // doOpenButtonCmd()
 
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
 /// game filename, or prompts for one if it is null. This is exported for use in app.tsx or
 /// process kick off code for file activation. It takes a game optionally for checking a game
 /// that is not the current game (when deleting games).
 ///
-function checkDirtySave () {
-
+async function checkDirtySave (g: Game, fileBridge: FileBridge): Promise<void> {
+  // Save the current comment back into the model
+  g.saveCurrentComment();
+  if (g.isDirty && 
+      // g.message must be set if this is running, and the board is dirty.
+      (await g.message!.confirm?.("Game is unsaved, OK save, Cancel/Esc leave unsaved.")) === true) {
+    if (g.saveCookie !== null) {
+      await g.writeGame(g.saveCookie);
+    } else {
+      // const handle = await g.message.getSaveFileHandle?.("game.sgf");
+      const data = quickieGetSGF(g, g.size);
+      fileBridge.saveAs("game01.sgf", data);
+      // if (handle) {
+      //   await g.writeGame(handle);
+    }
+  } else {
+    // Clean up autosave file to avoid dialog when re-opening about unsaved file edits.
+    // IF the user saved to cookie, then WriteGame cleaned up the auto save file.
+    // If user saved to a new file name, then there was no storage or specific autosave file.
+    // If the user didn't save, still clean up the autosave since they don't want it.
+    if (g.saveCookie) {
+      // If game had a saveCookie, we can compute an autosave name
+      // const autoName = g.getAutoSaveName(g.saveCookie);
+      // await g.deleteAutoSave(autoName);
+    } else {
+      // Unnamed scratch game: clean up the unnamed autosave
+      // await g.deleteUnnamedAutoSave();
+    }
+  }
 }
 
-/// This basically covers the UI to stop further input, then calls getFileGameCheckingAutoSave 
-/// to check current game's auto save and parse file to create ParsedGame.  Can snap this linkage
-/// if no UI dike needed.
-function doOpenGetFileGame (path: string | null, data: string, gameRef : React.MutableRefObject<Game>) {
-  const curgame = gameRef.current; // Stash in case we have to undo due to file error.
-  // TODO do I need any UI block while this is doing on to stop user from mutating state?
-  const lastCreatedGame = null;
-  // TODO try-catch for exception throws, such as from setupfirst...
-  // try {
-  //   validateInput("");
-  // } catch (e: unknown) {
-  //   // Narrow the type of 'e' to Error for safe access to 'message'
-  //   if (e instanceof Error) {
-  //     console.error("Caught an error:", e.message);
-  //   } else {
-  //     console.error("Caught an unknown error:", e);
-  //   }
-  // }
-  getFileGameCheckingAutoSave(path === undefined ? null : path, data, gameRef);
-  curgame
-}
+/// doOpenGetFileGame in the C# code had to cover the UI to prevent mutations and then read the
+/// file and made the new game.  Here we just have a try-catch in case file processing throws.
+///
+async function doOpenGetFileGame (fileHandle: unknown, fileName: string, data: string, 
+                                  fileBridge: FileBridge, gameref: React.MutableRefObject<Game>, 
+                                  cleanup: {getLastCreatedGame: () => Game | null,
+                                            setLastCreatedGame: (g: Game | null) => void,
+                                            setGame: (g: Game) => void,
+                                            getGames: () => readonly Game[]
+                                            setGames: (gs: Game[]) => void}) {
+  if (fileHandle !== null && data == "") {
+    const curgame = gameref.current; // Stash in case we have to undo due to file error.
+    console.log(`opening: ${(fileHandle as any).name}`)
+    try {
+      cleanup.setLastCreatedGame(null);
+      // THIS LINE is the essence of this function.
+      await getFileGameCheckingAutoSave(fileHandle, fileName, fileBridge, data, 
+                                        {gameRef: gameref, setGame: cleanup.setGame, 
+                                         getGames: cleanup.getGames, setGames: cleanup.setGames});
+    }
+    catch (err: unknown) {
+      // At this point Game Context appglobals could have a new bad game in the games list.
+      // It should not be true that global context current game was set, and then we threw.
+      // Cleanup should just be making game, clearing board display, adding the game to global games.
+      // Narrow the type of 'e' to Error for safe access to 'message'
+      if (err instanceof SGFError) {
+        await curgame.message!.message(
+          `IO Error with opening or reading file.\n\n${err.message}\n\n${err.stack}`);
+      }
+      if (err instanceof Error) 
+        await curgame.message!.message(`Error opening game.\n\n${err.message}\n\n${err.stack}`);
+      if (cleanup.getLastCreatedGame() !== null) {
+        // Error after creating game, so remove it and reset board to last game or default game.
+        // The games list may not contain curgame (above) because creating new games may delete the 
+        // initial default game.  Did this before message call in C# since it cannot await in catch.
+        // I think we want to use curgame here, not gameref, so we see the game that was current
+        // when this function started executing.
+        undoLastGameCreation((cleanup.getGames().findIndex((g) => g === curgame)) != -1 ? 
+        //TODO not impl, need more helpers passed down, like setgames
+                              curgame : null);
+        }
+        // await curgame.message!.message(
+        //   `Error opening or reading file.\n\n${err.message}\n\n${err.stack}`);
+      }
+    finally {
+      cleanup.setLastCreatedGame(null); // C# didn't do this, but this is only useful for cleaning up opens.
+    }
+  } // if can do anything
+} //doOpenGetFileGame()
 
+/// GetFileGameCheckingAutoSave checks the auto save file and prompts user whether to
+/// use it.  If we use the auto save file, then we need to mark game dirty since the file
+/// is not up to date.  We also delete the auto save file at this point.  This is public
+/// for code in app.xaml.cs to call.
+///
+async function getFileGameCheckingAutoSave 
+    (fileHandle: unknown, filenName: string, fileBridge: FileBridge, data: string,
+     gamemgt: {gameRef: React.MutableRefObject<Game>, setGame: (g: Game) => void,
+               getGames: () => readonly Game[], setGames: (gs: Game[]) => void}) {
+  // TODO Check auto save file exisitence and ask user which to use.
+  const curgame = gamemgt.gameRef.current;
+  if (fileBridge.canPickFiles()) { // Can do autosaving
+    const autoSaveName = ""; //getAutoSaveName((fileHandle as any).name)
+    const autoHandle: unknown | null = null; //getAutoSaveFile(autoSaveName);
+    if (autoHandle !== null) {
+      // TODO: THIS ALL NEEDS TO CHANGE now with appStorageBridge and expecting to always autosave
+      if (fileBridge.getWriteDate(autoHandle) > fileBridge.getWriteDate(fileHandle) &&
+          await curgame.message!.confirm!(
+            `Found more recent auto saved file for ${(fileHandle as any).name}.  Confirm opening auto saved file,` +
+            `OK for auto saved version, Cancel/Escape to open older original file.`)) {
+          // TODO: PROPERLY, I should test handle and read data here, but autosave mgt will all change
+          parseAndCreateGame(autoHandle, autoSaveName, fileBridge, "", gamemgt.gameRef, 
+                             {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+                              setGames: gamemgt.setGames});
+          const nowCurrent = gamemgt.gameRef.current;
+          nowCurrent.isDirty = true; // actual file is not saved up to date
+          // Persist actual file name and handle for future save operations.
+          nowCurrent.filename = (fileHandle as any).name; // if there is a path, this is it.
+          const parts = nowCurrent.filename!.split(/[/\\]/); 
+          nowCurrent.filebase = parts[parts.length - 1];
+          // old code updated the title here, but we fully data bind it
+        } else {// Not saving current game ...
+          parseAndCreateGame(fileHandle, filenName, fileBridge, data, gamemgt.gameRef, 
+                             {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+                              setGames: gamemgt.setGames})
+        }
+        (autoHandle as any).deleteFile();
+    } else {// No autoHandle, no auto saved file to worry about ...
+      parseAndCreateGame(fileHandle, filenName, fileBridge, data, gamemgt.gameRef, 
+                         {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+                              setGames: gamemgt.setGames});
 
-function getFileGameCheckingAutoSave (path: string | null, data: string, 
-                                      gameRef : React.MutableRefObject<Game>) {
-  //Check auto save file exisitence and ask user which to use.
-  parseAndCreateGame(path, data, gameRef);
-}
+    }
+  } else {
+  const data = await browserFileBridge.readText(fileHandle);
+  // Need to pass gameref down so that when we make a new game, we can poach the platform callbacks.
+  parseAndCreateGame(null, filenName, fileBridge, data ?? "", gamemgt.gameRef, 
+                     {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+                      setGames: gamemgt.setGames});
+  }
+} // getFileGameCheckingAutoSave()
 
-function parseAndCreateGame (_path: string | null, data: string, 
-                             gameRef : React.MutableRefObject<Game>) : Game {
+/// parseAndCreateGame
+/// Callers must be prepared for throw due to parsing and fileHandle/data mishap.
+/// take curgame to pass down to poach UI callbacks from and save in new game.
+///
+async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBridge: FileBridge,  
+                                   data: string, gameRef : React.MutableRefObject<Game>,
+                                   cleanup: {curGame: Game, setGame: (g: Game) => void,
+                                             getGames: () => readonly Game[], 
+                                             setGames: (gs: Game[]) => void}): 
+      Promise<Game> {
+  if (fileHandle !== null) {
+    debugAssert(data == "", "If fileHandle non-null, then data should not have contents yet???");
+    const tmp = await fileBridge.readText(fileHandle);
+    if (tmp !== null)
+      data = tmp;
+    else {
+      //gameRef.current.message!.message(`Can't read file: ${(fileHandle as any).name}`);
+      throw new Error(`Can't read file: ${(fileHandle as any).name}`);
+    }
+  } else if (data === "") {
+    throw new Error(`Eh?! fileHandle is null, data empty, wassup?! ${(fileHandle as any).name}`);
+  }
   const pg = parseFile(data);
-  const curGame = gameRef.current; // pass in to model code to get UI callbacks for new game.
-  createGamefromParsedGame(pg, curGame);
-  return createGamefromParsedGame(pg, curGame);
+  const g = createGameFromParsedGame(pg, cleanup.curGame, cleanup.setGame, 
+                                     cleanup.getGames, cleanup.setGames);
+  // 
+  gameRef.current.saveGameFileInfo(fileHandle, fileName);   
+  return g; 
+}
+
+function undoLastGameCreation (game: Game | null) {
+  game
 }
 
 
-
 ///
-/// Save Commands
+//// Save Commands
 ///
 
-async function writeGameCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies):
+async function writeGameCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependencies):
     Promise<void> {
   // GATHER STATE FIRST -- commit dirty comment to game or move, then save
   const g = gameRef.current;
-  const data = quickieGetSGF(gameRef, size);
+  const data = quickieGetSGF(g, g.size);
   const hint = g.filename ?? "game.sgf";
   const res = await fileBridge.save(g.saveCookie ?? null, hint, data);
   focusOnRoot(); // call before returning to ensure back at top
@@ -282,9 +507,9 @@ async function writeGameCmd ({ gameRef, bumpVersion, fileBridge, size }: CmdDepe
   }
 }
 
-async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, size }: CmdDependencies): Promise<void> {
+async function saveAsCommand ({ gameRef, bumpVersion, fileBridge }: CmdDependencies): Promise<void> {
   const g = gameRef.current;
-  const data = quickieGetSGF(gameRef, size);
+  const data = quickieGetSGF(g, g.size);
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
   if (!res) return; // cancelled
   const { fileName, cookie } = res;
@@ -298,12 +523,12 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, size }: CmdDep
 }
 
 /// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
-function quickieGetSGF (gameRef: React.MutableRefObject<Game>, size: number): string {
+function quickieGetSGF (g: Game, size: number): string {
   // Minimal: (;GM[1]SZ[19];B[dd];W[pp]...)
   const letters = "abcdefghjklmnopqrstuvwxyz"; // 'i' skipped
   const toCoord = (row: number, col: number) => letters[col] + letters[row];
   const parts: string[] = [`(;GM[1]SZ[${size}]`];
-  let m = gameRef.current.firstMove;
+  let m = g.firstMove;
   while (m) {
     const abbr = m.color === "black" ? "B" : "W";
     parts.push(`;${abbr}[${toCoord(m.row, m.column)}]`);
@@ -314,16 +539,55 @@ function quickieGetSGF (gameRef: React.MutableRefObject<Game>, size: number): st
 }
 
 ///
-/// Keybindings
+//// Games and Setup Helpers
 ///
 
-async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent): Promise<void> {
+
+function gotoOpenGame(idx: number) {
+  idx
+}
+
+// Move an existing game at index `idx` to the front (MRU)
+function moveGameToMRU(games: readonly Game[], idx: number, setGames: (gs: Game[]) => void,
+                       setGame: (g: Game) => void): readonly Game[] {
+  if (idx < 0 || idx >= games.length) return games;
+  const newGames = [games[idx], ...games.slice(0, idx), ...games.slice(idx + 1)];
+  setGames(newGames);
+  setGame(newGames[0]);
+  return newGames;
+  // gpt5 showed this code ...
+  // setGames(oldGames => {const idx = oldGames.findIndex(g => g.id === game.id);
+  //                       if (idx === -1) return oldGames; // not found
+  //                       const reordered = [...oldGames];
+  //                       const [found] = reordered.splice(idx, 1);
+  //                       return [found, ...reordered];});
+}
+
+// Add a new game to the front
+function addGameAsMRU(games: readonly Game[], g: Game, setGames: (gs: Game[]) => void,
+                      setGame: (g: Game) => void): Game[] {
+  const newGames = [g, ...games];
+  setGames(newGames);
+  setGame(g);
+  return newGames;
+}
+
+///
+//// Keybindings
+///
+
+/// handleKeyPressed shouldn't be async and await callees because we need the preventDefault and
+/// stopPropagation to run immediately and have effect.  Also, keydown can repeat while awaiting
+/// and have adverse effects.
+///
+function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   // console.log("hotkey", { key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, 
   //                         shift: e.shiftKey, target: e.target });
   // Handle keys that don't depend on any other UI having focus ...
   const lower = e.key.toLowerCase();
-  const ctrl_s = e.ctrlKey && lower === "s";
-  const metaShiftS = (e.ctrlKey || e.metaKey) && e.shiftKey && lower === "s";
+  const ctrl_s = e.ctrlKey && !e.shiftKey && !e.metaKey && lower === "s";
+  const ctrl_shift_s = e.ctrlKey && e.shiftKey && lower === "s";  
+  const ctrl_o = e.ctrlKey && !e.shiftKey && !e.metaKey && lower === "o";
   // ESC: alway move focus to root so all keybindings work.
   if (lower === "escape" ) { //&& isEditingTarget(e.target)) { maybe always, what about dialogs?
     e.preventDefault();
@@ -333,7 +597,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent): Promi
     focusOnRoot();
     return;
   }
-  if (metaShiftS) {
+  if (ctrl_shift_s) {
     e.preventDefault();
     void saveAsCommand(deps);
     return;
@@ -343,9 +607,15 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent): Promi
     void writeGameCmd(deps);
     return;
   }
+    if (ctrl_o) {
+    e.preventDefault();
+    e.stopPropagation();
+    void doOpenButtonCmd(deps); // do not await inside keydown
+    return;
+    }
   // The following depend on what other UI has focus ...
   // If the user is editing text (e.g., the comment textarea), don't further process arrows.
-  if (isEditingTarget(e.target) && (lower === "arrowleft" || lower === "arrowright")) {
+  if (isEditingTarget(e.target)) {
     return; // let the content-editable elt handle cursor movement
   }
   const curgame = deps.gameRef.current;
@@ -377,7 +647,7 @@ if (lower === "arrowdown" && curgame.canReplayMove()) {
   }
 if (lower === "end" && curgame.canReplayMove()) {
     e.preventDefault();
-    await curgame.gotoLastMove(); // signal onchange
+    curgame.gotoLastMove(); // signals onchange, and don't await in handleKeyDown says gpt5
     return;
   }
 }
@@ -466,21 +736,10 @@ function focusOnRoot () {
 }
 
 ///
-/// Game Tree of Variations
+//// Game Tree of Variations
 ///
 
 function drawGameTree () {
 
 }
 
-///
-/// Messaging for Model
-///
-
-/// Quick and dirty messaging and confirming with user for model code.  Could have better, custom UI,
-/// but maybe good enough is just fine :-).
-///
-const browserMessageOrQuery: MessageOrQuery = {
-   message: (msg) => alert(msg),
-   confirm: async (msg) => window.confirm(msg),
- };

@@ -1,12 +1,14 @@
 import { debugAssert } from '../debug-assert';
-import { Board, Move, StoneColors, oppositeColor, parsedToModelCoordinates } from './Board';
+import { Board, Move, StoneColors, oppositeColor, parsedToModelCoordinates,
+         parsedLabelModelCoordinates, modelCoordinateToDisplayLetter} from './Board';
 import type { StoneColor, Adornment } from './Board';
-import type { ParsedGame, ParsedNode } from './sgfparser';
+import { ParsedGame, type ParsedNode } from './sgfparser';
+import { SGFError } from './sgfparser';
 
 export const DEFAULT_BOARD_SIZE = 19;
 
 ///
-/// Game
+//// Game
 ///
 
 export class Game {
@@ -26,6 +28,8 @@ export class Game {
   saveCookie: unknown | null;
   parsedGame: ParsedGame | null;
   isDirty: boolean;
+  playerBlack: string;
+  playerWhite: string;
   blackPrisoners: number; // number of white stones captured by black
   whitePrisoners: number; // number of black stones captured by white
   // Comments holds any initial board state comments for the game.  Opening a file sets this.
@@ -62,12 +66,17 @@ export class Game {
     this.moveCount = 0;
     this.komi = komi;
     this.isDirty = false;
+    this.playerBlack = "";
+    this.playerWhite = "";
     this.blackPrisoners = 0;
     this.whitePrisoners = 0;
     this.comments = "";
   }
 
-  /// _init_handicap_next_color sets the next color to play and sets up any handicap state.
+  static readonly DefaultKomi = "6.5";
+
+
+  /// initHandicapNextColor sets the next color to play and sets up any handicap state.
   /// If there is a handicap, the moves may be specified in a parsed game; otherwise, this
   /// fills in traditional locations. If there is a handicap and stones are supplied, then
   /// their number must agree. This sets nextColor based on handicap since sgfeditor ignores
@@ -112,7 +121,7 @@ export class Game {
     } else {
     debugAssert(handicapStones.length == handicap, 
                 "Handicap number is not equal to all black stones in parsed root node.");
-    // BUG -- Do not add moves to this.HandicapMoves, and do not add AB in GotoStart or
+    // TODO BUG -- Do not add moves to this.HandicapMoves, and do not add AB in GotoStart or
     // GotoSTartForGameSwap, which means these moves never get added back if hit Home key,
     // click in tree view, and things like checking for dead stones won't know they are there.
     // However, in 14 years never encountered a game with AB at start and no HA.
@@ -207,27 +216,7 @@ export class Game {
       this.updatePrisoners(move.color, move.deadStones.length);
     }
     return move;
-
-    // debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
-    // this.onChange?.(); // Don't need, UI code checks if returned a move and calls bumpVersion.
-
-    // move.number = this.moveCount + 1;
-    // if (this.firstMove === null) this.firstMove = move;
-    // if (this.currentMove !== null) this.currentMove.next = move;
-    // move.previous = this.currentMove;
-    // if (this.currentMove) {
-    //     this.currentMove.comment = ""; // get from UI elt when have access
-    //     // else set comment for game
-    // }
-    // this.board.addStone(move);
-    // // REMEMBER to not increment counter and color until we know we're returning non-null
-    // this.moveCount++;
-    // this.nextColor = this.nextColor === StoneColors.Black ? StoneColors.White : StoneColors.Black;
-    // this.currentMove = move;
-
-    //this.onChange!();
-  } // makeMove
-
+  } // makeMove()
   
   /// checkSelfCaptureNoKill returns true if move removes the last liberty of its group
   /// without killing an opponent group. This function needs to temporarily add the move to
@@ -441,7 +430,7 @@ export class Game {
 
 
   ///
-  /// Unwinding Moves and Goign to Start
+  //// Unwinding Moves and Goign to Start
   ///
 
   /// Move the current pointer one step *back* along the main line.
@@ -527,22 +516,6 @@ gotoStartForGameSwap(): void {
   /// rewinding. This returns null if it can't replay a move, which means it encountered a
   /// conflicting move or bad parse node.
   ///
-//   replayMove (): Move | null {
-//     const current = this.currentMove;
-//     if (current === null) {
-//       this.currentMove = this.firstMove;
-//       debugAssert(this.currentMove !== null, "Next button should be disabled if no first move.");
-//     } else {
-//       debugAssert(current.next !== null, "Next button should be disabled if there is no next move.");
-//       this.currentMove = current.next;
-//     }
-//     this.board.addStone(this.currentMove);
-//     debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
-//     this.onChange!();
-
-//     return this.currentMove;
-//  }
-
   async replayMove (): Promise<Move | null> {
     const fixup = this.currentMove; // save for catch block
     // Advance this.currentMove
@@ -629,7 +602,7 @@ gotoStartForGameSwap(): void {
   /// returns a bool whether to display an error msg due to a bad parsenode. The move obj returned
   /// is the arg obj.
   ///
-  private replayMoveUpdateModel(move: Move): [Move | null, boolean] {
+  private replayMoveUpdateModel (move: Move): [Move | null, boolean] {
     let cleanup = false;
     if (!move.isPass) {
       // Normally there won't be a stone in place because we verify as we go that board locations are
@@ -665,11 +638,6 @@ gotoStartForGameSwap(): void {
   }
 
 
-  readonly SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
-                                   "Don't handle arbitrary nodes in the middle of a game.\n" +
-                                   "Converting node to Pass move and adding adornments as follows:\n";
-
-
   /// _ready_for_rendering puts move in a state as if it had been displayed on the screen before.
   /// Moves from parsed nodes need to be created when their previous move is actually displayed
   /// on the board so that there is a next Move object in the game tree for consistency with the
@@ -687,11 +655,11 @@ gotoStartForGameSwap(): void {
     let mnext: Move | null = null;
     let hadErr = false;
     let oneGood = false;
-    if (pn.branches !== null && pn.branches.length > 0) {
+    if (pn.branches !== null && pn.branches.length > 0) { // gpt5 added length test but unnecessary
       const branchMoves: Move[] = [];
       for (const n of pn.branches) {
         const m = parsedNodeToMove(n, this.board.size); 
-        if (m !== null) { // No longer return if m is null.  Some branches are viewable.  
+        if (m === null) { // No longer return if m is null.  Some branches are viewable.  
           hadErr = true; // Let callers know there was an issue, but other branches may be valid.
           continue;
         }
@@ -701,7 +669,7 @@ gotoStartForGameSwap(): void {
         m!.previous = move;
         // Check if parsed node was a setup node in the middle of game nodes. Need to set color
         // because ParsedNodeToMove has no access to Game.nextColor.
-        if (m!.comments.includes(this.SetupNodeCommentStart)) {
+        if (m!.comments.includes(SetupNodeCommentStart)) {
           m!.color = oppositeColor(move.color);
         }
         branchMoves.push(m!);
@@ -712,14 +680,14 @@ gotoStartForGameSwap(): void {
       mnext = branchMoves[0];
     } else if (pn.next !== null) {
       mnext = parsedNodeToMove(pn.next, this.board.size);
-      if (mnext !== null) {
+      if (mnext === null) {
         return [null, true];
       }
       // Have to add ! everywhere, typescript can't tell null doesn't flow down here.
       oneGood = true;
       mnext!.number = this.moveCount + 2;
       mnext!.previous = move;
-      if (mnext!.comments.includes(this.SetupNodeCommentStart)) {
+      if (mnext!.comments.includes(SetupNodeCommentStart)) {
         mnext!.color = oppositeColor(move.color);
       }
     } else {
@@ -733,11 +701,55 @@ gotoStartForGameSwap(): void {
 
   treeViewNodeForMove (move) {move}
 
-  replayUnrenderedAdornments (move) {move}
+/// _replay_unrendered_adornments is just a helper for _replay_move_update_model.  This does not 
+/// need to check add_adornment for a None result since we're trusting the file was written correctly,
+/// or it doesn't matter if there are dup'ed letters.  Move must have a parsedNode with properties.
+///
+replayUnrenderedAdornments (move: Move): void {
+    const props = move.parsedNode!.properties;
+    if (props["TR"]) { // Triangles: TR[aa][bb]...
+      for (const coord of props["TR"]) {
+        const [row, col] = parsedToModelCoordinates(coord);
+        // const a = this.addAdornment.(move, row, col, "triangle");    // TODO: your impl
+      }
+    }
+    if (props["SQ"]) { // Squares: SQ[aa]...
+      for (const coord of props["SQ"]) {
+        const [row, col] = parsedToModelCoordinates(coord);
+        // const a = this.addAdornment?.(move, row, col, "square");
+      }
+    }
+    if (props["LB"]) { // Labels: LB[aa:A]...
+      for (const token of props["LB"]) {
+        const [row, col, char] = parsedLabelModelCoordinates(token);
+        // const a = this.addAdornment?.(move, row, col, "letter", char);
+      }
+    }
+      
+  }
+
+  ///
+  //// File Writing
+  ///
+
+  async writeGame (saveCoooke: unknown, autosave: boolean = false): Promise<void> {
+    saveCoooke
+    autosave
+  }
+
+  /// SaveGameFileInfo updates the games storage object and filename properties.
+  /// This is public since it is called from MainWindow.xaml.cs and App.xaml.cs.
+  ///
+  saveGameFileInfo (fileHandle: unknown, path: string) {
+    this.saveCookie = fileHandle;
+    this.filename = path;
+    const parts = path.split(/[/\\]/); 
+    this.filebase = parts[parts.length - 1];
+  }
 
 
   ///
-  /// Saving Comments
+  //// Saving Comments
   ///
 
   /// saveCurrentComment makes sure the current comment is persisted in the model.  UI code calls
@@ -783,41 +795,14 @@ gotoStartForGameSwap(): void {
   }
 
 ///
-/// Misc Utils
+//// Misc Utils
 ///
-
-
 
 
 } // Game class
 
-
-/// CreateGame in the C# code took the mainwin, but we will finese those references in the ts impl.
-/// handicap stones includes AB stones.
-export function CreateGame (size : number, handicap : number, komi : string, 
-                            handicapStones: Move[] | null = null, all_white : Move[] | null = null):
-        Game {
-    var g = new Game(size, handicap, komi, handicapStones, all_white);
-    // mainwin.SetupBoardDisplay(g);
-    //    extract settings if first time
-    //    draws lines, labels, and any empty board stones
-    //    sets prevsize to not do this part again
-    //    ON SUCCESSIVE CALLS
-    //       cleans current move, adornments, stones
-    //       updates UI like branch combo, comment, button enabled/disabled, 
-    //    initialize tree view
-    // // Must set Game after calling SetupBoardDisplay.
-    // mainwin.AddGame(g);
-    // return g;
-    // TODO: CallbackToSetupBoardDisplay(g); set any model stuff for full redisplay
-    // Must set Game after calling SetupBoardDisplay.
-    // TODO: callback to mainwin.AddGame(g); to games list, re-order it, etc.
-    return g;
-}
-
-
 ///
-/// Enable model to signal UI to interact with user
+//// Enable model to signal UI to interact with user
 ///
 
 /// MessageOrQuery is a type for conveying payload to the UI for alerting the user or confirming a
@@ -825,9 +810,6 @@ export function CreateGame (size : number, handicap : number, komi : string,
 /// use a dialog or other UI that requires awaiting.  AppGlobals.tsx uses alert/confirm which are
 /// not async, but using await in typescript is ok on non-async calls and has no impact.
 ///
-///  -- file moved error (save as/cancel), open autosave / create default board,
-///           open newer auto dave / open older saved file, confirm saving dirty file y/n, 
-///           game already saved, trying to save-as y/n, confirm tree cut
 export interface MessageOrQuery {
   message (msg: string): Promise<void> | void;
   // true if OK, false if Cancel/Escape
@@ -836,7 +818,7 @@ export interface MessageOrQuery {
 
 
 ///
-/// Mapping Games to ParsedGames (for printing)
+//// Mapping Games to ParsedGames (for printing)
 ///
 
 
@@ -844,65 +826,373 @@ export interface MessageOrQuery {
 
 
 ///
-/// Misc Helper Functions for Game Consumers
+//// Misc Helper Functions for Game Consumers
 ///
 
-/// called CreateParsedGame in C# land, and it returns void, storing new game in mainwin.game.
-export function createGamefromParsedGame (pg: ParsedGame, g : Game) {
-  // TODO: Inspect various properties for size, players, game comment, etc., to copy to game.
-  g.parsedGame = pg;
-  debugAssert(pg.nodes !== null, "WTF, there is always one parsed node.")
-  const m : Move | null = setupFirstParsedMoved(g, pg!.nodes);
-  g.firstMove = m;
-  g.currentMove = null;
-  //g.firstMove = pg.nodes?.next;
-  //TODO: set game comment
-  //appGlobals.game = g;
+/// create_parsed_game takes a ParsedGame and the current game (for messaging and poaching UI
+/// callbacks for the new game).  It creates a new Game (which cleans up the current game) and sets
+/// up the first moves so that the user can start advancing through the moves.
+///
+export async function createGameFromParsedGame 
+    (pgame: ParsedGame, curgame: Game, setGame: (g: Game) => void, getGames: () => readonly Game[],
+     setGames: (gs: Game[]) => void):
+    Promise<Game> {
+  // consoleWritePG(pgame.nodes!); // integrity check code for parsed file structure.
+  const props = pgame.nodes!.properties;
+  // Handicap and empty board handicap / all black stones.
+  let handicap = 0;
+  let allBlack: Move[] | null = null;
+  if ("HA" in props) {
+    ({handicap, allBlack} = createGameFromParsedHandicap(pgame, props));
+  } else if ("AB" in props) {
+    // There may be all black stone placements even if there is no handicap property since some programs
+    // allow explicit stone placements of black stones that get written to the initial board properties.
+    allBlack = createGameFromParsedAB(pgame, props);
+  }
+  // Get root AW
+  let allWhite: Move[] | null = null;
+  if ("AW" in props) {
+    allWhite = createGameFromParsedAW(pgame, props);
+  }
+  // Board size (default 19 with info message; enforce only 19)
+  let size = Board.MaxSize;
+  if ("SZ" in props) {
+    size = parseInt(props["SZ"][0], 10);
+  } else {
+    await curgame.message!.message(`"No SZ, size, property in .sgf.  Default is 19x19"`);
+  }
+  if (size != Board.MaxSize) {
+    throw new SGFError(`Only work with size 19 currently, got ${size}.`);
+  }
+  // Komi
+  const komi = "KM" in props ? props["KM"][0] : (handicap === 0 ? Game.DefaultKomi : "0.5");
+  // Create new game and clean up current game
+  const g = createGame(size, handicap, komi, allBlack, allWhite, setGame, getGames, setGames);
+  // Players
+  if ("PB" in props) g.playerBlack = props["PB"][0];
+  if ("PW" in props) g.playerWhite = props["PW"][0];
+  // Root comments: C and GC, some apps use C when they should use GC, just grab both.
+  if ("C" in props) g.comments = props["C"][0];
+  if ("GC" in props) g.comments = props["GC"][0] + (g.getComments!() ?? "");
+  // Setup remaining model for first moves, comment, etc.
+  g.parsedGame = pgame;
+  setupFirstParsedMove(g, pgame.nodes!);
+  //copyGameCallbacks(curgame, g); // Don't need this setGame callback copies from last closed over game
+  g.setComments!(g.comments);
+  //setGame(g); C# code set here, but it is already set in createGame.
   return g;
 }
 
-function setupFirstParsedMoved (g : Game, pn : ParsedNode) : Move | null {
+/// cosoleWritePG is debugging code to test parsing results.
+// function consoleWritePG (nodes: ParsedNode | null, indent: string = "") {
+//   if (nodes === null) return;
+//   const writeNode = (n: ParsedNode) => {
+//     if ("B" in n.properties) {
+//       console.log(indent + `Move ${parsedToModelCoordinates(n.properties["B"][0])}`);
+//     }
+//     else if ("W" in n.properties) {
+//       console.log(indent + `Move ${parsedToModelCoordinates(n.properties["W"][0])}`);
+//     }
+//     else console.log("empty board");
+//   }
+//   if (nodes.branches !== null) {
+//     writeNode(nodes);
+//     nodes.branches.forEach((pn, idx) => {console.log(indent + `Branch ${idx}`);
+//                                          consoleWritePG(pn, indent + "   ");})
+//   } else {
+//     writeNode(nodes);
+//     consoleWritePG(nodes.next, indent);
+//   }
+// }
+
+/// NOT NEEDED, setGame UI callback copies these to new game.
+// function copyGameCallbacks (from: Game, to: Game) {
+//   to.setComments = from.setComments;
+//   to.getComments = from.getComments;
+//   to.message = from.message;
+//   to.onchange = from.onchange;
+// }
+
+
+/// called CreateParsedGame in C# land, and it returns void, storing new game in mainwin.game.
+// export function createGamefromParsedGame (pg: ParsedGame, g : Game) {
+//   g.parsedGame = pg;
+//   debugAssert(pg.nodes !== null, "WTF, there is always one parsed node.")
+//   const m : Move | null = setupFirstParsedMove(g, pg!.nodes);
+//   g.firstMove = m;
+//   g.currentMove = null;
+//   //g.firstMove = pg.nodes?.next;
+//   //TODO: set game comment
+//   //appGlobals.game = g;
+//   return g;
+// }
+
+/// createParsedGameHandicap helps create a Game from a ParsedGame by processing the handicap (HA)
+/// and all black (AB) properties.  It returns the handicap number and the Moves for the stones.
+/// This assumes there is an HA property, so check before calling.
+///
+function createGameFromParsedHandicap(pgame: ParsedGame, props: Record<string, string[]>):
+    { handicap: number; allBlack: Move[] | null } {
+  const handicap = parseInt(props["HA"][0], 10);
+  if (handicap === 0) {
+    return { handicap, allBlack: null };
+  }
+  // KGS saves HA[6] and then AB[]...
+  if (!("AB" in props)) {
+    throw new SGFError("If parsed game has handicap (HA), then need handicap stones (AB).");
+  }
+  if (props["AB"].length !== handicap) {
+    throw new SGFError("Parsed game's handicap count (HA) does not match stones (AB).");
+  }
+  return { handicap, allBlack: createGameFromParsedAB(pgame, props) };
+}
+
+/// Assumes "AB" exists.
+function createGameFromParsedAB(pgame: ParsedGame, props: Record<string, string[]>): Move[] {
+  return props["AB"].map((coords) => {
+    const [row, col] = parsedToModelCoordinates(coords); 
+    const m = new Move(row, col, StoneColors.Black);
+    m.parsedNode = pgame.nodes;
+    m.rendered = false;
+    return m;
+  });
+}
+/// Assume "AW" exists.
+function createGameFromParsedAW(pgame: ParsedGame, props: Record<string, string[]>): Move[] {
+  return props["AW"].map((coords) => {
+    const [row, col] = parsedToModelCoordinates(coords);
+    const m = new Move(row, col, StoneColors.White);
+    m.parsedNode = pgame.nodes;
+    m.rendered = false;
+    return m;
+  });
+}
+
+
+function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
   if ("B" in pn.properties || "W" in pn.properties)
-    throw new Error ("Unexpected move in root parsed node.");
+    throw new SGFError ("Unexpected move in root parsed node.");
   if ("PL" in pn.properties)
-    throw new Error("Do not support player-to-play for changing start color.");
+    throw new SGFError("Do not support player-to-play for changing start color.");
   if ("TR" in pn.properties || "SQ" in pn.properties || "LB" in pn.properties)
-    throw new Error("Don't handle adornments on initial board from parsed game yet.");
-  var m : Move | null = null;
-  if (pn.next === null) m = null;
-  else {
-    m = parsedNodeToMove(pn.next, g.size);
-    if (m === null) {
-      debugAssert(pn.next.badNodeMessage != null, 
-                  "Failed to make Move from ParsedNode, but no error message provided.");
-      throw new Error(pn.next.badNodeMessage);
+    throw new SGFError("Don't handle adornments on initial board from parsed game yet.");
+  var m : Move | null;
+  if (pn.branches && pn.branches.length > 0) {
+    // Game starts with branches; build Move objects for each branch head.
+    const moves: Move[] = [];
+    for (const n of pn.branches) {
+      const mv = parsedNodeToMove(n, g.size);
+      if (mv == null) {
+        debugAssert(n.badNodeMessage != null, "parsedNodeToMove returned null without a message?!");
+        // Mirror C#: surface the specific parse error.
+        throw new SGFError(n.badNodeMessage!);
+      }
+      // Note, do not incr g.move_count since first move has not been rendered,
+      // so if user clicks, that should be number 1 too.
+      mv.number = g.moveCount + 1;
+      // Don't set previous point because these are first moves, so prev is null.
+      moves.push(mv);
     }
-    m.number = g.moveCount + 1;
+    g.branches = moves;
+    m = moves[0];
+  } else {
+    if (pn.next === null) m = null;
+    else {
+      m = parsedNodeToMove(pn.next, g.size);
+      if (m === null) {
+        debugAssert(pn.next.badNodeMessage != null, 
+                    "Failed to make Move from ParsedNode, but no error message provided.");
+        throw new SGFError(pn.next.badNodeMessage);
+      }
+      // Note, do not incr g.move_count since first move has not been rendered,
+      // so if user clicks, that should be number 1 too.
+      m.number = g.moveCount + 1;
+    }
   }
   g.firstMove = m;
   return m;
 }
 
-/// parsedNodeToMove makes the move while checking for bad moves, making a pass move with a big
-/// comment to describe error situations, or setting bad move message in move object.
-/// For now assume unicorns and rainbows.
+/// createDefaultGame stashes the new game in Game Context globals defaultGame so that we can throw
+///  it away if the user does not use it and opens a file or creates a new game.
 ///
-function parsedNodeToMove (pn : ParsedNode, _size : number) : Move | null {
-  if ("B" in pn.properties) {
-    const color = StoneColors.Black;
-    const [row, col] = parsedToModelCoordinates(pn.properties["B"][0]);
-    const m = new Move(row, col, color);
-    return m;
-  }
-  if ("W" in pn.properties) {
-    const color = StoneColors.White;
-    console.log(`${pn.properties["B"]} [0]${pn.properties["B"][0]}`);
-    const [row, col] = parsedToModelCoordinates(pn.properties["W"][0]);
-    const m = new Move(row, col, color);
-    return m;
-  }
-  return new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
+export function createDefaultGame (setGame: (g: Game) => void, getGames: () => readonly Game[], 
+                                   setGames: (gs: Game[]) => void): Game {
+return createGame(Board.MaxSize, 0, Game.DefaultKomi, null, null, setGame, getGames, setGames);
 }
+
+/// createGame in the C# code setup board display and added the game to the Game Context app globals.
+/// handicap stones includes AB stones.
+///
+export function createGame (size : number, handicap : number, komi : string, 
+                            handicapStones: Move[] | null = null, all_white : Move[] | null = null,
+                            setGame: (g: Game) => void, getGames: () => readonly Game[], 
+                            setGames: (gs: Game[]) => void):
+        Game {
+    var g = new Game(size, handicap, komi, handicapStones, all_white);
+    setGame(g);
+    setGames([g, ...getGames()]);
+    return g;
+}
+
+
+/// _parsed_node_to_move takes a ParsedNode and returns a Move model for it. For now, this is
+/// fairly constrained to expected next move colors and no random setup nodes that place several
+/// moves or just place adornments. This takes the game board size for computing indexes because
+/// SGF files count rows from the top, but SGF programs display boards counting bottom up. This
+/// returns null for failure cases, setting the parse node's error msg.
+///
+/// Trial hack that stuck: ParserAux.ParseNode marks nodes that had no B or W
+/// notation with a special BadNodeMessage, and this function stopped checking for
+/// BadNodeMessage being non-null. We used to immediately return null that there is no next move
+/// we can represent for the user. Now this code works around some bad node situations,
+/// returning the pass node as a hack.
+///
+function parsedNodeToMove (pn : ParsedNode, size : number) : Move | null {
+  // Removed optimization to avoid computing msg again, due to experiment to taint nodes in sgfparser
+  // so that clicking on treeview nodes can abort immediately (due to have a BadNodeMessage).
+  //if (n.BadNodeMessage != null) return null;
+  let color: StoneColor = StoneColors.NoColor;
+  let row = Board.NoIndex; // Not all paths set the value, so need random initial value.
+  let col = Board.NoIndex;
+  let pass_move: Move | null = null; // null signals we did not substitute a pass move.
+  if ("B" in pn.properties) {
+    color = StoneColors.Black;
+    [row, col] = parsedToModelCoordinates(pn.properties["B"][0]);
+  } else if ("W" in pn.properties) {
+    color = StoneColors.White;
+    [row, col] = parsedToModelCoordinates(pn.properties["W"][0]);
+  } else if (("AW" in pn.properties) || ("AB" in pn.properties) || ("AE" in pn.properties)) {
+    // Don't handle setup nodes in the middle of game nodes.  This is a light hack to use
+    // a Pass node with a big comment and adornments to show what the setup node described.
+    pass_move = setupNodeToPassNode(pn, size);
+    // Set this to null to stop UI from popping dialogs that you cannot advance to
+    // this node.  We modify this when trying to ready moves for rendering, which we do
+    // when the user advances through the tree.  If the user clicks on a tree view node based
+    // on the parsed node only, 1) they will still get the error dialog 2) the node doesn't
+    // show the green highlight that there is a comment.
+    pn.badNodeMessage = null;
+  } else {
+    pn.badNodeMessage = "Next nodes must be moves, don't handle arbitrary nodes yet -- " +
+                        pn.nodeString(false);
+    return null;
+  }
+  const m = pass_move ?? new Move(row, col, color);
+  m.parsedNode = pn;
+  m.rendered = false;
+  if ("C" in pn.properties)
+      m.comments = pn.properties["C"][0];
+  return m;
+}
+
+const SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
+                              "Don't handle arbitrary nodes in the middle of a game.\n" +
+                              "Converting node to Pass move and adding adornments as follows:\n";
+
+/// SetupNodeToPassNode takes a Parsenode and board size and returns a Pass move as a hack to
+/// handle nodes in the middle of a game that are setup nodes (AB, AE, AW, etc.).  The view model
+/// and tree view model and advancing and rewinding move operatios don't handle arbitrary
+/// transitions and transformations to the board.  This hack just turns those nodes into a Pass
+/// move with various adornments and a comment explaining what the user sees.  Before, the program
+/// showed the node, popped a dialog that it was not viewable, and that was it.  This assumes
+/// caller sets the new move's parse node and not rendered state.
+///
+export function setupNodeToPassNode(pn: ParsedNode, size: number): Move {
+  // Capture any pre-existing comment to append at the end
+  let comment = pn.properties["C"]?.[0] ?? "";
+  if (comment !== "")
+    comment = "The following is the original comment from the SGF file ...\n" + comment;
+  let newComment = SetupNodeCommentStart;
+  const props: Record<string, string[]> = {}; // New props to replace parsenode's
+  // Caller sets pass_move.parsedNode and pass_move.rendered.
+  const passMove = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
+  // Sweep properties, rewriting to adornment forms and documenting
+  for (const [k, v] of Object.entries(pn.properties)) {
+    if (k === "AB") { // turn AB's to triangles
+      newComment = setupNodeDisplayCoords(props, newComment, "All Black stones", "TR", v, size);
+      if (pn.properties["TR"]) {
+        newComment = setupNodeDisplayCoords(props, newComment, "triangles", "TR", pn.properties["TR"],
+                                            size, true); // true = concat coord lists
+      }
+    } else if (k === "AW") { // turn AWs to squares
+      newComment = setupNodeDisplayCoords(props, newComment, "All White stones", "SQ", v, size);
+      if (pn.properties["SQ"]) {
+        newComment = setupNodeDisplayCoords(props, newComment, "squares", "SQ", pn.properties["SQ"],
+                                            size, true); // true = concat coord lists
+      }
+    } else if (k === "AE") { // turn AEs to labels using "X"
+      newComment = setupNodeDisplayCoords(props, newComment, "All Empty points (X)", "LB", v, size);
+      if (pn.properties["LB"]) {
+        newComment = setupNodeDisplayCoords(props, newComment, "letters", "LB", pn.properties["LB"],
+        size, true); // true = concat coord lists
+      }
+    } else if (k === "TR" || k === "SQ" || k === "LB" || k === "C") {
+      // Already swept into new properties and comment, so skip here.
+      continue;
+    } else {
+      // Preserve any other properties but note them in the comment
+      props[k] = v.slice();
+      newComment += "Setup node also had this unrecognized notation:\n" + "     " + k + "[" +
+                    v.join("][") + "]\n";
+    }
+  } // for loop
+  newComment = newComment + "\n\n" + comment;
+  props["C"] = [newComment];
+  // Replace the node’s properties (so later rendering paths see the adornments/comment)
+  pn.properties = props;
+  // Caller will set passMove.parsedNode and passMove.rendered
+  return passMove;
+}
+
+/// SetupNodeDisplayCoords creates comment text describing the nodes conversion to a pass move
+/// with adornments, where we placed adornments, and what they mean.  This takes the new properties
+/// dictionary for the node, the new comment being built up, a string describing the setup notation
+/// ("all black"), the adornment notation as a string for indexing, the notation's value for reporting
+/// where we're adding markup notation, and the size of the board.  This takes the game board size for
+/// computing indexes because SGF files count rows from the top, but SGF programs display boards 
+/// counting bottom up.
+///
+export function setupNodeDisplayCoords(props: Record<string, string[]>, newComment: string,
+                                       setup: string, adornment: "TR" | "SQ" | "LB", v: string[],
+                                       size: number, concat = false): string {
+  const LBChar = "X"; 
+  if (concat) {
+    // Picking up explict notation from SGF file that is the same as we chose to note unhandled notations.
+    // Just add it in here, below add to the comment what's going on.
+    props[adornment] = (props[adornment] ?? []).concat(v);
+  } else if (adornment === "LB") {
+    // Convert value from just indexes to <indexes>:<char> form.
+    // Use X for labels (not A, B, C, ...) because marking all clear (AE) notation.
+    props[adornment] = v.map((c) => `${c}:${LBChar}`);
+  } else {
+    // The value used for the unsupported SGF notation (AB/AW) is good as-is to use with the new 
+    // adornment. TR/SQ can use the coordinates as-is.
+    props[adornment] = v.slice(); // ok to alias it, but gpt5 generated new array.
+  }
+  newComment += `\nThis node adds ${setup} at `;
+  const coords = v.map((c) => {
+      const [row, col] = parsedToModelCoordinates(c);
+      // SGF counts rows from the top, but goban display counts from bottom.
+      const rowStr = String(size + 1 - row);
+      const displayCol = modelCoordinateToDisplayLetter(col); 
+      if (adornment === "LB") {
+        if (concat) {
+          // Existing label entries are already like "aa:X", keep the label suffix
+          const suffix = c.slice(2); // ":X" (or longer)
+          return `${displayCol}${rowStr}${suffix}`; // readable coordinates : letter
+        } else {
+          // We added ":X" above
+          return `${displayCol}${rowStr}${LBChar}`;
+        }
+      }
+      return `${displayCol}${rowStr}`;
+  });
+  newComment += coords.join(", ") + ".\n";
+  const word = adornment === "TR" ? "triangles" : adornment === "SQ" ? "squares" : "letters";
+  newComment += `SGFEditor shows these as ${word} on the board.\n`;
+  return newComment;
+}
+
 
 
 /// NextMoveDisplayError figures out the error msg for the user when trying to replay
