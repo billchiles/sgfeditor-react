@@ -85,7 +85,7 @@ function AppContent({
         id="app-focus-root"
         tabIndex={-1} 
         style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", outline: "none" }}
-        aria-hidden="true"
+        aria-hidden={undefined}
       />
       {/* Go Board */}
       <div className={styles.leftPane}>

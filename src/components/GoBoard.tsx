@@ -74,8 +74,16 @@ export default function GoBoard({
   const padding = 36;
   const appGlobals = useContext(GameContext);
   debugAssert(appGlobals !== null, "WTF?! Why would this ever be null?  Race condition?");
-  const board = appGlobals.game.board;
-
+  //
+  // gpt5 showed this telemetry to see when the version ticks
+  // useEffect(() => {console.log("render version:", appGlobals.version);}, [appGlobals.version]);
+  // gpt5 suggested fetching game as commented out below in case state was picking up a stale game 
+  // model, but I think the real issue was closing over game/board in handleClick (and possibly
+  // renderStones).  I changed them to always fetch from appGlobals and to add appGlobals to their
+  // dependencies for the handleClick and renderStones useMemo's.  Now nothing references these.
+  // const game = appGlobals.getGame ? appGlobals.getGame() : appGlobals.game;
+  // const board = game.board;
+  //
   /// Memoized geometry globals used for many calculations in this file.
   ///
   const geom = useMemo(() => {
@@ -133,28 +141,31 @@ export default function GoBoard({
       // Also, Move coordinates are 1-based for the vernacular of Go boards.
       const row = grid.y + 1;
       const col = grid.x + 1;
-      if (board.moveAt(row, col) !== null) {
+      // Fetch game and board fresh to ensure latest and not closed over stale ref from render.
+      const curGame = appGlobals?.getGame ? appGlobals.getGame() : appGlobals?.game;
+      debugAssert(curGame !== null, "Eh?! How can there be no game, but we're clicking?!");
+      const curBoard = curGame.board;
+      if (curBoard.moveAt(row, col) !== null) {
         alert("You can't play on an occupied point.");
         return;
       }
       // Make move in the game model via GameContext/appGlobals, bump version to re-render.
       if (appGlobals !== null) {//appGlobals?.game
-        const m = await appGlobals.game.makeMove(row, col);
+        const m = await curGame.makeMove(row, col);
         if (m !== null) {
           // Game.makeMove updates the model & provider bumps version -> memo below will re-run
           appGlobals.bumpVersion()
         }
       } else {
-        console.warn("AppGlobals missing: how could someone click before we're ready?!.");
+        console.error("AppGlobals missing: how could someone click before we're ready?!.");
       }
-      
     },
     // gpt5 thinks this is right:
     //    [stones, nextColor, cellSize, boardSize, geom.gridStart, appGlobals]
     // Weird to add appData, appGlobals, color, cell size, boardsize and various things that don't
     // change the behavior of adding a stone.  Maybe I'm not understanding something, closing over shit, etc.
     // So far it is working fine.
-    [geom.effCell, boardSize, geom.gridStart] // shouldn't need stones or nextColor dependency unless closes over them
+    [appGlobals, geom.effCell, boardSize, geom.gridStart] 
   );
 
 
@@ -241,18 +252,23 @@ export default function GoBoard({
 
   const renderStones = useMemo(() => {
     const circles: React.ReactNode[] = [];
-    const current = appGlobals?.game?.currentMove ?? null;
+    // Fetch game and board fresh to ensure latest and not closed over stale ref from render.
+    const curGame = appGlobals?.getGame ? appGlobals.getGame() : appGlobals?.game;
+    debugAssert(curGame !== null, "Eh?! How can there be no game, but we're clicking?!");
+    const curBoard = curGame.board;
+    const current = curGame.currentMove ?? null;
     // marker sizes scale with stone radius; keeps ring visible at small sizes
     const markRadius = Math.max(geom.radius * 0.4, 3);
     const markStroke = Math.max(geom.radius * 0.2, 1);
-
+    // console.log("\n\nSTARTING ...\n\n");
     for (let y = 0; y < boardSize; y++) {
       for (let x = 0; x < boardSize; x++) {
         // Model is 1-based for vernacular of Go boards.
         const row = y + 1;
         const col = x + 1;
-        const m = board.moveAt(row, col);
+        const m = curBoard.moveAt(row, col);
         if (m !== null) {
+          // console.log("board now has:", m);
           // Board/Move model is rows go down, columns go across, but graphics is X goes across, Y goes down.
           const cx = boardToPx.xs[x]; 
           const cy = boardToPx.ys[y];
@@ -277,7 +293,7 @@ export default function GoBoard({
     };
     return <g>{circles}</g>;
     // redraw when global version changes, or things that change on resize
-  }, [appGlobals?.version, boardToPx, geom.radius]);
+  }, [appGlobals, appGlobals?.version, boardToPx, geom.radius]);
   // Now render ...
   return (
     <div className={styles.boardWrap} ref={wrapRef}>

@@ -309,6 +309,7 @@ async function doOpenButtonCmd (
     // focus on stones
     bumpVersion();
   }
+  focusOnRoot();
 } // doOpenButtonCmd()
 
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
