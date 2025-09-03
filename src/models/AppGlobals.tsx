@@ -20,6 +20,18 @@ import { debugAssert } from "../debug-assert";
 //// Define types for passing global state to React and command state handlers.
 ///
 
+export const CommandTypes = {
+  NoMatter: "inconsequential-command",
+  GotoNextGame: "goto-next-game",
+} as const;
+
+export type CommandType = typeof CommandTypes[keyof typeof CommandTypes];
+
+export type LastCommand =
+  | { type: typeof CommandTypes.NoMatter }
+  | { type: typeof CommandTypes.GotoNextGame; cookie: {idx: number} };
+
+
 /// AppGlobals is the shape of values bundled together and provided as GameContext to UI handlers.
 ///
 export type AppGlobals = {
@@ -44,6 +56,8 @@ export type AppGlobals = {
   openSgf: () => Promise<void>;
   saveSgf: () => Promise<void>;
   saveSgfAs: () => Promise<void>;
+  getLastCommand(): LastCommand;
+  setLastCommand(lc: LastCommand): void;
 };
 ///
 /// A bit about appGlobals vs gameref, why two acessors and what about management:
@@ -110,6 +124,8 @@ type CmdDependencies = {
   setGame: (g: Game) => void;
   getLastCreatedGame: () => Game | null;
   setLastCreatedGame: (g: Game | null) => void;
+  getLastCommand: () => LastCommand;
+  setLastCommand: (c: LastCommand) => void;
 };
 
 /// ProviderProps just describes the args to GameProvider function.
@@ -132,9 +148,18 @@ type ProviderProps = {
 /// but maybe good enough is just fine :-).
 ///
 const browserMessageOrQuery: MessageOrQuery = {
-   message: (msg) => alert(msg),
-   confirm: async (msg) => window.confirm(msg),
+  //  message: (msg) => alert(msg),
+  //  confirm: async (msg) => window.confirm(msg),
+  message: (msg) => {
+    alert(msg);                   // synchronous
+    return Promise.resolve();     // present async surface
+  },
+  confirm: (msg) => {
+    const ok = window.confirm(msg);        // synchronous
+    return Promise.resolve(ok);            // present async surface
+  },
  };
+
 
 ///
 /// GameProvider (HUGE function that gathers all state, passes it to children, and loads up
@@ -203,17 +228,22 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
     // run once on mount; guard prevents re-entry
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // One small deps object to pass to top-level commands that updates if any member changes ref ID.
+  const lastCommandRef = React.useRef<LastCommand>({ type: CommandTypes.NoMatter });
+  const getLastCommand = React.useCallback(() => lastCommandRef.current, []);
+  const setLastCommand = React.useCallback((c: LastCommand) => { lastCommandRef.current = c; }, []);
+  // One deps object to pass to top-level commands that updates if any member changes ref ID.
   // React takes functions anywhere it takes a value and invokes it to get the value if types match.
   const deps = useMemo<CmdDependencies>(
       () => ({gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ getGames: () => games, 
-              setGames, setGame, getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,}), 
+              setGames, setGame, getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
+              getLastCommand, setLastCommand,}), 
              [gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ games, setGames, setGame, 
-              lastCreatedGame, setLastCreatedGame]);
+              lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
-  const saveSgf   = useCallback(() => writeGameCmd(deps),   [deps]);
+  const saveSgf   = useCallback(() => doWriteGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
-  const onKey     = useCallback((e: KeyboardEvent) => handleKeyPressed(deps, e), [deps]);
+  // Need to await handler that is calling bumpVersion, otherwise UI updates before model is done.
+  const onKey     = useCallback(async (e: KeyboardEvent) => await handleKeyPressed(deps, e), [deps]);
   // Providing Hotkeys ...
   // leftarrow/rightarrow for Prev/Next; c-s for Save
   useEffect(() => {
@@ -227,7 +257,8 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
             getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
             getComment, setComment,
             version, bumpVersion,
-            openSgf, saveSgf, saveSgfAs,}),
+            openSgf, saveSgf, saveSgfAs, 
+            getLastCommand, setLastCommand,}),
     [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs,
      games, setGames, defaultGame, setDefaultGame, lastCreatedGame, setLastCreatedGame,
      getGame, setGame]
@@ -238,26 +269,26 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
   return <GameContext.Provider value={api}>{children}</GameContext.Provider>;
 } // GameProvider function 
 
-function createDefaultGameForUI (setDefaultGame: (g: Game | null) => void, setGame: (g: Game) => void,
-                                 getGames: () => readonly Game[], setGames: (gs: Game[]) => void) {
-  const g = createDefaultGame(setGame, getGames, setGames);
-  setDefaultGame(g);
-  setupBoardDisplay(g); // call init tree view model instead
-  // C# code had to setup title and game tree.
-  // TODO:? we need to setup the game tree view model for drawing
-  focusOnRoot();
-  return g;
-}
+// function createDefaultGameForUI (setDefaultGame: (g: Game | null) => void, setGame: (g: Game) => void,
+//                                  getGames: () => readonly Game[], setGames: (gs: Game[]) => void) {
+//   const g = createDefaultGame(setGame, getGames, setGames);
+//   setDefaultGame(g);
+//   setupBoardDisplay(g); // call init tree view model instead
+//   // C# code had to setup title and game tree.
+//   // TODO:? we need to setup the game tree view model for drawing
+//   focusOnRoot();
+//   return g;
+// }
 
 /// setupBoardDisplay in C# created lines, labels, etc., but we don't need to do that here.
 /// Now this just checks settings and clears the comment box.  No need for UI cleanup.
-function setupBoardDisplay (newgame: Game) {
-  newgame
-  // TODO check flag for first run, pull in settings if have settings store.
-  // addInitialStones(newgame); all UI internal stuff, no true model
-  // TODO: initialize tree view
-  // used to set click mode to move, but this version will rely on keybindings, no mode buttons.
-}
+// function setupBoardDisplay (newgame: Game) {
+//   newgame
+//   // TODO check flag for first run, pull in settings if have settings store.
+//   // addInitialStones(newgame); all UI internal stuff, no true model
+//   // TODO: initialize tree view
+//   // used to set click mode to move, but this version will rely on keybindings, no mode buttons.
+// }
 
 
 ///
@@ -270,9 +301,10 @@ function setupBoardDisplay (newgame: Game) {
 ///
 async function doOpenButtonCmd (
     {gameRef, bumpVersion, fileBridge, getGames, setGames, setGame, getLastCreatedGame,
-     setLastCreatedGame,}: CmdDependencies): 
+     setLastCreatedGame, setLastCommand}: CmdDependencies): 
     Promise<void> {
-  checkDirtySave (gameRef.current, fileBridge);
+  setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
+  await checkDirtySave (gameRef.current, fileBridge);
   // Get file info from user
   let fileHandle = null;
   let fileName = "";
@@ -297,7 +329,9 @@ async function doOpenButtonCmd (
     // Show existing game, updating games MRU and current game.
     gotoOpenGame(openidx);
     // Move to function gotoOpenGame
-    moveGameToMRU(games, openidx, setGames, setGame);
+    const newGames = moveGameToMRU(games, openidx) //, setGame, setGames);
+    setGame(newGames[0]);
+    setGames(newGames);
   } else {
     // TODO consider C# code ignores if a file opened or not, so we shouldn't be making a new Game here
     // C# code also draws tree, etc., even if nothing changed, but maybe good for cleanup?
@@ -489,8 +523,9 @@ function undoLastGameCreation (game: Game | null) {
 //// Save Commands
 ///
 
-async function writeGameCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependencies):
+async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastCommand }: CmdDependencies):
     Promise<void> {
+  setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   // GATHER STATE FIRST -- commit dirty comment to game or move, then save
   const g = gameRef.current;
   const data = quickieGetSGF(g, g.size);
@@ -508,7 +543,9 @@ async function writeGameCmd ({ gameRef, bumpVersion, fileBridge }: CmdDependenci
   }
 }
 
-async function saveAsCommand ({ gameRef, bumpVersion, fileBridge }: CmdDependencies): Promise<void> {
+async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand }: 
+    CmdDependencies): Promise<void> {
+  setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
   const data = quickieGetSGF(g, g.size);
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
@@ -549,29 +586,32 @@ function gotoOpenGame(idx: number) {
 }
 
 // Move an existing game at index `idx` to the front (MRU)
-function moveGameToMRU(games: readonly Game[], idx: number, setGames: (gs: Game[]) => void,
-                       setGame: (g: Game) => void): readonly Game[] {
-  if (idx < 0 || idx >= games.length) return games;
-  const newGames = [games[idx], ...games.slice(0, idx), ...games.slice(idx + 1)];
-  setGames(newGames);
-  setGame(newGames[0]);
+function moveGameToMRU(games: readonly Game[], idx: number /*, setGame: (g: Game) => void,
+                       setGames: (gs: Game[]) => void */): Game[] {
+  if (idx < 0 || idx >= games.length) throw new Error("Must call with valid index.");
+  const target = games[idx];
+  const rest = games.slice(0, idx).concat(games.slice(idx + 1));
+  const newGames = [target, ...rest];
+  // setGames(newGames);
+  // setGame(target);
   return newGames;
-  // gpt5 showed this code ...
-  // setGames(oldGames => {const idx = oldGames.findIndex(g => g.id === game.id);
-  //                       if (idx === -1) return oldGames; // not found
-  //                       const reordered = [...oldGames];
-  //                       const [found] = reordered.splice(idx, 1);
-  //                       return [found, ...reordered];});
 }
 
+// function moveGameToFront(games: Game[], idx: number): Game[] {
+//   if (idx <= 0 || idx >= games.length) return games.slice();
+//   const target = games[idx];
+//   const rest = games.slice(0, idx).concat(games.slice(idx + 1));
+//   return [target, ...rest];
+//}
+
 // Add a new game to the front
-function addGameAsMRU(games: readonly Game[], g: Game, setGames: (gs: Game[]) => void,
-                      setGame: (g: Game) => void): Game[] {
-  const newGames = [g, ...games];
-  setGames(newGames);
-  setGame(g);
-  return newGames;
-}
+// function addGameAsMRU(games: readonly Game[], g: Game, setGames: (gs: Game[]) => void,
+//                       setGame: (g: Game) => void): Game[] {
+//   const newGames = [g, ...games];
+//   setGames(newGames);
+//   setGame(g);
+//   return newGames;
+// }
 
 ///
 //// Keybindings
@@ -585,6 +625,8 @@ function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   // console.log("hotkey", { key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, 
   //                         shift: e.shiftKey, target: e.target });
   // Handle keys that don't depend on any other UI having focus ...
+  // NOTE: order matters unless testing the state of every modifier.  If not, then test for keys
+  // requiring more modifiers first.
   const lower = e.key.toLowerCase();
   const ctrl_s = e.ctrlKey && !e.shiftKey && !e.metaKey && lower === "s";
   const ctrl_shift_s = e.ctrlKey && e.shiftKey && lower === "s";  
@@ -594,59 +636,78 @@ function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.preventDefault();
     // GPT5 gen, of course, don't blur comment 1) Blur the current editable element
     //(document.activeElement as HTMLElement | null)?.blur();
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     // Move focus to a safe, focusable container so arrows work immediately
     focusOnRoot();
     return;
   }
   if (ctrl_shift_s) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     void saveAsCommand(deps);
     return;
   }
   if (ctrl_s) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
-    void writeGameCmd(deps);
+    void doWriteGameCmd(deps);
     return;
   }
-    if (ctrl_o) {
+  if (ctrl_o) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     e.stopPropagation();
     void doOpenButtonCmd(deps); // do not await inside keydown
     return;
-    }
+  }
+  if (/*!isTextInputFocused() &&*/
+      !e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "w") {
+    e.preventDefault();
+    //e.stopPropagation(); Can't stop chrome from taking c-w, so using s-w
+    gotoNextGameCmd(deps,deps.getLastCommand());
+    return;
+  }
+  //
   // The following depend on what other UI has focus ...
-  // If the user is editing text (e.g., the comment textarea), don't further process arrows.
+  //
+  // If the user is editing text (e.g., the comment textarea), don't further process the following.
   if (isEditingTarget(e.target)) {
     return; // let the content-editable elt handle cursor movement
   }
   const curgame = deps.gameRef.current;
   if (lower === "arrowleft" && curgame.canUnwindMove()) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     curgame.unwindMove(); // model fires onChange → provider bumps version
     return;
   }
   if (lower === "arrowright" && curgame.canReplayMove()) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     const m = curgame.replayMove();
     if (m !== null) deps.bumpVersion();
     return;
   }
-if (lower === "arrowup") {
+  if (lower === "arrowup") {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
-    handleArrowUpCmd(deps, curgame);
+    curgame.selectBranchUp(); // Calls onchange if needed.
     return;
   }
-if (lower === "arrowdown" && curgame.canReplayMove()) {
+  if (lower === "arrowdown" && curgame.canReplayMove()) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
-    handleArrowDownCmd(deps, curgame);
+    curgame.selectBranchDown(); // Calls onchange if needed
     return;
   }
   if (lower === "home" && curgame.canUnwindMove()) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
-    curgame.gotoStart(); // signal onchange
+    curgame.gotoStart(); // signals onchange
     return;
   }
 if (lower === "end" && curgame.canReplayMove()) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     curgame.gotoLastMove(); // signals onchange, and don't await in handleKeyDown says gpt5
     return;
@@ -673,60 +734,33 @@ function isEditingTarget (t: EventTarget | null): boolean {
 }
 
 
-function handleArrowUpCmd (deps: CmdDependencies, curgame: Game) {
-    const curmove = curgame.currentMove;
-    let branches = null;
-    let next = null;
-    if (curmove !== null) {
-      branches = curmove.branches;
-      next = curmove.next;
-    } else {
-      branches = curgame.branches
-      next = curgame.firstMove;
-    }
-    if (branches === null) return;
-    const idx = branches.findIndex(m => m === next);
-    debugAssert(idx != -1, "WTF, next move must be in branches.");
-    if (idx > 0) {
-      if (curmove !== null)
-        curmove.next = branches[idx - 1];
-      else
-        curgame.firstMove = branches[idx - 1]
-      deps.bumpVersion();
-    } else {
-      alert("Already on highest branch.");
-    }
-    return;
-  } // handleArrowUpCmd
 
-function handleArrowDownCmd (deps: CmdDependencies, curgame: Game) {
-    const curmove = curgame.currentMove;
-    let branches = null;
-    let next = null;
-    if (curmove !== null) {
-      branches = curmove.branches;
-      next = curmove.next;
-    } else {
-      branches = curgame.branches
-      next = curgame.firstMove;
+  async function gotoNextGameCmd(deps : CmdDependencies, last: LastCommand): Promise<void> {
+    const games = deps.getGames();
+    if (games.length < 2) {
+      alert("Only one game open currently.  Can't switch games.")
+      deps.setLastCommand( { type: CommandTypes.NoMatter });
+      return;
     }
-    if (branches === null) return;
-    const idx = branches.findIndex(m => m === next);
-    debugAssert(idx != -1, "WTF, next move must be in branches.");
-    if (idx < branches.length - 1) {
-      if (curmove !== null)
-        curmove.next = branches[idx + 1];
-      else
-        curgame.firstMove = branches[idx + 1]
-      deps.bumpVersion();
-    } else {
-      alert("Already on highest branch.");
-    }
-    return;
-  } // handleArrowUpCmd
+    let idx = 1;
+    if (last.type === CommandTypes.GotoNextGame) {
+      idx = last.cookie.idx;
+      debugAssert(idx < games.length, "Eh?! Consecutive GotoNextGame should never reduce games len.");
+      idx++;
+      // If we rotated through all games, then the games list is completely reversed from when the
+      // user started repeatedly invoking this command.  Now if we promote the last game every time
+      // the user sees each game in order of most recently visited at the time they started the cmd.
+      idx = idx === games.length ? idx - 1 : idx;
+    } 
+    const newGames = moveGameToMRU(games, idx) //, deps.setGame, deps.setGames);
+    deps.setGame(newGames[0]);
+    deps.setGames(newGames);
+    deps.setLastCommand({ type: CommandTypes.GotoNextGame, cookie: { idx } })
+    deps.bumpVersion();
+  }
+  
 
-
-/// focusOnRoot called from input handling on esc to make sure all keybindings work.
+  /// focusOnRoot called from input handling on esc to make sure all keybindings work.
 /// May need to call this if, for example, user uses c-s in comment box, that is, command impls
 /// may need to call at end to ensure all keys are working.
 ///
@@ -740,7 +774,7 @@ function focusOnRoot () {
 //// Game Tree of Variations
 ///
 
-function drawGameTree () {
+// function drawGameTree () {
 
-}
+// }
 

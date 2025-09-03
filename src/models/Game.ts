@@ -699,7 +699,7 @@ gotoStartForGameSwap(): void {
     return [oneGood ? move : null, hadErr];
   } // readyForRendering()
 
-  treeViewNodeForMove (move) {move}
+  treeViewNodeForMove (move : Move) {move}
 
 /// _replay_unrendered_adornments is just a helper for _replay_move_update_model.  This does not 
 /// need to check add_adornment for a None result since we're trusting the file was written correctly,
@@ -732,9 +732,9 @@ replayUnrenderedAdornments (move: Move): void {
   //// File Writing
   ///
 
-  async writeGame (saveCoooke: unknown, autosave: boolean = false): Promise<void> {
-    saveCoooke
-    autosave
+  async writeGame (saveCookie: unknown, autosave: boolean = false): Promise<void> {
+    saveCookie
+    autosave // save file info
   }
 
   /// SaveGameFileInfo updates the games storage object and filename properties.
@@ -794,10 +794,62 @@ replayUnrenderedAdornments (move: Move): void {
     }
   }
 
-///
-//// Misc Utils
-///
+  ///
+  //// Branching Helpers
+  ///
 
+  selectBranchUp () {
+    const curmove = this.currentMove;
+    let branches = null;
+    let next = null;
+    if (curmove !== null) {
+      branches = curmove.branches;
+      next = curmove.next;
+    } else {
+      branches = this.branches
+      next = this.firstMove;
+    }
+    if (branches === null) return;
+    const idx = branches.findIndex(m => m === next);
+    debugAssert(idx != -1, "WTF, next move must be in branches.");
+    if (idx > 0) {
+      if (curmove !== null)
+        curmove.next = branches[idx - 1];
+      else
+        this.firstMove = branches[idx - 1]
+      this.onChange!();
+    } else {
+      alert("Already on highest branch.");
+    }
+    return;
+  } // moveBranchUp()
+
+  selectBranchDown () {
+    const curmove = this.currentMove;
+    let branches = null;
+    let next = null;
+    if (curmove !== null) {
+      branches = curmove.branches;
+      next = curmove.next;
+    } else {
+      branches = this.branches
+      next = this.firstMove;
+    }
+    if (branches === null) return;
+    const idx = branches.findIndex(m => m === next);
+    debugAssert(idx != -1, "WTF, next move must be in branches.");
+    if (idx < branches.length - 1) {
+      if (curmove !== null)
+        curmove.next = branches[idx + 1];
+      else
+        this.firstMove = branches[idx + 1]
+      this.onChange!();
+    } else {
+      alert("Already on highest branch.");
+    }
+    return;
+  } // moveBranchDown()
+  
 
 } // Game class
 
@@ -811,9 +863,9 @@ replayUnrenderedAdornments (move: Move): void {
 /// not async, but using await in typescript is ok on non-async calls and has no impact.
 ///
 export interface MessageOrQuery {
-  message (msg: string): Promise<void> | void;
+  message (msg: string): Promise<void>;
   // true if OK, false if Cancel/Escape
-  confirm? (msg: string): Promise<boolean> | boolean; 
+  confirm? (msg: string): Promise<boolean>; 
 };
 
 

@@ -3,8 +3,9 @@ import styles from "./goboard.module.css";
 import  { StoneColors } from "../models/Board";
 import type { StoneColor } from "../models/Board";
 import { DEFAULT_BOARD_SIZE } from "../models/Game";
-import { GameContext } from "../models/AppGlobals";
+import { CommandTypes, GameContext } from "../models/AppGlobals";
 import { debugAssert } from "../debug-assert";
+//import type { CommandType, LastCommand } from "../models/AppGlobals";
 
 
 /// GoBoardProps is bogus param list from UI elements to setting up GoBoard component, but it is
@@ -127,6 +128,8 @@ export default function GoBoard({
   ///
   const handleClick = useCallback(
     async (e: React.MouseEvent<SVGSVGElement>) => {
+      // Don't change behavior on repeated clicks
+      appGlobals.setLastCommand( {type: CommandTypes.NoMatter }); 
       const svg = e.currentTarget;
       const pt = svg.createSVGPoint();
       pt.x = e.clientX; // pixels from left
