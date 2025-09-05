@@ -1,7 +1,9 @@
-import { useMemo, useRef, useContext, useCallback } from "react";
+import { useMemo, useRef, useContext, useCallback, useState, useEffect } from "react";
 import GoBoard from "./components/GoBoard";
 import styles from "./App.module.css";
-import { GameProvider, GameContext } from "./models/AppGlobals";
+import { GameProvider, GameContext, addGame } from "./models/AppGlobals";
+import NewGameDialog from "./components/NewGameDialog";
+import { Game } from "./models/Game";
 
 
 /// App function only provides context from GameProvider, and AppContent function spews all the UI
@@ -43,16 +45,8 @@ function AppContent({
   commentRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const appGlobals = useContext(GameContext);
-  /// Prev/Next enabling
+  // Game status area definition and updating
   const g = appGlobals?.game;
-  //var prevEnabled = false;
-  //var nextEnabled = true;
-  // if (g) {
-  //   prevEnabled = !!g!.currentMove;
-  //   nextEnabled = (!!g!.currentMove && !!g!.currentMove.next) ||
-  //                 (!g!.currentMove && !!g!.firstMove);
-  // }
-  /// functions to update Title / status area
   const statusTop = 
     useMemo(() => {
               if (!g) return "SGF Editor --"; // First render this is undefined.
@@ -73,6 +67,9 @@ function AppContent({
             [appGlobals?.version, appGlobals?.game, appGlobals?.game.currentMove, 
              appGlobals?.game.blackPrisoners, appGlobals?.game.whitePrisoners]
   );
+
+  // Modal dialog support.  Only the visibility lives here.  Dialog manages its own field state.
+  const [showNew, setShowNew] = useState(false);
 
   //
   // Rendering ...
@@ -98,7 +95,7 @@ function AppContent({
         <div className={styles.panel}>
           <div className={styles.buttonRow}>
             <button className={styles.btn} 
-                    onClick={() => "do nothing now"}>New</button>
+                    onClick={() => setShowNew(true)}>New</button>
             <button
               className={styles.btn}
               onClick={() => { appGlobals?.openSgf(); }}
@@ -145,6 +142,23 @@ function AppContent({
           </div>
         </div>
       </aside>
+      {/* Portal-based modal dialogs live outside normal stacking/context.  Dialog owns its state. */}
+      <NewGameDialog
+        open={showNew}
+        onClose={() => setShowNew(false)}
+        onCreate={({ white, black, handicap, komi }) => {
+          if (!appGlobals) return; // This will never happen, appglobals exists when user can click.
+          // Construct a new game instance
+          const g = new Game(19, handicap, komi.trim());
+          //todo need to check dirty, delete default game, etc
+          g.playerWhite = white.trim();
+          g.playerBlack = black.trim();
+          addGame({g},appGlobals.getGames(), appGlobals.setGame, appGlobals.setGames);
+          setShowNew(false);
+        }}
+        // provide somw defaults
+        defaults={{ handicap: 0, komi: "6.5", }}
+      />    
     </div>
   );
 }

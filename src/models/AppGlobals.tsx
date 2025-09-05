@@ -328,23 +328,30 @@ async function doOpenButtonCmd (
   if (openidx != -1) {
     // Show existing game, updating games MRU and current game.
     gotoOpenGame(openidx);
-    // Move to function gotoOpenGame
-    const newGames = moveGameToMRU(games, openidx) //, setGame, setGames);
-    setGame(newGames[0]);
-    setGames(newGames);
+    // todo Move to function gotoOpenGame
+    addGame({idx: openidx}, games, setGame, setGames);
   } else {
     // TODO consider C# code ignores if a file opened or not, so we shouldn't be making a new Game here
     // C# code also draws tree, etc., even if nothing changed, but maybe good for cleanup?
     await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
                            {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames});
-    // const newGame = new Game();
-    // addGameAsMRU(games, newGame, setGames, setGame);
     // drawgametree
     // focus on stones
     bumpVersion();
   }
   focusOnRoot();
 } // doOpenButtonCmd()
+
+/// addGame adds g to the front of the MRU and makes it the current game, or it moves game at idx to
+/// the front of thr MRU and makes it the current game.
+///
+export function addGame (arg: { g: Game } | { idx: number }, games: readonly Game[],
+                        setGame: (g: Game) => void, setGames: (gs: Game[]) => void): void {
+  const newGames =
+    "idx" in arg ? moveGameToMRU(games, arg.idx) : [arg.g, ...games];
+  setGame(newGames[0]);
+  setGames(newGames);
+}
 
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
 /// game filename, or prompts for one if it is null. This is exported for use in app.tsx or
@@ -585,19 +592,18 @@ function gotoOpenGame(idx: number) {
   idx
 }
 
-// Move an existing game at index `idx` to the front (MRU)
-function moveGameToMRU(games: readonly Game[], idx: number /*, setGame: (g: Game) => void,
+/// moveGameToMRU moves an existing game from idx to the front (MRU).
+///
+function moveGameToMRU (games: readonly Game[], idx: number /*, setGame: (g: Game) => void,
                        setGames: (gs: Game[]) => void */): Game[] {
   if (idx < 0 || idx >= games.length) throw new Error("Must call with valid index.");
   const target = games[idx];
   const rest = games.slice(0, idx).concat(games.slice(idx + 1));
   const newGames = [target, ...rest];
-  // setGames(newGames);
-  // setGame(target);
   return newGames;
 }
 
-// function moveGameToFront(games: Game[], idx: number): Game[] {
+// function moveGameToFront (games: Game[], idx: number): Game[] {
 //   if (idx <= 0 || idx >= games.length) return games.slice();
 //   const target = games[idx];
 //   const rest = games.slice(0, idx).concat(games.slice(idx + 1));
@@ -752,9 +758,7 @@ function isEditingTarget (t: EventTarget | null): boolean {
       // the user sees each game in order of most recently visited at the time they started the cmd.
       idx = idx === games.length ? idx - 1 : idx;
     } 
-    const newGames = moveGameToMRU(games, idx) //, deps.setGame, deps.setGames);
-    deps.setGame(newGames[0]);
-    deps.setGames(newGames);
+    addGame({idx}, games, deps.setGame, deps.setGames);
     deps.setLastCommand({ type: CommandTypes.GotoNextGame, cookie: { idx } })
     deps.bumpVersion();
   }
