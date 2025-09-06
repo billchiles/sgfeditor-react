@@ -6,7 +6,7 @@
 /// code is in control and calls on the model for each game and its state changes.
 ///
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { Game, createDefaultGame, createGameFromParsedGame } from "./Game";
+import { Game, createGameFromParsedGame } from "./Game";
 import type { MessageOrQuery } from "./Game";
 //import { StoneColors, Board, Move, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
@@ -56,6 +56,8 @@ export type AppGlobals = {
   openSgf: () => Promise<void>;
   saveSgf: () => Promise<void>;
   saveSgfAs: () => Promise<void>;
+  // Central entry point for starting the New Game flow (runs prechecks, then asks UI to show modal).
+  newGame: () => Promise<void>;
   getLastCommand(): LastCommand;
   setLastCommand(lc: LastCommand): void;
 };
@@ -126,6 +128,7 @@ type CmdDependencies = {
   setLastCreatedGame: (g: Game | null) => void;
   getLastCommand: () => LastCommand;
   setLastCommand: (c: LastCommand) => void;
+  startNewGameFlow: () => Promise<void>;
 };
 
 /// ProviderProps just describes the args to GameProvider function.
@@ -135,6 +138,9 @@ type ProviderProps = {
   // Get/Set the current comment text from App (uncontrolled textarea, rendering leave alone)
   getComment: () => string;
   setComment: (text: string) => void;
+  // Let the provider ask the shell UI (App) to show the New Game dialog (portal lives in App.tsx)
+  openNewGameDialog?: () => void;
+
   // Board size for the game model (defaults to 19)
   //size: number;
 };
@@ -169,7 +175,7 @@ const browserMessageOrQuery: MessageOrQuery = {
 /// GameProvider is the big lift here.  It collects all the global state, callbacks for the model
 /// layer, etc., and makes this available to UI content below <GameProvider> under <App>.
 ///
-export function GameProvider ({ children, getComment, setComment}: ProviderProps) {
+export function GameProvider ({ children, getComment, setComment, openNewGameDialog: openNewGameDialog }: ProviderProps) {
   //const size = DEFAULT_BOARD_SIZE;
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
   // render, which would replace game and all the move state (new Game).  This holds it's value
@@ -203,6 +209,12 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
   const fileBridge: FileBridge = browserFileBridge;
   const appStorageBridge: AppStorageBridge = browserAppStorageBridge;
   const hotkeys: HotkeyBridge = browserHotkeys;
+  // One place to kick off the New Game flow (pre-check dirty, ask UI to open modal)
+  const startNewGameFlow = useCallback(async () => {
+    await checkDirtySave(gameRef.current, fileBridge);
+    openNewGameDialog?.();
+  }, [fileBridge, openNewGameDialog]);
+
   // Add next line if want to avoid deprecated MutableRefObject warning
   //const getGame = useCallback(() => gameRef.current, []);
   // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
@@ -236,12 +248,13 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
   const deps = useMemo<CmdDependencies>(
       () => ({gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ getGames: () => games, 
               setGames, setGame, getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
-              getLastCommand, setLastCommand,}), 
+              getLastCommand, setLastCommand, startNewGameFlow }), 
              [gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ games, setGames, setGame, 
-              lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand]);
+              lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
   const saveSgf   = useCallback(() => doWriteGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
+  const newGame   = useCallback(() => deps.startNewGameFlow(), [deps]);
   // Need to await handler that is calling bumpVersion, otherwise UI updates before model is done.
   const onKey     = useCallback(async (e: KeyboardEvent) => await handleKeyPressed(deps, e), [deps]);
   // Providing Hotkeys ...
@@ -257,7 +270,7 @@ export function GameProvider ({ children, getComment, setComment}: ProviderProps
             getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
             getComment, setComment,
             version, bumpVersion,
-            openSgf, saveSgf, saveSgfAs, 
+            openSgf, saveSgf, saveSgfAs, newGame,
             getLastCommand, setLastCommand,}),
     [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs,
      games, setGames, defaultGame, setDefaultGame, lastCreatedGame, setLastCreatedGame,
@@ -633,10 +646,15 @@ function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   // Handle keys that don't depend on any other UI having focus ...
   // NOTE: order matters unless testing the state of every modifier.  If not, then test for keys
   // requiring more modifiers first.
+  //
+  // If a modal is open, ignore global hotkeys completely.
+  if (document.body.dataset.modalOpen === "true") return;
   const lower = e.key.toLowerCase();
   const ctrl_s = e.ctrlKey && !e.shiftKey && !e.metaKey && lower === "s";
   const ctrl_shift_s = e.ctrlKey && e.shiftKey && lower === "s";  
   const ctrl_o = e.ctrlKey && !e.shiftKey && !e.metaKey && lower === "o";
+  // Browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
+  const alt_n = !e.ctrlKey && !e.shiftKey && !e.metaKey && e.altKey && lower === "n";
   // ESC: alway move focus to root so all keybindings work.
   if (lower === "escape" ) { //&& isEditingTarget(e.target)) { maybe always, what about dialogs?
     e.preventDefault();
@@ -664,6 +682,13 @@ function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
     void doOpenButtonCmd(deps); // do not await inside keydown
+    return;
+  }
+  if (alt_n) {
+    deps.setLastCommand( {type: CommandTypes.NoMatter });
+    e.preventDefault();
+    e.stopPropagation();
+    void deps.startNewGameFlow();
     return;
   }
   if (/*!isTextInputFocused() &&*/

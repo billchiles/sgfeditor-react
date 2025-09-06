@@ -1,4 +1,4 @@
-import { useMemo, useRef, useContext, useCallback, useState, useEffect } from "react";
+import { useMemo, useRef, useContext, useCallback, useState } from "react";
 import GoBoard from "./components/GoBoard";
 import styles from "./App.module.css";
 import { GameProvider, GameContext, addGame } from "./models/AppGlobals";
@@ -21,9 +21,15 @@ export default function App() {
   const setComment = (text: string) => {
     if (commentRef.current) commentRef.current.value = text;
   };
-  return (<GameProvider getComment={getComment} setComment={setComment}>
+  // Modal visibility lives here so the provider can ask us to open it.
+  const [showNewGameDlg, setShowNewGameDlg] = useState(false);
+
+  return (<GameProvider getComment={getComment} setComment={setComment}
+                        openNewGameDialog={() => setShowNewGameDlg(true)} >
             <AppContent commentRef={commentRef} />
-          </GameProvider>);
+            <NewGameOverlay open={showNewGameDlg} onClose={() => setShowNewGameDlg(false)} />
+          </GameProvider>
+  );
 } // App function
 
 
@@ -47,6 +53,7 @@ function AppContent({
   const appGlobals = useContext(GameContext);
   // Game status area definition and updating
   const g = appGlobals?.game;
+  // useMemo's run on firsr render and when dependencies change.
   const statusTop = 
     useMemo(() => {
               if (!g) return "SGF Editor --"; // First render this is undefined.
@@ -67,10 +74,6 @@ function AppContent({
             [appGlobals?.version, appGlobals?.game, appGlobals?.game.currentMove, 
              appGlobals?.game.blackPrisoners, appGlobals?.game.whitePrisoners]
   );
-
-  // Modal dialog support.  Only the visibility lives here.  Dialog manages its own field state.
-  const [showNew, setShowNew] = useState(false);
-
   //
   // Rendering ...
   return (
@@ -95,12 +98,15 @@ function AppContent({
         <div className={styles.panel}>
           <div className={styles.buttonRow}>
             <button className={styles.btn} 
-                    onClick={() => setShowNew(true)}>New</button>
+                    onClick={() => { appGlobals?.newGame(); }}
+                    title="Alt-n">
+              New
+            </button>
             <button
               className={styles.btn}
               onClick={() => { appGlobals?.openSgf(); }}
             >
-              Open…
+              Open
             </button>
             <button
               className={styles.btn}
@@ -143,23 +149,31 @@ function AppContent({
         </div>
       </aside>
       {/* Portal-based modal dialogs live outside normal stacking/context.  Dialog owns its state. */}
-      <NewGameDialog
-        open={showNew}
-        onClose={() => setShowNew(false)}
-        onCreate={({ white, black, handicap, komi }) => {
-          if (!appGlobals) return; // This will never happen, appglobals exists when user can click.
-          // Construct a new game instance
-          const g = new Game(19, handicap, komi.trim());
-          //todo need to check dirty, delete default game, etc
-          g.playerWhite = white.trim();
-          g.playerBlack = black.trim();
-          addGame({g},appGlobals.getGames(), appGlobals.setGame, appGlobals.setGames);
-          setShowNew(false);
-        }}
-        // provide somw defaults
-        defaults={{ handicap: 0, komi: "6.5", }}
-      />    
+      {/* Ended up moving Dialog to <App/> so provider can open it via openNewGameDialog) */}
     </div>
+  );
+}
+
+/// Renders the New Game dialog inside the game provider's context
+function NewGameOverlay ({ open, onClose, }: { open: boolean; onClose: () => void;}) {
+  const appGlobals = useContext(GameContext);
+  if (!appGlobals) return null;
+  return (
+    <NewGameDialog
+      open={open}
+      onClose={onClose}
+      onCreate={({ white, black, handicap, komi }) => {
+        const g = new Game(19, handicap, komi.trim());
+        g.playerWhite = white;
+        g.playerBlack = black;
+        addGame({ g }, appGlobals.getGames(), appGlobals.setGame, appGlobals.setGames);
+        onClose();
+      }}
+      defaults={{
+        handicap: appGlobals.getGame().handicap ?? 0,
+        komi: appGlobals.getGame().komi ?? "6.5",
+      }}
+    />
   );
 }
 

@@ -1,58 +1,47 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 
 type ModalProps = {
   open: boolean;
-  onClose: () => void;            // called on Escape or backdrop click
+  onClose: () => void;  // called on Escape
   children: React.ReactNode;
 };
 
 export default function Modal({ open, onClose, children }: ModalProps) {
-  const firstFocusRef = useRef<HTMLDivElement | null>(null);
-
+  // Reference to the dialog content; used for TAB focus trapping only.
+  const contentRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open) return;
-
-    // Mark app as “modal-open” for hotkeys guard and lock scroll
     const prev = document.body.dataset.modalOpen;
     document.body.dataset.modalOpen = "true";
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-
-    // Focus first focusable thing inside
-    const timer = requestAnimationFrame(() => {
-      firstFocusRef.current?.focus();
-    });
-
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
         e.preventDefault();
         onClose();
+        // return focus so global hotkeys work immediately
+        requestAnimationFrame(() => {
+          const root = document.getElementById("app-focus-root") as HTMLElement | null;
+          root?.focus();
+        });
       }
-      // Simple focus trap: cycle Tab inside the modal
       if (e.key === "Tab") {
-        const root = firstFocusRef.current?.parentElement;
+        const root = contentRef.current;
         if (!root) return;
         const focusables = root.querySelectorAll<HTMLElement>(
           'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])'
         );
         if (focusables.length === 0) return;
         const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
+        const last  = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       }
     };
-
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
-      cancelAnimationFrame(timer);
       document.removeEventListener("keydown", onKeyDown, true);
       document.body.dataset.modalOpen = prev ?? "";
       document.body.style.overflow = prevOverflow;
@@ -61,12 +50,16 @@ export default function Modal({ open, onClose, children }: ModalProps) {
 
   if (!open) return null;
 
-  // backdrop click closes
+  // Clicking the backdrop should NOT dismiss. Keep focus inside the modal.
   const onBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose();
+    if (e.target === e.currentTarget) {
+      e.preventDefault();
+      e.stopPropagation();
+      // Keep focus inside, but do not steal focus from inputs during typing.
+      // (no-op)    
+    }
   };
 
-  /// 
   return createPortal(
     <div
       onMouseDown={onBackdrop}
@@ -91,9 +84,8 @@ export default function Modal({ open, onClose, children }: ModalProps) {
           boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
         }}
         onMouseDown={(e) => e.stopPropagation()}
+        ref={contentRef}
       >
-        {/* sentinel to grab initial focus */}
-        <div ref={firstFocusRef} tabIndex={0} style={{ outline: "none" }} />
         {children}
       </div>
     </div>,
