@@ -1,4 +1,50 @@
-import React, { useEffect, useCallback, useRef } from "react";
+/// Generally re-usable modal dialog container mechanics.  It renders an overlay via createPortal to
+/// cover main UI (<div role="dialog").  It manages focus for dialogs, escape cancelling to put
+/// focus back on #app-focus-root, locks body scrolling, etc.
+///
+/// Basic architectue of dialogs ...
+/// App.tsx (shell)
+///   + AppContent (main UI)
+///   + #app-focus-root (hidden focus target)
+///   + NewGameOverlay (wires dialog to model)
+///       + NewGameDialog (form)
+///           + Modal (portal + a11y container)
+///
+/// AppGlobals.tsx (GameProvider context)
+///   + commands (newGame/open/save…), hotkeys, prechecks (checkDirtySave)
+///
+/// App.tsx separates GameProvider/logic from React state details about dialogs.  It owns dialog
+/// visibility, where dialogs appear in the tree, boolean to show/hide each dialog (e.g., showNewGameDlg),
+/// exposes a capability to open dialogs to the provider (e.g., giving openNewGameDialog() that sets
+/// showNewGameDlf to true to GameProvider, which triggers NewGameOverlay to display alongside
+/// AppContent so dialog portals sits on top.
+///
+/// AppGlobals.tsx has some command trampolines that do a bit before calling on App.tsx to launch
+/// dialogs, such as calling checkDirtySave.
+/// Encapsulates: all cross-cutting “modal logic” (portal, focus trap, Esc behavior, body-lock).
+/// Isolates: form UIs from needing to worry about accessibility and keyboard traps.
+///
+/// NewGameDialog gets callbacks for cancel, commit, and default values, and it maintains local state
+/// for fields in the dialog.  Other dialogs work similarly.
+///
+/// Adding new dialogs pattern:
+///    Create FoooDialog (form/UX).
+///    Add a shell callback openFooDialog that provider code can call.
+///    Add a provider command, like opensgf, to tee up dialog launch.
+///    Render a fooOverlay wrapper to turn results into model updates.
+///
+/// You click New (button calls appGlobals.newGame()) or press alt-n (calls startNewGameFlow, 
+/// which newGame calls).  The provider runs checkDirtySave() or other pre-dialog prep and calls
+/// App.tsx's/shell’s openNewGameDialog() callback.  App shell sets showNewGameDlg=true, which 
+/// causes NewGameOverlay which contains NewGameDialog to open.  Modal mounts, locks body scroll,
+/// sets dataset.modalOpen="true", and installs Esc & Tab-trap listeners.  Dialog mounts,
+/// initializes field state from defaults, calls dialog onClose() for Cancel or Esc to unmount MOdal
+/// and return focus to #app-focus-root, OR calls handleCreate for Create (or Enter).  If invalid 
+/// values, alert user to proper usage, otherwise call onCreate({ white, black, handicap, komi }).
+/// NewGameOverlay receives result, creates a new Game, sets players, inserts to MRU/selects it and
+/// calls onClose().  Modal unmount, focus returns to #app-focus-root, and new game is visible.
+///
+import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 type ModalProps = {

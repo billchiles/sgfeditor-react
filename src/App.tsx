@@ -1,3 +1,15 @@
+/// App.tsx owns app UI state and composition.
+/// It owns dialog visibility, where dialogs appear in the tree.
+///    Holds the boolean that shows/hides each dialog (e.g., showNewGameDlg).
+///    Exposes a capability to open dialogs to the provider 
+///       (e.g., openNewGameDialog={() => setShowNewGameDlg(true)}).
+///    Renders NewGameOverlay alongside AppContent so dialog portals sits above everything visually.
+/// It renders #app-focus-root (a hidden, focusable div) so we can snap focus and global key
+///    bindings work.
+///
+/// NewGameOverlay bridges dialog results to the model and implements the dialog’s onCreate to make
+/// the new game and update current game and games MRU.
+///
 import { useMemo, useRef, useContext, useCallback, useState } from "react";
 import GoBoard from "./components/GoBoard";
 import styles from "./App.module.css";
@@ -164,6 +176,7 @@ function NewGameOverlay ({ open, onClose, }: { open: boolean; onClose: () => voi
       onClose={onClose}
       onCreate={({ white, black, handicap, komi }) => {
         const g = new Game(19, handicap, komi.trim());
+        //TODO: alert if bad handicap
         g.playerWhite = white;
         g.playerBlack = black;
         addGame({ g }, appGlobals.getGames(), appGlobals.setGame, appGlobals.setGames);

@@ -1,10 +1,18 @@
 /// This file should be renamed.  It is app globals in a sense, but is more so is an abstraction
 /// to isolate UI code from model code.  This file is ostensibly UI/React side of the fence, but
-/// it will have a lot of code to add and remove games, manage the games list.  The model code
-/// just knows about a game, a board, moves, and related logic.  While a list of games feels like
-/// app domain, not UI domain, there is nothing more to the list of games than the list, so the UI
-/// code is in control and calls on the model for each game and its state changes.
+/// it will have a lot of code for app-level commands and keybindings, such as add and remove games, 
+/// manage the games list, saving games, etc.  The model code just knows about a game, a board, 
+/// moves, and related logic.  While a list of games feels like app domain, not UI domain, there is 
+/// nothing more to the list of games than the list, so the UI code is in control and calls on the 
+/// model for each game and its state changes.
 ///
+/// GameProvider has several little functions that enable command code to be invoked from UI
+/// components and keybindings, and they trampoline to the actual implementations (newgame, opensgf,
+/// savesgf, etc.). These may do some preliminary work, such as calling checkDirtySave.
+///
+/// It also handles global keybindings, handleKeyPress, which ignores input when dialogs are up, or
+/// commentBox has focus.
+
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { Game, createGameFromParsedGame } from "./Game";
 import type { MessageOrQuery } from "./Game";
@@ -688,7 +696,7 @@ function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     deps.setLastCommand( {type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
-    void deps.startNewGameFlow();
+    void deps.startNewGameFlow(); // void explicitly ignores result
     return;
   }
   if (/*!isTextInputFocused() &&*/

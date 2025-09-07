@@ -1,3 +1,22 @@
+/// This owns the form UX and validation for new games.
+///
+/// NewGameDialog gets callbacks for cancel, commit, and default values, and it maintains local state
+/// for fields in the dialog.
+///
+/// Wraps inputs and buttons in a <form onSubmit={handleCreate}> so Enter == Create.
+///
+/// handelCreate validates handicap integer on submit and calls 
+/// onCreate({ white, black, handicap, komi }) only when valid.
+///
+/// Cancel calls onClose(), and Modal will return focus to #app-focus-root.
+///
+// Encapsulates: field state, input parsing/validation, submit/cancel semantics.
+// Isolates: model updates and global UI from form internals.
+
+
+
+
+
 import { useEffect, useState, useRef } from "react";
 import Modal from "./modals"; // shared portal modal
 
@@ -33,9 +52,13 @@ export default function NewGameDialog({ open, onClose, onCreate, defaults,}:
   const handleCreate = (e?: any) => {
     e?.preventDefault();
     const h = parseInt(handicapText.trim() === "" ? "0" : handicapText, 10);
-    const handicap = Number.isFinite(h) ? Math.max(0, Math.min(9, Math.trunc(h))) : 0;
+    if (!Number.isFinite(h) || h < 0 || h > 9) {
+      window.alert("Handicap must be an integer from 0–9 (use 0 for no handicap).");
+      return;
+    }
+    const k = (komi.trim() === "" ? "6.5" : komi.trim());
     // Call back to App owner to make game ans so on.
-    onCreate({ white: white.trim(), black: black.trim(), handicap, komi: komi.trim(), });  };
+    onCreate({ white: white.trim(), black: black.trim(), handicap: h, komi: k, });  };
 
   const close = () => {
     onClose();
