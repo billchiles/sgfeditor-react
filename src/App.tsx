@@ -13,7 +13,7 @@
 import { useMemo, useRef, useContext, useCallback, useState } from "react";
 import GoBoard from "./components/GoBoard";
 import styles from "./App.module.css";
-import { GameProvider, GameContext, addGame } from "./models/AppGlobals";
+import { GameProvider, GameContext, addOrGotoGame } from "./models/AppGlobals";
 import NewGameDialog from "./components/NewGameDialog";
 import { Game } from "./models/Game";
 
@@ -176,10 +176,9 @@ function NewGameOverlay ({ open, onClose, }: { open: boolean; onClose: () => voi
       onClose={onClose}
       onCreate={({ white, black, handicap, komi }) => {
         const g = new Game(19, handicap, komi.trim());
-        //TODO: alert if bad handicap
         g.playerWhite = white;
         g.playerBlack = black;
-        addGame({ g }, appGlobals.getGames(), appGlobals.setGame, appGlobals.setGames);
+        addOrGotoGame({ g }, appGlobals.getGames(), appGlobals.setGame, appGlobals.setGames);
         onClose();
       }}
       defaults={{

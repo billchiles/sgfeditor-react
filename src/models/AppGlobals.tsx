@@ -264,7 +264,10 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
   const newGame   = useCallback(() => deps.startNewGameFlow(), [deps]);
   // Need to await handler that is calling bumpVersion, otherwise UI updates before model is done.
-  const onKey     = useCallback(async (e: KeyboardEvent) => await handleKeyPressed(deps, e), [deps]);
+  const onKey     = useCallback( 
+    // listeners and event systems don't await handlers, so don't async the lambda and await
+    // handlekeypressed, just use void decl to say we ignore the promise from handleKeyPress.
+    (e: KeyboardEvent) => void handleKeyPressed(deps, e), [deps]);
   // Providing Hotkeys ...
   // leftarrow/rightarrow for Prev/Next; c-s for Save
   useEffect(() => {
@@ -290,26 +293,13 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   return <GameContext.Provider value={api}>{children}</GameContext.Provider>;
 } // GameProvider function 
 
-// function createDefaultGameForUI (setDefaultGame: (g: Game | null) => void, setGame: (g: Game) => void,
-//                                  getGames: () => readonly Game[], setGames: (gs: Game[]) => void) {
-//   const g = createDefaultGame(setGame, getGames, setGames);
-//   setDefaultGame(g);
-//   setupBoardDisplay(g); // call init tree view model instead
-//   // C# code had to setup title and game tree.
-//   // TODO:? we need to setup the game tree view model for drawing
-//   focusOnRoot();
-//   return g;
-// }
 
 /// setupBoardDisplay in C# created lines, labels, etc., but we don't need to do that here.
-/// Now this just checks settings and clears the comment box.  No need for UI cleanup.
-// function setupBoardDisplay (newgame: Game) {
-//   newgame
-//   // TODO check flag for first run, pull in settings if have settings store.
-//   // addInitialStones(newgame); all UI internal stuff, no true model
-//   // TODO: initialize tree view
-//   // used to set click mode to move, but this version will rely on keybindings, no mode buttons.
-// }
+/// In the react/ts code, just need to get settings (initial stones already added to model)
+/// for createDefaultGame when first launch:
+///   TitleFontSize, IndexesFontSize, CommentFontSize, TreeNodeSize, TreeNodeFontSize,
+///   TreeCurrentHighlight, and TreeCommentHIghlight.
+/// Maybe setup tree view?
 
 
 ///
@@ -348,12 +338,9 @@ async function doOpenButtonCmd (
   const openidx = games.findIndex(g => g.filename === fileName);
   if (openidx != -1) {
     // Show existing game, updating games MRU and current game.
-    gotoOpenGame(openidx);
-    // todo Move to function gotoOpenGame
-    addGame({idx: openidx}, games, setGame, setGames);
+    addOrGotoGame({idx: openidx}, games, setGame, setGames);
   } else {
-    // TODO consider C# code ignores if a file opened or not, so we shouldn't be making a new Game here
-    // C# code also draws tree, etc., even if nothing changed, but maybe good for cleanup?
+    // TODO test failures and cleanups or no cleanup needed
     await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
                            {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames});
     // drawgametree
@@ -366,7 +353,7 @@ async function doOpenButtonCmd (
 /// addGame adds g to the front of the MRU and makes it the current game, or it moves game at idx to
 /// the front of thr MRU and makes it the current game.
 ///
-export function addGame (arg: { g: Game } | { idx: number }, games: readonly Game[],
+export function addOrGotoGame (arg: { g: Game } | { idx: number }, games: readonly Game[],
                         setGame: (g: Game) => void, setGames: (gs: Game[]) => void): void {
   const newGames =
     "idx" in arg ? moveGameToMRU(games, arg.idx) : [arg.g, ...games];
@@ -437,9 +424,8 @@ async function doOpenGetFileGame (fileHandle: unknown, fileName: string, data: s
       // Narrow the type of 'e' to Error for safe access to 'message'
       if (err instanceof SGFError) {
         await curgame.message!.message(
-          `IO Error with opening or reading file.\n\n${err.message}\n\n${err.stack}`);
-      }
-      if (err instanceof Error) 
+          `IO/SGF Error with opening or reading file.\n\n${err.message}\n\n${err.stack}`);
+      } else if (err instanceof Error) 
         await curgame.message!.message(`Error opening game.\n\n${err.message}\n\n${err.stack}`);
       if (cleanup.getLastCreatedGame() !== null) {
         // Error after creating game, so remove it and reset board to last game or default game.
@@ -448,7 +434,7 @@ async function doOpenGetFileGame (fileHandle: unknown, fileName: string, data: s
         // I think we want to use curgame here, not gameref, so we see the game that was current
         // when this function started executing.
         undoLastGameCreation((cleanup.getGames().findIndex((g) => g === curgame)) != -1 ? 
-        //TODO not impl, need more helpers passed down, like setgames
+        // TODO not impl, need more helpers passed down, like setgames
                               curgame : null);
         }
         // await curgame.message!.message(
@@ -542,6 +528,7 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
   return g; 
 }
 
+/// TODO not sure we need this at all, but
 function undoLastGameCreation (game: Game | null) {
   game
 }
@@ -608,11 +595,6 @@ function quickieGetSGF (g: Game, size: number): string {
 //// Games and Setup Helpers
 ///
 
-
-function gotoOpenGame(idx: number) {
-  idx
-}
-
 /// moveGameToMRU moves an existing game from idx to the front (MRU).
 ///
 function moveGameToMRU (games: readonly Game[], idx: number /*, setGame: (g: Game) => void,
@@ -648,7 +630,7 @@ function moveGameToMRU (games: readonly Game[], idx: number /*, setGame: (g: Gam
 /// stopPropagation to run immediately and have effect.  Also, keydown can repeat while awaiting
 /// and have adverse effects.
 ///
-function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
+async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   // console.log("hotkey", { key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, 
   //                         shift: e.shiftKey, target: e.target });
   // Handle keys that don't depend on any other UI having focus ...
@@ -707,7 +689,7 @@ function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return;
   }
   //
-  // The following depend on what other UI has focus ...
+  // ********** The following depend on what other UI has focus ... **********
   //
   // If the user is editing text (e.g., the comment textarea), don't further process the following.
   if (isEditingTarget(e.target)) {
@@ -727,18 +709,30 @@ function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     if (m !== null) deps.bumpVersion();
     return;
   }
-  if (lower === "arrowup") {
+  if (lower === "arrowup" && !e.ctrlKey) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     curgame.selectBranchUp(); // Calls onchange if needed.
     return;
   }
-  if (lower === "arrowdown" && curgame.canReplayMove()) {
+  if (lower === "arrowdown" && !e.ctrlKey&& curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     curgame.selectBranchDown(); // Calls onchange if needed
     return;
   }
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && lower === "arrowup") {
+    e.preventDefault(); // called before await so browser scrolling etc blocked immediately.
+    await curgame.moveBranchUp();   // or curgame.()
+    return;
+  }
+
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && lower === "arrowdown") {
+    e.preventDefault();
+    await curgame.moveBranchDown(); // or curgame.moveBranchOrderDown()
+    return;
+  }
+
   if (lower === "home" && curgame.canUnwindMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
@@ -791,7 +785,7 @@ function isEditingTarget (t: EventTarget | null): boolean {
       // the user sees each game in order of most recently visited at the time they started the cmd.
       idx = idx === games.length ? idx - 1 : idx;
     } 
-    addGame({idx}, games, deps.setGame, deps.setGames);
+    addOrGotoGame({idx}, games, deps.setGame, deps.setGames);
     deps.setLastCommand({ type: CommandTypes.GotoNextGame, cookie: { idx } })
     deps.bumpVersion();
   }

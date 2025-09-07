@@ -798,6 +798,9 @@ replayUnrenderedAdornments (move: Move): void {
   //// Branching Helpers
   ///
 
+  /// selectBranchUp makes one branch higher/earlier in the branches array the current branch and
+  /// fixes curmove's next pointer.
+  ///
   selectBranchUp () {
     const curmove = this.currentMove;
     let branches = null;
@@ -824,6 +827,9 @@ replayUnrenderedAdornments (move: Move): void {
     return;
   } // moveBranchUp()
 
+  /// selectBranchDown makes one branch lower/later in the branches array the current branch and
+  /// fixes curmove's next pointer.
+  ///
   selectBranchDown () {
     const curmove = this.currentMove;
     let branches = null;
@@ -850,6 +856,105 @@ replayUnrenderedAdornments (move: Move): void {
     return;
   } // moveBranchDown()
   
+
+  /// moveBranchUpp and moveBranchDown move the current move (if it follows a move or initial board 
+  /// state with branching) to be higher or lower in the previous branches list.  If the game hasn't
+  /// started, or the conditions aren't met, this informs the user.
+  ///
+  async moveBranchUp (): Promise<void> {
+    const res = await this.branchesForMoving();
+    if (!res) return;
+    const [branches, curIndex] = res;
+    await this.moveBranch(branches, curIndex, -1);
+    this.isDirty = true;
+    this.onChange?.(); // title/tree refresh is derived from state in the React layer
+  }
+
+  // Move the current branch down in the sibling list.
+  async moveBranchDown (): Promise<void> {
+    const res = await this.branchesForMoving();
+    if (!res) return;
+    const [branches, curIndex] = res;
+    await this.moveBranch(branches, curIndex, +1);
+    this.isDirty = true;
+    this.onChange?.();
+  }
+
+  /// branchesForMoving returns the branches list (from previous move or
+  /// initial board state) and the index in that list of the current move.
+  /// This does user interaction for moveBranchUp and moveBranchDown.
+  ///
+  private async branchesForMoving (): Promise<[Move[], number] | null> {
+    // Game not started → no branches to modify.
+    // const noMoves =
+    //   (this.firstMove === null) &&
+    //   (this.branches === null || this.branches.length === 0);
+
+    // if (noMoves) {
+    //   await this.message?.message?.("Game not started, no branches to modify.");
+    //   return null;
+    // }
+    const current = this.currentMove;
+    if (current === null) {
+      await this.message?.message?.("Must be on the first move of a branch to move it.");
+      return null;
+    }
+    // Get appropriate branches
+    const prev = current.previous;
+    let branches: Move[] | null;
+    if (prev === null) {
+      branches = this.branches;
+    } else {
+      branches = prev.branches;
+    }
+    // Any branches?
+    if (branches === null) {
+      await this.message?.message?.("Must be on the first move of a branch to move it.");
+      return null;
+    }
+    // Get index of current move in branches
+    let curIndex = -1;
+    if (prev === null) {
+      // Reordering among root branches; current should equal firstMove
+      curIndex = branches.indexOf(this.firstMove as Move);
+    } else {
+      // Reordering among prev.branches; current should be prev.next
+      curIndex = branches.indexOf(prev.next as Move);
+    }
+    debugAssert(curIndex !== -1, "Current move must be a member of the branch list.");
+    return [branches, curIndex];
+  }
+
+  /// moveBranch takes a list of branches and the index of a branch to move
+  /// up or down, depending on delta.  This provides feedback to the user on
+  /// the result.
+  /// 
+  private async moveBranch (branches: Move[], curIndex: number, delta: 1 | -1): Promise<void> {
+    debugAssert(delta === 1 || delta === -1, "Branch moving delta must be 1 or -1 for now.");
+    const swap = () => {
+      const tmp = branches[curIndex];
+      branches[curIndex] = branches[curIndex + delta];
+      branches[curIndex + delta] = tmp;
+    };
+
+    if (delta < 0) {
+      // moving up and current is not top ...
+      if (curIndex > 0) {
+        swap();
+        await this.message?.message?.("Branch moved up.");
+      } else {
+        await this.message?.message?.("This branch is the main branch.");
+      }
+    } else {
+      // moving down and current is not last ...
+      if (curIndex < branches.length - 1) {
+        swap();
+        await this.message?.message?.("Branch moved down.");
+      } else {
+        await this.message?.message?.("This branch is the last branch.");
+      }
+    }
+}
 
 } // Game class
 
@@ -1073,8 +1178,9 @@ export function createDefaultGame (setGame: (g: Game) => void, getGames: () => r
 return createGame(Board.MaxSize, 0, Game.DefaultKomi, null, null, setGame, getGames, setGames);
 }
 
-/// createGame in the C# code setup board display and added the game to the Game Context app globals.
-/// handicap stones includes AB stones.
+/// createGame makes the game and makes it current game.  The constructor adds handicap stones to
+/// the board.
+/// TODO does this need to clear the UI comment box?
 ///
 export function createGame (size : number, handicap : number, komi : string, 
                             handicapStones: Move[] | null = null, all_white : Move[] | null = null,
