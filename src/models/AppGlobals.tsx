@@ -18,8 +18,8 @@ import { Game, createGameFromParsedGame } from "./Game";
 import type { MessageOrQuery } from "./Game";
 //import { StoneColors, Board, Move, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
-import { browserFileBridge, browserAppStorageBridge, browserHotkeys } from "../platforms/browser-bridges";
-import type { AppStorageBridge, FileBridge, HotkeyBridge } from "../platforms/bridges";
+import { browserFileBridge, browserAppStorageBridge, browserKeybindings } from "../platforms/browser-bridges";
+import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platforms/bridges";
 import {parseFile, SGFError} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
 //import { debugAssert } from "../debug-assert";
@@ -126,6 +126,7 @@ type CmdDependencies = {
   // Then change cmd implementers to getGame: () => Game instead of gameref param
   gameRef: React.MutableRefObject<Game>; 
   bumpVersion: () => void;
+  commonKeyBindingsHijacked: boolean; // true in browser, false in Electron
   fileBridge: FileBridge;
   appStorageBridge: AppStorageBridge;
   //size: number;
@@ -216,7 +217,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);
   const fileBridge: FileBridge = browserFileBridge;
   const appStorageBridge: AppStorageBridge = browserAppStorageBridge;
-  const hotkeys: HotkeyBridge = browserHotkeys;
+  const hotkeys: KeyBindingBridge = browserKeybindings;
+  //const isElectron = !!(window as any)?.process?.versions?.electron;
+  const commonKeyBindingsHijacked = hotkeys.commonKeyBindingsHijacked; //!isElectron; 
   // One place to kick off the New Game flow (pre-check dirty, ask UI to open modal)
   const startNewGameFlow = useCallback(async () => {
     await checkDirtySave(gameRef.current, fileBridge);
@@ -254,11 +257,12 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // One deps object to pass to top-level commands that updates if any member changes ref ID.
   // React takes functions anywhere it takes a value and invokes it to get the value if types match.
   const deps = useMemo<CmdDependencies>(
-      () => ({gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ getGames: () => games, 
-              setGames, setGame, getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
-              getLastCommand, setLastCommand, startNewGameFlow }), 
+      () => ({gameRef, bumpVersion, commonKeyBindingsHijacked, fileBridge, appStorageBridge, 
+              getGames: () => games, setGames, setGame, getLastCreatedGame: () => lastCreatedGame, 
+              setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow }), 
              [gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ games, setGames, setGame, 
-              lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow]);
+              lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
+              commonKeyBindingsHijacked]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
   const saveSgf   = useCallback(() => doWriteGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
@@ -268,12 +272,18 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     // listeners and event systems don't await handlers, so don't async the lambda and await
     // handlekeypressed, just use void decl to say we ignore the promise from handleKeyPress.
     (e: KeyboardEvent) => void handleKeyPressed(deps, e), [deps]);
-  // Providing Hotkeys ...
-  // leftarrow/rightarrow for Prev/Next; c-s for Save
+  // Providing keybindings ...
   useEffect(() => {
     hotkeys.on(onKey);
     return () => hotkeys.off(onKey);
   }, [hotkeys, onKey]);
+  // useEffect(() => {
+  //   // Dev-only logging (optional)
+  //   if (import.meta.env.MODE !== "development") return;
+  //   const h = (ev: KeyboardEvent) => logKey(ev);
+  //   window.addEventListener("keydown", h, { capture: true }); // capture = early
+  //   return () => window.removeEventListener("keydown", h, { capture: true });
+  // }, []);
   // Code to provide the values when the UI rendering code runs
   const api: AppGlobals = useMemo(
     () => ({game: gameRef.current, getGame, setGame, getGames: () => games, setGames,
@@ -373,13 +383,13 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge): Promise<void> {
       // g.message must be set if this is running, and the board is dirty.
       (await g.message!.confirm?.("Game is unsaved, OK save, Cancel/Esc leave unsaved.")) === true) {
     if (g.saveCookie !== null) {
-      await g.writeGame(g.saveCookie);
+      // todo no op
+      fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
     } else {
-      // const handle = await g.message.getSaveFileHandle?.("game.sgf");
-      const data = quickieGetSGF(g, g.size);
-      fileBridge.saveAs("game01.sgf", data);
-      // if (handle) {
-      //   await g.writeGame(handle);
+      const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
+      if (tmp !== null) {
+        g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+      }
     }
   } else {
     // Clean up autosave file to avoid dialog when re-opening about unsaved file edits.
@@ -543,7 +553,7 @@ async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastComman
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   // GATHER STATE FIRST -- commit dirty comment to game or move, then save
   const g = gameRef.current;
-  const data = quickieGetSGF(g, g.size);
+  const data = g.buildSGFString();
   const hint = g.filename ?? "game.sgf";
   const res = await fileBridge.save(g.saveCookie ?? null, hint, data);
   focusOnRoot(); // call before returning to ensure back at top
@@ -562,7 +572,7 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
     CmdDependencies): Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
-  const data = quickieGetSGF(g, g.size);
+  const data = g.buildSGFString();
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
   if (!res) return; // cancelled
   const { fileName, cookie } = res;
@@ -573,22 +583,6 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
     g.saveCookie = cookie;
     bumpVersion();
   }
-}
-
-/// This could take getGame: () => Game instead of gameref to avoid MutuableRefObject warning
-function quickieGetSGF (g: Game, size: number): string {
-  // Minimal: (;GM[1]SZ[19];B[dd];W[pp]...)
-  const letters = "abcdefghjklmnopqrstuvwxyz"; // 'i' skipped
-  const toCoord = (row: number, col: number) => letters[col] + letters[row];
-  const parts: string[] = [`(;GM[1]SZ[${size}]`];
-  let m = g.firstMove;
-  while (m) {
-    const abbr = m.color === "black" ? "B" : "W";
-    parts.push(`;${abbr}[${toCoord(m.row, m.column)}]`);
-    m = m.next ?? null;
-  }
-  parts.push(")");
-  return parts.join("");
 }
 
 ///
@@ -626,23 +620,45 @@ function moveGameToMRU (games: readonly Game[], idx: number /*, setGame: (g: Gam
 //// Keybindings
 ///
 
+/// Debugging telemetry.  See the following code in
+///   useEffect(() => {
+///     const h = (ev: KeyboardEvent) => logKey(ev);
+///     window.addEventListener("keydown", h, { capture: true });
+///     return () => window.removeEventListener("keydown", h, { capture: true });
+///   }, []);
+// function logKey(e: KeyboardEvent) {
+//   console.log({
+//     key: e.key, code: e.code, which: (e as any).which,
+//     ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey,
+//     getCtrl: e.getModifierState("Control"),
+//     getShift: e.getModifierState("Shift"),
+//     getCaps: e.getModifierState("CapsLock"),
+//     repeat: e.repeat, target: (e.target as HTMLElement)?.tagName,
+//   });
+// }
+
 /// handleKeyPressed shouldn't be async and await callees because we need the preventDefault and
 /// stopPropagation to run immediately and have effect.  Also, keydown can repeat while awaiting
 /// and have adverse effects.
 ///
 async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
-  // console.log("hotkey", { key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, 
-  //                         shift: e.shiftKey, target: e.target });
+  // console.log(`saw key:, ${ e.key}, code: e.code, ctrl: ${e.ctrlKey}, meta: ${e.metaKey}, 
+  //                          shift: ${e.shiftKey}, target: ${e.target }}`);
   // Handle keys that don't depend on any other UI having focus ...
   // NOTE: order matters unless testing the state of every modifier.  If not, then test for keys
   // requiring more modifiers first.
   //
-  // If a modal is open, ignore global hotkeys completely.
+  // If a modal dialog is open, ignore global key bindings completely.
   if (document.body.dataset.modalOpen === "true") return;
   const lower = e.key.toLowerCase();
-  const ctrl_s = e.ctrlKey && !e.shiftKey && !e.metaKey && lower === "s";
-  const ctrl_shift_s = e.ctrlKey && e.shiftKey && lower === "s";  
-  const ctrl_o = e.ctrlKey && !e.shiftKey && !e.metaKey && lower === "o";
+  const control = e.getModifierState("Control") || e.ctrlKey; //e.getModifierState("CapsLock") || 
+  const shift = e.getModifierState("Shift") || e.shiftKey;
+  const alt = e.getModifierState("Alt") || e.altKey;
+  const browser = deps.commonKeyBindingsHijacked;
+  const ctrl_s = control && !shift && e.code === "KeyS"; //lower === "s";&& !e.metaKey
+  const ctrl_shift_s = browser ? control && alt && e.code === "KeyS" : //lower === "s") ||
+                                 control && shift && e.code === "KeyS";
+  const ctrl_o = e.ctrlKey && !e.shiftKey && lower === "o"; //&& !e.metaKey 
   // Browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
   const alt_n = !e.ctrlKey && !e.shiftKey && !e.metaKey && e.altKey && lower === "n";
   // ESC: alway move focus to root so all keybindings work.
@@ -658,6 +674,8 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   if (ctrl_shift_s) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
+    e.stopPropagation();
+    (e as any).stopImmediatePropagation?.(); // stop any addins from granning keys
     void saveAsCommand(deps);
     return;
   }

@@ -203,11 +203,20 @@ export class Move implements IMoveNext {
 /// Adornments
 ///
 
+export const AdornmentKinds = {
+  Triangle: "triangle",
+  Square: "square",
+  Letter: "letter",
+  CurrentMove: "current move",
+} as const;
+
+export type AdornmentKind = (typeof AdornmentKinds)[keyof typeof AdornmentKinds];
+
 export type Adornment =
-  | { kind: "triangle"; row: number, column: number }
-  | { kind: "square"; row: number, column: number }
-  | { kind: "letter"; row: number, column: number; text: string }
-  | { kind: "currentMove"; row: number, column: number };
+  | { kind: typeof AdornmentKinds.Triangle; row: number, column: number }
+  | { kind: typeof AdornmentKinds.Square; row: number, column: number }
+  | { kind: typeof AdornmentKinds.Letter; row: number, column: number; letter: string }
+  | { kind: typeof AdornmentKinds.CurrentMove; row: number, column: number };
 
 
 
@@ -240,13 +249,13 @@ export function getParsedCoordinates(moveOrAdornment: { row: number; column: num
   }
 }
 
-/// FlipParsedCoordinates is only called from GameAux.FlipCoordinates, which is only used for
+/// FlipParsedCoordinates is only called from Game.ts flipCoordinates, which is only used for
 /// writing files.  Hence, we represent pass coordinates as the empty string.  Apparently, some
 /// programs use "tt" due to older format conventions.
 ///
 export function flipParsedCoordinates(coords: string, size: number): string {
   const [r, c] = parsedToModelCoordinates(coords);
-  if (r === Board.NoIndex) return "";
+  if (r === Board.NoIndex) return ""; // pass move
   return sgfCoordLetters[size + 1 - c] + sgfCoordLetters[size + 1 - r];
 }
 

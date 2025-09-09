@@ -127,6 +127,13 @@ function AppContent({
             >
               Save
             </button>
+            <button
+              className={styles.btn}
+              onClick={() => { appGlobals?.saveSgfAs(); }}  // calls saveAsCommand via provider
+              title="c-shift-s"
+            >
+              Save As…
+            </button>
           </div>
           <div className={styles.buttonRow}>
             <CommandButtons/>

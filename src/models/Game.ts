@@ -1,8 +1,9 @@
 import { debugAssert } from '../debug-assert';
 import { Board, Move, StoneColors, oppositeColor, parsedToModelCoordinates,
-         parsedLabelModelCoordinates, modelCoordinateToDisplayLetter} from './Board';
-import type { StoneColor, Adornment } from './Board';
-import { ParsedGame, type ParsedNode } from './sgfparser';
+         parsedLabelModelCoordinates, modelCoordinateToDisplayLetter,
+         getParsedCoordinates, flipParsedCoordinates } from './Board';
+import { type StoneColor, type Adornment, type AdornmentKind, AdornmentKinds} from './Board';
+import { ParsedGame, ParsedNode } from './sgfparser';
 import { SGFError } from './sgfparser';
 
 export const DEFAULT_BOARD_SIZE = 19;
@@ -34,6 +35,7 @@ export class Game {
   whitePrisoners: number; // number of black stones captured by white
   // Comments holds any initial board state comments for the game.  Opening a file sets this.
   comments: string;
+  miscGameInfo: Record<string, string[]> | null;
 
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion, keeping model / UI isolation.
@@ -71,6 +73,7 @@ export class Game {
     this.blackPrisoners = 0;
     this.whitePrisoners = 0;
     this.comments = "";
+    this.miscGameInfo = null;
   }
 
   static readonly DefaultKomi = "6.5";
@@ -729,13 +732,8 @@ replayUnrenderedAdornments (move: Move): void {
   }
 
   ///
-  //// File Writing
+  //// Generating SGF Representation of Games
   ///
-
-  async writeGame (saveCookie: unknown, autosave: boolean = false): Promise<void> {
-    saveCookie
-    autosave // save file info
-  }
 
   /// SaveGameFileInfo updates the games storage object and filename properties.
   /// This is public since it is called from MainWindow.xaml.cs and App.xaml.cs.
@@ -746,6 +744,144 @@ replayUnrenderedAdornments (move: Move): void {
     const parts = path.split(/[/\\]/); 
     this.filebase = parts[parts.length - 1];
   }
+
+/// buildSGFString returns SGF representation of the current game.  Call from the command layer to write a file.
+/// This was WriteGame in C#, just tagging this to find later.
+/// 
+/// TODO: Callers need to handle if the write fails, which can happen if the user deletes the
+/// file after opening the file or since the last save.  Callers need to save sf, path, and base filename
+/// in the this Game in case this is from a SaveAs call.  Caller needs to check for an autosave
+/// file based on sf's name and deletes it if found since user explicitly saved.
+///
+buildSGFString (): string {
+    const pg = this.updateParsedGameFromGame();
+    return pg.toString();
+  }
+
+/// buildSGFStringFlipped represents all the game moves as a diagonal mirror image.
+/// You can share a game you recorded with your opponents, and they can see
+/// it from their points of view.  (Properties to modify: AB, AW, B, W, LB,
+/// SQ, TR, MA.)  This does NOT update the view or the game to track the
+/// flipped file.  This does NOT set this.isDirty to false since the tracked
+/// file may be out of date with the state of the game.
+///
+buildSGFStringFlipped (): string {
+    // Keep the unflipped parsed tree intact while generating flipped output
+    const saved = this.parsedGame;
+    const pg = this.updateParsedGameFromGame(true);
+    this.parsedGame = saved;
+    return pg.toString();
+  }
+
+  /// updateParsedGameFromGame returns a ParsedGame representing game, re-using
+  /// existing parsed node properties where appropriate to avoid losing any we
+  /// ignore from parsed files.  This stores the new ParsedGame into Game
+  /// because re-using ParsedNode objects changes some previous pointers.
+  /// We just keep the new one for consistency.  If flipped is true, then move
+  /// and adornment indexes are diagonally mirrored; see write_flipped_game.
+  /// NOTE NOTE NOTE -- this may be called from auto save timer, so any await or
+  /// UI moment could clobber the root parsednodes; nodes not re-rendered still
+  /// have accurate parsed node properties hanging from them that were read from the file.
+  ///
+  updateParsedGameFromGame(flipped: boolean = false): ParsedGame {
+    const pgame = new ParsedGame();
+    const root = this.genParsedGameRoot(flipped);
+    pgame.nodes = root;
+    // Handle branches
+    if (this.branches === null) {
+      if (this.firstMove) {
+        root.next = genParsedNodes(this.firstMove, flipped, this.size);
+        root.next.previous = root;
+      }
+    } else {
+      const branches: ParsedNode[] = [];
+      for (const m of this.branches) {
+        const nodes = genParsedNodes(m, flipped, this.size);
+        branches.push(nodes);
+        nodes.previous = root;
+      }
+      root.branches = branches;
+      root.next = branches[0];
+    }
+    // Need to store new game since creating the parsed game re-uses original nodes.
+    this.parsedGame = pgame;
+    return pgame;
+  }
+
+  /// genParsedGameRoot returns a ParsedNode that is based on the Game object
+  /// and that represents the first node in a ParsedGame.  It grabs any existing
+  /// root node properties if there's an existing ParsedGame root node.  If
+  /// flipped is true, then moves and adornment indexes are diagonally mirrored;
+  /// see write_flipped_game.
+  ///
+  /// NOTE, this function needs to overwrite any node properties that the UI
+  /// supports editing.  For example, if the end user can change the players
+  /// names or rank, then this function needs to overwrite the node properties
+  /// value with the game object's value.  It also needs to write properties from
+  /// new games.
+  ///
+  private genParsedGameRoot (flipped: boolean): ParsedNode {
+    const n = new ParsedNode();
+    // Reuse existing root properties to preserve unknown tags from parsed files
+    if (this.parsedGame !== null) {
+      if (this.miscGameInfo !== null)
+        n.properties = copyProperties(this.miscGameInfo);
+      else
+        n.properties = copyProperties(this.parsedGame.nodes!.properties);
+    }
+    // App name and game size.
+    n.properties["AP"] = [`SGFEditor`];
+    n.properties["SZ"] = [String(this.size)];
+    // Game.comments go in GC, not C, and we already merged any errant C text.
+    delete n.properties["C"];
+    if (this.comments !== "") {
+      n.properties["GC"] = [this.comments];
+    } else {
+      delete n.properties["GC"];
+    }
+    // Komi
+    n.properties["KM"] = [this.komi];
+    // Handicap, AB, AW
+    this.genParsedGameRootInitialStones(flipped, n);
+    // Player names
+    n.properties["PB"] = [this.playerBlack !== "" ? this.playerBlack : "Black"];
+    n.properties["PW"] = [this.playerWhite !== "" ? this.playerWhite : "White"];
+    return n;
+  }
+
+  /// GenParsedGameRootInitialStones sets handicap (HA), all black (AB), and all white (AW)
+  /// properties.  You can have all black with a zero handicap, that is, if a program supported
+  /// just laying down stones in an example pattern.
+  ///
+  private genParsedGameRootInitialStones (flipped: boolean, n: ParsedNode): void {
+    // HA
+    if (this.handicap !== 0) {
+      n.properties["HA"] = [String(this.handicap)];
+    } else {
+      delete n.properties["HA"];
+    }
+    // AB 
+    if ("AB" in n.properties) {
+      // Prefer to keep what we parsed
+      if (flipped) n.properties["AB"] = n.properties["AB"].map((v) => flipParsedCoordinates(v, this.size));
+    } else if (this.handicapMoves && this.handicapMoves.length) {
+      n.properties["AB"] = this.handicapMoves
+        .map((m) => getParsedCoordinates(m, flipped, this.size));
+    } else {
+      delete n.properties["AB"];
+    }
+
+    // AW — keep parsed values if they exist; otherwise synthesize from allWhiteMoves (if any)
+    if (n.properties["AW"] && n.properties["AW"].length) {
+      if (flipped) n.properties["AW"] = n.properties["AW"].map((v) => flipParsedCoordinates(v, this.size));
+    } else if (this.allWhiteMoves && this.allWhiteMoves.length) {
+      n.properties["AW"] = this.allWhiteMoves
+        .map((m) => getParsedCoordinates(m, flipped, this.size));
+    } else {
+      delete n.properties["AW"];
+    }
+  }
+
 
 
   ///
@@ -958,6 +1094,7 @@ replayUnrenderedAdornments (move: Move): void {
 
 } // Game class
 
+
 ///
 //// Enable model to signal UI to interact with user
 ///
@@ -978,8 +1115,202 @@ export interface MessageOrQuery {
 //// Mapping Games to ParsedGames (for printing)
 ///
 
+function copyProperties(src: Record<string, string[]>): Record<string, string[]> {
+  const res: Record<string, string[]> = {};
+  for (const k of Object.keys(src)) res[k] = [...src[k]];
+  return res;
+}
 
+/// genParsedNodes returns a ParsedNode with all the moves following move represented in the
+/// linked list. If move has never been rendered, then the rest of the list is the parsed nodes
+/// hanging from it since the user could not have modified the game at this point. This recurses
+/// on children of move objects with branches. If flipped is true, then moves and adornment
+/// indexes are diagonally mirrored; see write_flipped_game. This takes the game board size for
+/// computing indexes because SGF files count rows from the top, but SGF programs display boards
+/// counting bottom up.
+///
+function genParsedNodes(move: Move, flipped: boolean, size: number): ParsedNode {
+  // If move exists and not rendered, delegate to parsed nodes hanging from it.
+  if (!move.rendered) {
+    return (flipped === true) ?
+      cloneAndFlipNodes(move.parsedNode!, size) :
+      (move.parsedNode as ParsedNode);
+  }
+  // First node from the current Move is the result.
+  let curNode = genParsedNode(move, flipped, size);
+  const res = curNode;
+  let mmove : Move | null = move;
+  if (mmove.branches === null) {
+    mmove = mmove.next;
+    while (mmove !== null) {
+      curNode.next = genParsedNode(mmove, flipped, size);
+      curNode.next.previous = curNode;
+      if (mmove.branches == null) {
+          curNode = curNode.next;
+          mmove = mmove.next;
+      }
+      else {
+          curNode = curNode.next;
+          break;
+      }
+    }
+  }
+  // Only get here when move is null, or we're recursing on branches.
+  if (mmove != null) {
+    curNode.branches = [];
+    for (const m of mmove.branches!) {
+        const bn = genParsedNodes(m, flipped, size);
+        curNode.branches.push(bn);
+        bn.previous = curNode;
+    }
+    curNode.next = curNode.branches[0];
+  }
+  return res;
+} //genParsedNodes()
 
+/// genParsedNode returns a ParsedNode that is based on the Move object.  It
+/// grabs any existing parsed node properties from move to preserve any move
+/// properties that we ignore from a file we read.  If flipped is true, then moves 
+/// and adornment indexes are diagonally mirrored; see write_flipped_game.
+/// This takes the game board size for computing indexes because SGF files
+/// count rows from the top, but SGF programs display boards counting bottom up.
+///
+/// NOTE, this function needs to overwrite any node properties that the UI
+/// supports editing.  For example, if the end user modified adornments.
+///
+function genParsedNode (move: Move, flipped: boolean, size: number): ParsedNode {
+  if (move.rendered === false) {
+    return flipped ? 
+           // If move exists and not rendered, then must be ParsedNode.
+           cloneAndFlipNodes(move.parsedNode as ParsedNode, size) :
+           // Note: result re-uses original parsed nodes, and callers change this node
+           // to point to new parents.
+           move.parsedNode as ParsedNode;
+    }
+  const node = new ParsedNode();
+  node.properties =  move.parsedNode !== null ?
+                     copyProperties((move.parsedNode).properties) :
+                     node.properties;
+  const props = node.properties;
+  // Color
+  if (move.color === StoneColors.Black) {
+    props["B"] = [getParsedCoordinates(move, flipped, size)];
+  } else if (move.color === StoneColors.White) {
+    props["W"] = [getParsedCoordinates(move, flipped, size)];
+  }
+  // Comments
+  if (move.comments !== "") {
+    props["C"] = [move.comments];
+  } else {
+    delete props["C"];
+  }
+  // Adornments
+  delete props["TR"];
+  delete props["SQ"];
+  delete props["LB"];
+  for (const a of move.adornments) {
+    const coords = getParsedCoordinates(a, flipped, size);
+    if (a.kind === AdornmentKinds.Triangle) {
+      if ("TR" in props) props["TR"].push(coords);
+      else props["TR"] = [coords];
+    }
+    if (a.kind === AdornmentKinds.Square) {
+      if ("SQ" in props) props["SQ"].push(coords);
+      else props["SQ"] = [coords];
+    }
+    if (a.kind === AdornmentKinds.Letter) {
+      const data = `${coords}:${a.letter}`;
+      if ("LB" in props) props["LB"].push(data);
+      else props["LB"] = [data];
+    }
+  } // foreach
+  return node;
+} // genParsedNode()
+
+/// cloneAndFlipNodes is similar to genParsedNodes.  This returns a
+/// ParsedNode with all the nodes following the argument represented in the
+/// resulting linked list, but their coordinates have been transposed to the
+/// diagonal mirror image, see write_flipped_game.  This recurses on nodes with
+/// branches.
+///
+function cloneAndFlipNodes (nodes: ParsedNode, size: number): ParsedNode {
+  const first = cloneAndFlipNode(nodes, size);
+  let curNode = first;
+  if (nodes.branches === null) {
+    let nnodes: ParsedNode | null = nodes.next;
+    while (nnodes !== null) {
+      curNode.next = cloneAndFlipNode(nnodes, size);
+      curNode.next.previous = curNode;
+      if (nnodes.branches === null) {
+        curNode = curNode.next;
+        nnodes = nnodes.next;
+      } else {
+        curNode = curNode.next;
+        nodes = nnodes;
+        break;
+      }
+    }
+  } 
+  // Only get here when nodes is null from while loop, or we're recursing on branches.
+  if (nodes !== null) {
+    curNode.branches = [];
+    for (const m of nodes.branches!) {
+      const tmp = cloneAndFlipNodes(m, size);
+      curNode.branches.push(tmp);
+      tmp.previous = curNode;
+    }
+    curNode.next = curNode.branches[0];
+  }
+  return first;
+} // cloneAndFlipNodes()
+
+/// cloneAndFlipNode is similar to _gen_parsed_node.  This returns a
+/// ParsedNode that is a clone of node, but any indexes are diagonally mirror
+/// transposed, see write_flipped_game.
+///
+function cloneAndFlipNode (node: ParsedNode, size: number): ParsedNode {
+  const new_node = new ParsedNode();
+  new_node.properties = copyProperties(node.properties);
+  const props = new_node.properties;
+  // Color
+  if ("B" in props) {
+    props["B"] = flipCoordinates(props["B"], size);
+  } else if ("W" in props) {
+    props["W"] = flipCoordinates(props["W"], size);
+  }
+  // Adornments
+  if ("TR" in props) {
+    props["TR"] = flipCoordinates(props["TR"], size);
+  }
+  if ("SQ" in props) {
+    props["SQ"] = flipCoordinates(props["SQ"], size);
+  }
+  if ("LB" in props) {
+    props["LB"] = flipCoordinates(props["LB"], size, true);
+  }
+  return new_node;
+}
+
+/// flipCoordinates takes a list of parsed coordinate strings and returns the
+/// same kind of list (<letter><letter> or <letter><letter>:<letter>) with the coorindates 
+/// diagonally flipped (see writeFlippedGame).  This takes the game board size for computing the 
+/// diagonally flipped index.
+///
+export function flipCoordinates(coords: string[], size: number, labels: boolean = false): string[] {
+  if (labels) {
+    // coords elts are "<col><row>:<letter>"
+    const coordPart = coords.map((c) => c.substring(0, c.length - 2));
+    const label = coords.map((c) => c.substring(2, 4));
+    const flipped = flipCoordinates(coordPart, size);
+    const res: string[] = [];
+    for (let i = 0; i < flipped.length; i++) {
+      res.push(flipped[i] + label[i]);
+    }
+    return res;
+  } else {
+    return coords.map((c) => flipParsedCoordinates(c, size));
+  }
+}
 
 
 ///
@@ -1062,27 +1393,7 @@ export async function createGameFromParsedGame
 //   }
 // }
 
-/// NOT NEEDED, setGame UI callback copies these to new game.
-// function copyGameCallbacks (from: Game, to: Game) {
-//   to.setComments = from.setComments;
-//   to.getComments = from.getComments;
-//   to.message = from.message;
-//   to.onchange = from.onchange;
-// }
 
-
-/// called CreateParsedGame in C# land, and it returns void, storing new game in mainwin.game.
-// export function createGamefromParsedGame (pg: ParsedGame, g : Game) {
-//   g.parsedGame = pg;
-//   debugAssert(pg.nodes !== null, "WTF, there is always one parsed node.")
-//   const m : Move | null = setupFirstParsedMove(g, pg!.nodes);
-//   g.firstMove = m;
-//   g.currentMove = null;
-//   //g.firstMove = pg.nodes?.next;
-//   //TODO: set game comment
-//   //appGlobals.game = g;
-//   return g;
-// }
 
 /// createParsedGameHandicap helps create a Game from a ParsedGame by processing the handicap (HA)
 /// and all black (AB) properties.  It returns the handicap number and the Moves for the stones.

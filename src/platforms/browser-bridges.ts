@@ -3,7 +3,7 @@
 ///
 /// src/models/appglobals.tsx wires up the handlers.
 ///
-import type { FileBridge, AppStorageBridge, HotkeyBridge, OpenResult } from "./bridges";
+import type { FileBridge, AppStorageBridge, KeyBindingBridge as KeyBindingBridge, OpenResult } from "./bridges";
 
 ///
 //// File Bridge
@@ -329,7 +329,8 @@ export const browserAppStorageBridge = hasOPFS ? new OpfsStorage() : new LocalSt
 //// Keybindings Bridge
 ///
 
-export const browserHotkeys: HotkeyBridge = {
-  on(handler) { window.addEventListener("keydown", handler); },
-  off(handler) { window.removeEventListener("keydown", handler); },
+export const browserKeybindings: KeyBindingBridge = {
+  on(handler) { window.addEventListener("keydown", handler, { capture: true }); },
+  off(handler) { window.removeEventListener("keydown", handler, { capture: true }); },
+  commonKeyBindingsHijacked: true,
 };
