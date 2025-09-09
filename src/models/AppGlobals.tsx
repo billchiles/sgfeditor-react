@@ -58,6 +58,9 @@ export type AppGlobals = {
   version: number;
   // Manually force a redraw from any UI or model code
   bumpVersion: () => void;
+  // UI commands exposed to components:
+  //
+  showHelp: () => void;
   // File I/O provided by src/platforms/bridges.ts declarations
   // Promise<void> is style choice because it feels like a command, not a query, and the caller
   // doesn't need the file contents because the openSGF handler creates the new game and model state.
@@ -138,6 +141,7 @@ type CmdDependencies = {
   getLastCommand: () => LastCommand;
   setLastCommand: (c: LastCommand) => void;
   startNewGameFlow: () => Promise<void>;
+  showHelp?: () => void;
 };
 
 /// ProviderProps just describes the args to GameProvider function.
@@ -148,7 +152,9 @@ type ProviderProps = {
   getComment: () => string;
   setComment: (text: string) => void;
   // Let the provider ask the shell UI (App) to show the New Game dialog (portal lives in App.tsx)
-  openNewGameDialog?: () => void;
+  // App provides these as callbacks to the provider.
+  openNewGameDialog?: () => void; 
+  openHelpDialog?: () => void;
 
   // Board size for the game model (defaults to 19)
   //size: number;
@@ -184,7 +190,8 @@ const browserMessageOrQuery: MessageOrQuery = {
 /// GameProvider is the big lift here.  It collects all the global state, callbacks for the model
 /// layer, etc., and makes this available to UI content below <GameProvider> under <App>.
 ///
-export function GameProvider ({ children, getComment, setComment, openNewGameDialog: openNewGameDialog }: ProviderProps) {
+export function GameProvider ({ children, getComment, setComment, openNewGameDialog: openNewGameDialog,
+                                openHelpDialog: openHelpDialog }: ProviderProps) {
   //const size = DEFAULT_BOARD_SIZE;
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
   // render, which would replace game and all the move state (new Game).  This holds it's value
@@ -259,10 +266,11 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const deps = useMemo<CmdDependencies>(
       () => ({gameRef, bumpVersion, commonKeyBindingsHijacked, fileBridge, appStorageBridge, 
               getGames: () => games, setGames, setGame, getLastCreatedGame: () => lastCreatedGame, 
-              setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow }), 
+              setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
+              showHelp: () => { openHelpDialog?.(); } }), 
              [gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ games, setGames, setGame, 
               lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
-              commonKeyBindingsHijacked]);
+              openHelpDialog, commonKeyBindingsHijacked]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
   const saveSgf   = useCallback(() => doWriteGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
@@ -291,7 +299,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
             getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
             getComment, setComment,
             version, bumpVersion,
-            openSgf, saveSgf, saveSgfAs, newGame,
+            showHelp: () => { openHelpDialog?.(); }, openSgf, saveSgf, saveSgfAs, newGame,
             getLastCommand, setLastCommand,}),
     [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs,
      games, setGames, defaultGame, setDefaultGame, lastCreatedGame, setLastCreatedGame,
@@ -655,12 +663,15 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   const shift = e.getModifierState("Shift") || e.shiftKey;
   const alt = e.getModifierState("Alt") || e.altKey;
   const browser = deps.commonKeyBindingsHijacked;
+  /// todo move these to where relevant, maybe rerstructure if-then-else to only compute needed
   const ctrl_s = control && !shift && e.code === "KeyS"; //lower === "s";&& !e.metaKey
   const ctrl_shift_s = browser ? control && alt && e.code === "KeyS" : //lower === "s") ||
                                  control && shift && e.code === "KeyS";
   const ctrl_o = e.ctrlKey && !e.shiftKey && lower === "o"; //&& !e.metaKey 
   // Browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
   const alt_n = !e.ctrlKey && !e.shiftKey && !e.metaKey && e.altKey && lower === "n";
+  const f1 = !control && !shift && !alt && (e.code === "F1" || lower === "f1");
+
   // ESC: alway move focus to root so all keybindings work.
   if (lower === "escape" ) { //&& isEditingTarget(e.target)) { maybe always, what about dialogs?
     e.preventDefault();
@@ -704,6 +715,13 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.preventDefault();
     //e.stopPropagation(); Can't stop chrome from taking c-w, so using s-w
     gotoNextGameCmd(deps,deps.getLastCommand());
+    return;
+  }
+  // F1: show Help dialog
+  if (f1) {
+    e.preventDefault();
+    e.stopPropagation();
+    deps.showHelp?.();
     return;
   }
   //

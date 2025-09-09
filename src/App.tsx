@@ -16,6 +16,8 @@ import styles from "./App.module.css";
 import { GameProvider, GameContext, addOrGotoGame } from "./models/AppGlobals";
 import NewGameDialog from "./components/NewGameDialog";
 import { Game } from "./models/Game";
+import HelpDialog from "./components/HelpDialog";
+import { HELP_TEXT } from "./components/helpText";
 
 
 /// App function only provides context from GameProvider, and AppContent function spews all the UI
@@ -35,11 +37,14 @@ export default function App() {
   };
   // Modal visibility lives here so the provider can ask us to open it.
   const [showNewGameDlg, setShowNewGameDlg] = useState(false);
+  const [showHelpDlg, setShowHelpDlg] = useState(false);
 
   return (<GameProvider getComment={getComment} setComment={setComment}
-                        openNewGameDialog={() => setShowNewGameDlg(true)} >
+                        openNewGameDialog={() => setShowNewGameDlg(true)} 
+                        openHelpDialog={() => setShowHelpDlg(true)} >
             <AppContent commentRef={commentRef} />
             <NewGameOverlay open={showNewGameDlg} onClose={() => setShowNewGameDlg(false)} />
+            <HelpOverlay open={showHelpDlg} onClose={() => setShowHelpDlg(false)}/>
           </GameProvider>
   );
 } // App function
@@ -134,6 +139,13 @@ function AppContent({
             >
               Save As…
             </button>
+            <button
+              className={styles.btn}
+              onClick={() => { appGlobals?.showHelp(); }}
+              title="F1"
+            >
+              Help
+            </button>
           </div>
           <div className={styles.buttonRow}>
             <CommandButtons/>
@@ -195,6 +207,12 @@ function NewGameOverlay ({ open, onClose, }: { open: boolean; onClose: () => voi
     />
   );
 }
+
+/// Renders Help dialog inside gameprovider's context.
+function HelpOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return <HelpDialog open={open} onClose={onClose} text={HELP_TEXT} />;
+}
+
 
 function CommandButtons() {
   const app = useContext(GameContext);

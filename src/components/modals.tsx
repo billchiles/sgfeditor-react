@@ -53,7 +53,9 @@ type ModalProps = {
   children: React.ReactNode;
 };
 
-export default function Modal({ open, onClose, children }: ModalProps) {
+export default function Modal({ open, onClose, children, contentStyle, }: 
+                              { open: boolean; onClose: () => void; children: React.ReactNode;
+                                contentStyle?: React.CSSProperties; }) {
   // Reference to the dialog content; used for TAB focus trapping only.
   const contentRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -127,6 +129,7 @@ export default function Modal({ open, onClose, children }: ModalProps) {
           borderRadius: 12,
           padding: 16,
           width: "min(520px, 92vw)",
+          ...(contentStyle || {}),  // apply overrides like wider for Help
           boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
         }}
         onMouseDown={(e) => e.stopPropagation()}
