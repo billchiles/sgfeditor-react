@@ -35,6 +35,8 @@ export class Game {
   whitePrisoners: number; // number of black stones captured by white
   // Comments holds any initial board state comments for the game.  Opening a file sets this.
   comments: string;
+  // Adornments that live on the starting board.
+  startAdornments: Adornment[] = [];
   miscGameInfo: Record<string, string[]> | null;
 
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
@@ -73,6 +75,7 @@ export class Game {
     this.blackPrisoners = 0;
     this.whitePrisoners = 0;
     this.comments = "";
+    this.startAdornments = [];
     this.miscGameInfo = null;
   }
 
@@ -533,12 +536,12 @@ gotoStartForGameSwap(): void {
     if (retMove == null) {
       // Current move comes back if some branches had bad parsenodes, but some branches were good.
       // ! on this.message because must be defined if replaying, and ! on currentmove tested above
-      nextMoveDisplayError(this.message!.message, this.currentMove!); // ! cuz must be defined if replaying
+      await nextMoveDisplayError(this.message!.message, this.currentMove!); // ! cuz must be defined if replaying
       this.currentMove = fixup;
       return null;
     }
     if (hadParseErr) {
-      nextMoveDisplayError(this.message!.message, this.currentMove!); // ! cuz must be defined if replaying
+      await nextMoveDisplayError(this.message!.message, this.currentMove!); // ! cuz must be defined if replaying
     }
     this.saveAndUpdateComments(this.currentMove!.previous, this.currentMove);
     //this.onChange?.(); // UI decides based on non-null return.
@@ -713,18 +716,21 @@ replayUnrenderedAdornments (move: Move): void {
     if (props["TR"]) { // Triangles: TR[aa][bb]...
       for (const coord of props["TR"]) {
         const [row, col] = parsedToModelCoordinates(coord);
+        move.addAdornment({ kind: AdornmentKinds.Triangle, row, column: col });
         // const a = this.addAdornment.(move, row, col, "triangle");    // TODO: your impl
       }
     }
     if (props["SQ"]) { // Squares: SQ[aa]...
       for (const coord of props["SQ"]) {
         const [row, col] = parsedToModelCoordinates(coord);
+        move.addAdornment({ kind: AdornmentKinds.Square, row, column: col });
         // const a = this.addAdornment?.(move, row, col, "square");
       }
     }
     if (props["LB"]) { // Labels: LB[aa:A]...
       for (const token of props["LB"]) {
         const [row, col, char] = parsedLabelModelCoordinates(token);
+        move.addAdornment({ kind: AdornmentKinds.Letter, row, column: col, letter: char });
         // const a = this.addAdornment?.(move, row, col, "letter", char);
       }
     }
@@ -846,6 +852,24 @@ buildSGFStringFlipped (): string {
     // Player names
     n.properties["PB"] = [this.playerBlack !== "" ? this.playerBlack : "Black"];
     n.properties["PW"] = [this.playerWhite !== "" ? this.playerWhite : "White"];
+    // Root adornments (TR/SQ/LB) for the starting board.
+    delete n.properties["TR"];
+    delete n.properties["SQ"];
+    delete n.properties["LB"];
+    for (const a of this.startAdornments) {
+      const coords = getParsedCoordinates(a, flipped, this.size);
+      if (a.kind === AdornmentKinds.Triangle) {
+        if ("TR" in n.properties) n.properties["TR"].push(coords);
+        else n.properties["TR"] = [coords];
+      } else if (a.kind === AdornmentKinds.Square) {
+        if ("SQ" in n.properties) n.properties["SQ"].push(coords);
+        else n.properties["SQ"] = [coords];
+      } else if (a.kind === AdornmentKinds.Letter) {
+        const data = `${coords}:${a.letter}`;
+        if ("LB" in n.properties) n.properties["LB"].push(data);
+        else n.properties["LB"] = [data];
+      }
+    }
     return n;
   }
 
@@ -999,7 +1023,7 @@ buildSGFStringFlipped (): string {
   ///
   async moveBranchUp (): Promise<void> {
     const res = await this.branchesForMoving();
-    if (!res) return;
+    if (res === null) return;
     const [branches, curIndex] = res;
     await this.moveBranch(branches, curIndex, -1);
     this.isDirty = true;
@@ -1009,7 +1033,7 @@ buildSGFStringFlipped (): string {
   // Move the current branch down in the sibling list.
   async moveBranchDown (): Promise<void> {
     const res = await this.branchesForMoving();
-    if (!res) return;
+    if (res === null) return;
     const [branches, curIndex] = res;
     await this.moveBranch(branches, curIndex, +1);
     this.isDirty = true;
@@ -1021,15 +1045,6 @@ buildSGFStringFlipped (): string {
   /// This does user interaction for moveBranchUp and moveBranchDown.
   ///
   private async branchesForMoving (): Promise<[Move[], number] | null> {
-    // Game not started → no branches to modify.
-    // const noMoves =
-    //   (this.firstMove === null) &&
-    //   (this.branches === null || this.branches.length === 0);
-
-    // if (noMoves) {
-    //   await this.message?.message?.("Game not started, no branches to modify.");
-    //   return null;
-    // }
     const current = this.currentMove;
     if (current === null) {
       await this.message?.message?.("Must be on the first move of a branch to move it.");
@@ -1072,7 +1087,6 @@ buildSGFStringFlipped (): string {
       branches[curIndex] = branches[curIndex + delta];
       branches[curIndex + delta] = tmp;
     };
-
     if (delta < 0) {
       // moving up and current is not top ...
       if (curIndex > 0) {
@@ -1090,7 +1104,106 @@ buildSGFStringFlipped (): string {
         await this.message?.message?.("This branch is the last branch.");
       }
     }
-}
+  }
+
+  ///
+  //// Adornments
+  ///
+
+  /** Single unified toggle, per your C#: remove if present, otherwise add (letters A..Z, reuse freed). */
+  toggleAdornment (kind: AdornmentKind, row: number, col: number): void {
+    const move = this.currentMove;
+    const arr = this.adornmentsFor(move);
+    const i = this.indexOfAdornment(arr, row, col, kind);
+    if (i >= 0) {
+      // Remove existing adornment
+      arr.splice(i, 1);
+      this.isDirty = true;
+      this.onChange?.();
+      return;
+    }
+    // Add (for letters, A..Z with reuse semantics)
+    const a = this.addAdornment(move, row, col, kind, null);
+    if (!a && kind === AdornmentKinds.Letter) {
+      // ASYNC MODEL / REACT STYLE vs C#/XAML
+      // gpt5 wants this void to declare we are ignoring the promise explicitly.  fire and forget.
+      // gpt5 wants the model code purely synchronous, but ok if need to confirm an action.
+      // need to ensure no useful work occurs after an await if the caller 1) does not await and
+      // continues executing when the promise comes back and 2) the caller relies on all work in the
+      // callee to be done.  We had one example that typescript didn't flag: I think gotoLastMove's
+      // event handler caller didn't await, and more model state changed after the message box.
+      // You can void foo() in typescript to fire and forget, as well as foo().catch(() => {}) in
+      // case it could have an error to avoid unhandled rejected promises.
+      void this.message?.message?.("All 26 letters (A–Z) are already used on this node.");
+    }
+  }
+
+  /** AddAdornment(moveOrNull, ...) like C#: affects startAdornments if move is null */
+  addAdornment (move: Move | null, row: number, col: number, kind: AdornmentKind, 
+                data?: string | null): Adornment | null {
+    const arr = this.adornmentsFor(move);
+    const a = this.makeAdornment(arr, row, col, kind, data);
+    if (!a) return null;
+    if (move) move.addAdornment(a);
+    else this.startAdornments.push(a);
+    this.isDirty = true;
+    this.onChange?.();
+    return a;
+  }
+
+  /** C#-style AddAdornmentMakeAdornment: constructs the Adornment or returns null (e.g. no letters left). */
+  private makeAdornment (arr: Adornment[], row: number, col: number, kind: AdornmentKind, 
+                         data: string | null = null): Adornment | null {
+    if (kind === AdornmentKinds.Letter) {
+      if (data === null) {
+        const letter = this.chooseLetterAdornment(arr);
+        if (letter === null) return null;
+        return { kind: AdornmentKinds.Letter, row, column: col, letter };
+      }
+      return { kind, row, column: col, letter: data };
+    }
+    if (kind === AdornmentKinds.Triangle) return { kind, row, column: col };
+    if (kind === AdornmentKinds.Square) return { kind, row, column: col };
+    // all paths return, but typescript can't analyze that and thinks this may return undefined
+    // because typescript doesn't return void or null when you fall off the end.
+    return null; 
+  }
+
+  /** GetAdornment(row,col,kind) like C#: returns the first (should be only) adornment at that point. */
+  getAdornment (row: number, col: number, kind: AdornmentKind): Adornment | null {
+    const move = this.currentMove;
+    const arr = this.adornmentsFor(move);
+    const i = this.indexOfAdornment(arr, row, col, kind);
+    return i >= 0 ? arr[i] : null;
+  }
+
+  
+  /// currentAdornmentsArray returns the current move's adornment array or the starting empty
+  /// board's array.
+  ///
+  // private currentAdornments (): Adornment[] {
+  //   return this.adornmentsFor(this.currentMove);
+  // }
+
+  private adornmentsFor (move: Move | null): Adornment[] {
+    return move ? move.adornments : this.startAdornments;
+  }
+
+  private indexOfAdornment (arr: Adornment[], row: number, col: number, kind: AdornmentKind): number {
+    return arr.findIndex(a => a.row === row && a.column === col && a.kind === kind);
+  }
+
+  private chooseLetterAdornment (arr: Adornment[]): string | null {
+      // Collect letter adornments for this node only
+      const used = new Set(
+        arr.filter(a => a.kind === AdornmentKinds.Letter).map(a => (a as any).letter as string)
+      );
+      for (let code = "A".charCodeAt(0); code <= "Z".charCodeAt(0); code++) {
+        const c = String.fromCharCode(code);
+        if (!used.has(c)) return c;
+      }
+      return null; // all 26 in use
+  }
 
 } // Game class
 
@@ -1362,6 +1475,19 @@ export async function createGameFromParsedGame
   // Root comments: C and GC, some apps use C when they should use GC, just grab both.
   if ("C" in props) g.comments = props["C"][0];
   if ("GC" in props) g.comments = props["GC"][0] + (g.getComments!() ?? "");
+  // Initial board adornments (TR/SQ/LB) ...
+  if (props["TR"]) for (const coord of props["TR"]) {
+    const [r, c] = parsedToModelCoordinates(coord);
+    g.startAdornments.push({ kind: AdornmentKinds.Triangle, row: r, column: c });
+  }
+  if (props["SQ"]) for (const coord of props["SQ"]) {
+    const [r, c] = parsedToModelCoordinates(coord);
+    g.startAdornments.push({ kind: AdornmentKinds.Square, row: r, column: c });
+  }
+  if (props["LB"]) for (const token of props["LB"]) {
+    const [r, c, ch] = parsedLabelModelCoordinates(token);
+    g.startAdornments.push({ kind: AdornmentKinds.Letter, row: r, column: c, letter: ch });
+  }  
   // Setup remaining model for first moves, comment, etc.
   g.parsedGame = pgame;
   setupFirstParsedMove(g, pgame.nodes!);
@@ -1442,8 +1568,8 @@ function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
     throw new SGFError ("Unexpected move in root parsed node.");
   if ("PL" in pn.properties)
     throw new SGFError("Do not support player-to-play for changing start color.");
-  if ("TR" in pn.properties || "SQ" in pn.properties || "LB" in pn.properties)
-    throw new SGFError("Don't handle adornments on initial board from parsed game yet.");
+  // if ("TR" in pn.properties || "SQ" in pn.properties || "LB" in pn.properties)
+  //   throw new SGFError("Don't handle adornments on initial board from parsed game yet.");
   var m : Move | null;
   if (pn.branches && pn.branches.length > 0) {
     // Game starts with branches; build Move objects for each branch head.

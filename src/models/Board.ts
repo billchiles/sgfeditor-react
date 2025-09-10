@@ -177,12 +177,12 @@ export class Move implements IMoveNext {
     this.rendered = true; // Assume move rendered, parsed game code sets it to false.
   }
 
-  addBranch(m: Move) {
+  addBranch (m: Move) {
     if (this.branches === null) this.branches = [];
     this.branches.push(m);
   }
 
-  addAdornment(a: Adornment) {
+  addAdornment (a: Adornment) {
     this.adornments.push(a);
   }
 
@@ -207,7 +207,6 @@ export const AdornmentKinds = {
   Triangle: "triangle",
   Square: "square",
   Letter: "letter",
-  CurrentMove: "current move",
 } as const;
 
 export type AdornmentKind = (typeof AdornmentKinds)[keyof typeof AdornmentKinds];
@@ -215,8 +214,7 @@ export type AdornmentKind = (typeof AdornmentKinds)[keyof typeof AdornmentKinds]
 export type Adornment =
   | { kind: typeof AdornmentKinds.Triangle; row: number, column: number }
   | { kind: typeof AdornmentKinds.Square; row: number, column: number }
-  | { kind: typeof AdornmentKinds.Letter; row: number, column: number; letter: string }
-  | { kind: typeof AdornmentKinds.CurrentMove; row: number, column: number };
+  | { kind: typeof AdornmentKinds.Letter; row: number, column: number; letter: string };
 
 
 

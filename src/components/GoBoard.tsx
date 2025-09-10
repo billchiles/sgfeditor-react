@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useMemo, useRef, useContext, useEffect } from "react";
 import styles from "./goboard.module.css";
-import  { StoneColors } from "../models/Board";
-import type { StoneColor } from "../models/Board";
+import  { StoneColors, AdornmentKinds } from "../models/Board";
+import type { StoneColor, Adornment } from "../models/Board";
 import { DEFAULT_BOARD_SIZE } from "../models/Game";
 import { CommandTypes, GameContext } from "../models/AppGlobals";
 import { debugAssert } from "../debug-assert";
@@ -46,12 +46,7 @@ const stoneFill = (c: StoneColor) => (c === StoneColors.Black ? "#111" : "#f2f2f
 
 /// GoBoard -- Big Entry Point to render board
 ///
-export default function GoBoard({
-    //boardSize = 19,
-    // cellSize = 32,
-    // padding = 36,
-    responsive = true, // can pass as false and cellSize=32 to get original fixed board size behavior.
-    }: GoBoardProps) {
+export default function GoBoard({ responsive = true, }: GoBoardProps) {
   const boardSize = DEFAULT_BOARD_SIZE;
   // Measure the available space of the wrapper and keep a square side = min(width, height)
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -148,6 +143,14 @@ export default function GoBoard({
       const curGame = appGlobals?.getGame ? appGlobals.getGame() : appGlobals?.game;
       debugAssert(curGame !== null, "Eh?! How can there be no game, but we're clicking?!");
       const curBoard = curGame.board;
+      // Modifier-clicks toggle adornments; plain click places a stone.
+      const ctrl = e.ctrlKey || e.getModifierState?.("Control");
+      const shift = e.shiftKey || e.getModifierState?.("Shift");
+      const alt = e.altKey || e.getModifierState?.("Alt");
+      if (ctrl) { curGame.toggleAdornment(AdornmentKinds.Triangle, row, col); return; }
+      else if (shift) { curGame.toggleAdornment(AdornmentKinds.Square, row, col); return; }
+      else if (alt) { curGame.toggleAdornment(AdornmentKinds.Letter, row, col); return; }
+      /// Normal click...
       if (curBoard.moveAt(row, col) !== null) {
         alert("You can't play on an occupied point.");
         return;
@@ -261,7 +264,7 @@ export default function GoBoard({
     const curBoard = curGame.board;
     const current = curGame.currentMove ?? null;
     // marker sizes scale with stone radius; keeps ring visible at small sizes
-    const markRadius = Math.max(geom.radius * 0.4, 3);
+    const markRadius = Math.max(geom.radius * 0.6, 3);
     const markStroke = Math.max(geom.radius * 0.2, 1);
     // console.log("\n\nSTARTING ...\n\n");
     for (let y = 0; y < boardSize; y++) {
@@ -296,7 +299,133 @@ export default function GoBoard({
     };
     return <g>{circles}</g>;
     // redraw when global version changes, or things that change on resize
-  }, [appGlobals, appGlobals?.version, boardToPx, geom.radius]);
+  }, [appGlobals, appGlobals?.version, boardToPx, geom.radius] );
+
+
+
+// -    const strokeWidth = Math.max(geom.radius * 0.18, 1);
+// -    const half = Math.max(geom.radius * 0.55, 4);
+// -    const tri = Math.max(geom.radius * 0.75, 6);
+// -    const letterFontSize = Math.max(geom.radius * 1.25, 12);
+// +    // === Adornment styling knobs ===
+// +    const STROKE_K = 0.14;              // ↓ thinner lines (was 0.18)
+// +    const TRI_SCALE = 0.82;             // ↑ bigger triangles (0.75 → 0.82)
+// +    const SQ_HALF = 0.60;               // ↑ bigger squares (0.55 → 0.60)
+// +    const SQ_CORNER = 3;                // corner rounding (px)
+// +    const LETTER_SCALE = 1.30;          // size of letters vs. radius (you had 1.40 = too fat)
+// +    const LETTER_WEIGHT: number = 700;  // 600–800 tend to look best
+// +
+// +    const strokeWidth = Math.max(geom.radius * STROKE_K, 1);
+// +    const half = Math.max(geom.radius * SQ_HALF, 4);
+// +    const tri  = Math.max(geom.radius * TRI_SCALE, 6);
+// +    const letterFontSize = Math.max(geom.radius * LETTER_SCALE, 11);
+// @@
+// -      if (a.kind === AdornmentKinds.Triangle) {
+// +      if (a.kind === AdornmentKinds.Triangle) {
+//          const p1 = `${cx},${cy - tri * 0.7}`;
+//          const p2 = `${cx - tri * 0.8},${cy + tri * 0.6}`;
+//          const p3 = `${cx + tri * 0.8},${cy + tri * 0.6}`;
+//          nodes.push(
+//            <polygon key={`tri-${a.row}-${a.column}`} points={`${p1} ${p2} ${p3}`}
+// -                   fill="none" stroke={stroke} strokeWidth={strokeWidth} />
+// +                   fill="none" stroke={stroke} strokeWidth={strokeWidth}
+// +                   strokeLinejoin="round" strokeLinecap="round" />
+//          );
+//        } else if (a.kind === AdornmentKinds.Square) {
+//          nodes.push(
+//            <rect key={`sq-${a.row}-${a.column}`} x={cx - half} y={cy - half}
+//                  width={half * 2} height={half * 2}
+// -                fill="none" stroke={stroke} strokeWidth={strokeWidth} rx={2} ry={2} />
+// +                fill="none" stroke={stroke} strokeWidth={strokeWidth}
+// +                strokeLinejoin="round" strokeLinecap="round"
+// +                rx={SQ_CORNER} ry={SQ_CORNER} />
+//          );
+//        } else if (a.kind === AdornmentKinds.Letter) {
+//          nodes.push(
+//            <text key={`lb-${a.row}-${a.column}`} x={cx} y={cy}
+//                  fontFamily="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
+// -                fontSize={letterFontSize} fontWeight={800}
+// +                fontSize={letterFontSize} fontWeight={LETTER_WEIGHT}
+//                  textAnchor="middle" dominantBaseline="middle"
+// -                dy=".03em"
+// +                dy=".02em"
+//                  fill={stroke}>
+//              {a.letter}
+//            </text>
+//          );
+//        }
+// How to tune quickly
+
+// Thinner lines: drop STROKE_K (e.g., 0.12).
+
+// Bigger shapes, same thinness: raise TRI_SCALE/SQ_HALF, keep STROKE_K low.
+
+// Softer corners: increase SQ_CORNER (e.g., 4–5).
+
+// Letters not too “fat”: keep LETTER_SCALE ~ 1.25–1.32 and LETTER_WEIGHT 600–700. 
+
+
+  const renderAdornments = useMemo(() => {
+    const nodes: React.ReactNode[] = [];
+    const curGame = appGlobals?.getGame ? appGlobals.getGame() : appGlobals?.game;
+    if (!curGame) return <g />;
+    const curBoard = curGame.board;
+    const current = curGame.currentMove ?? null;
+    const list: Adornment[] = current ? current.adornments : curGame.startAdornments ?? [];
+    const strokeWidth = Math.max(geom.radius * 0.18, 1);
+    const half = Math.max(geom.radius * 0.55, 4);
+    const tri = Math.max(geom.radius * 0.75, 6);
+    // Bigger letters for parity with shapes (fonts render optically smaller than outlines)
+    const letterFontSize = Math.max(geom.radius * 1.4, 12); // play with 1.3 or fontWeight 900
+    // const fontSize = Math.max(geom.radius * 0.95, 9);
+
+    for (const a of list) {
+      const x = a.column - 1;
+      const y = a.row - 1;
+      if (x < 0 || y < 0 || x >= boardSize || y >= boardSize) continue;
+      const cx = boardToPx.xs[x];
+      const cy = boardToPx.ys[y];
+      const stone = curBoard.moveAt(a.row, a.column);
+      const stroke = stone ? (stone.color === StoneColors.Black ? "#fff" : "#000") : "#000";
+
+      if (a.kind === AdornmentKinds.Triangle) {
+        // Up-pointing triangle
+        const p1 = `${cx},${cy - tri * 0.7}`;
+        const p2 = `${cx - tri * 0.8},${cy + tri * 0.6}`;
+        const p3 = `${cx + tri * 0.8},${cy + tri * 0.6}`;
+        nodes.push(
+          <polygon key={`tri-${a.row}-${a.column}`} points={`${p1} ${p2} ${p3}`}
+                    fill="none" stroke={stroke} strokeWidth={strokeWidth} />
+        );
+      } else if (a.kind === AdornmentKinds.Square) {
+        nodes.push(
+          <rect key={`sq-${a.row}-${a.column}`} x={cx - half} y={cy - half}
+                width={half * 2} height={half * 2}
+                fill="none" stroke={stroke} strokeWidth={strokeWidth} rx={2} ry={2} />
+        );
+      } else if (a.kind === AdornmentKinds.Letter) {
+        nodes.push(
+          <text
+            key={`lb-${a.row}-${a.column}`}
+            x={cx}
+            y={cy}
+            fontFamily="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
+            fontSize={letterFontSize}
+            fontWeight={500}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            // small optical nudge so letters look centered on most fonts
+            dy=".03em"
+            fill={stroke}
+          >
+            {a.letter}
+          </text>
+        );
+      }
+    }
+    return <g>{nodes}</g>;
+  }, [appGlobals, appGlobals?.version, boardToPx, geom.radius, boardSize]);
+
   // Now render ...
   return (
     <div className={styles.boardWrap} ref={wrapRef}>
@@ -314,12 +443,15 @@ export default function GoBoard({
         {renderGrid()}
         {renderHoshi()}
         {renderCoords()}
-        {renderStones} // because renderstones is defined with useMemo, it's code is data, don't call it here
-                       // can change this to call syntax and remove usememo, gpt5 sys 361 circles is cheap
+        // because renderstones is defined with useMemo, it's code is data, don't call it here
+        // can change this to call syntax and remove usememo, gpt5 sys 361 circles is cheap
+        {renderStones} 
+        {renderAdornments}
       </svg>
     </div>
-  );
-}
+    ); // renderstones
+
+  } // GoBoard()
 
 
 /// hoshiPoints returns standard hoshi points

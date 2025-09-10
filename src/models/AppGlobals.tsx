@@ -539,7 +539,7 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
     throw new Error(`Eh?! fileHandle is null, data empty, wassup?! ${(fileHandle as any).name}`);
   }
   const pg = parseFile(data);
-  const g = createGameFromParsedGame(pg, cleanup.curGame, cleanup.setGame, 
+  const g = await createGameFromParsedGame(pg, cleanup.curGame, cleanup.setGame, 
                                      cleanup.getGames, cleanup.setGames);
   // 
   gameRef.current.saveGameFileInfo(fileHandle, fileName);   
