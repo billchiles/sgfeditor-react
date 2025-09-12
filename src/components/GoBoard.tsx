@@ -160,7 +160,9 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
         const m = await curGame.makeMove(row, col);
         if (m !== null) {
           // Game.makeMove updates the model & provider bumps version -> memo below will re-run
-          appGlobals.bumpVersion()
+          appGlobals.bumpVersion();
+          appGlobals.bumpTreeLayoutVersion();
+          appGlobals.bumpTreeHighlightVersion();
         }
       } else {
         console.error("AppGlobals missing: how could someone click before we're ready?!.");
@@ -372,11 +374,11 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
     const curBoard = curGame.board;
     const current = curGame.currentMove ?? null;
     const list: Adornment[] = current ? current.adornments : curGame.startAdornments ?? [];
-    const strokeWidth = Math.max(geom.radius * 0.18, 1);
-    const half = Math.max(geom.radius * 0.55, 4);
-    const tri = Math.max(geom.radius * 0.75, 6);
+    const strokeWidth = Math.max(geom.radius * 0.12, 1); // was .18, didn't see difference
+    const half = Math.max(geom.radius * 0.55, 4); // could try .65 for bigger
+    const tri = Math.max(geom.radius * 0.75, 6); // could try .85 for bigger
     // Bigger letters for parity with shapes (fonts render optically smaller than outlines)
-    const letterFontSize = Math.max(geom.radius * 1.4, 12); // play with 1.3 or fontWeight 900
+    const letterFontSize = Math.max(geom.radius * 1.4, 12); // play with 1.3 or fontWeight 500
     // const fontSize = Math.max(geom.radius * 0.95, 9);
 
     for (const a of list) {

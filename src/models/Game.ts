@@ -42,7 +42,12 @@ export class Game {
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion, keeping model / UI isolation.
   onChange?: () => void; // GameProvider wires this up to bumpVersion, so model can signal UI
+  onTreeLayoutChange?: () => void; // full re-render, layout/topolgy change
+  onTreeHighlightChange?: () => void; // just highlights or scrolling changes possible
   message?: MessageOrQuery; // optional sink (alert/confirm etc.)
+  // When a move is reified from a ParsedNode during replay/rendering, need to tell the UI layer
+  // the mapping from moves to view models needs updating.
+  onParsedNodeReified?: (oldKey: ParsedNode, newMove: Move) => void;
   getComments?: () => string; // optional: read current comment from UI
   setComments?: (text: string) => void;
 
@@ -138,7 +143,8 @@ export class Game {
 
 
 
-  /// makeMove adds a move in sequence to the game and board at row, col. Row, col index from the
+  /// makeMove -- command entry point.
+  /// Adds a move in sequence to the game and board at row, col. Row, col index from the
   /// top left corner (1-based so that Moves look like we talk about Go boards). This handles
   /// clicking and adding moves to a game (UI code applies the current move adornment based on
   /// Game.currentMove). This handles branching if the current move already has next moves and
@@ -439,8 +445,8 @@ export class Game {
   //// Unwinding Moves and Goign to Start
   ///
 
-  /// Move the current pointer one step *back* along the main line.
-  /// Returns the move that was unwound, or undefined if at the beginning.
+  /// unwindMove -- command entry point.  Move the current pointer one step *back* along the main 
+  /// line.  Returns the move that was unwound, or undefined if at the beginning.
   /// Note: This just moves the pointer and unlinks forward; your UI
   /// may also want to update the board view separately.
   ///
@@ -461,6 +467,7 @@ export class Game {
     this.currentMove = previous;
     debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
     this.onChange!();
+    this.onTreeHighlightChange!();
     return current;
   }
 
@@ -468,7 +475,8 @@ export class Game {
     return this.currentMove !== null;
   }
 
-/// goto_start resets the model to the initial board state before any moves have been played,
+/// goto_start -- command entry point.
+/// Resets the model to the initial board state before any moves have been played,
 /// and then resets the UI. This assumes the game has started, but throws an exception to
 /// ensure code is consistent on that.
 ///
@@ -484,7 +492,8 @@ gotoStart(): void {
   this.moveCount = 0;
   this.blackPrisoners = 0;
   this.whitePrisoners = 0;
-  this.onChange?.(); // Signal re-render
+  this.onChange!(); // Signal re-render
+  this.onTreeHighlightChange!();
 }
 
 
@@ -495,26 +504,28 @@ gotoStart(): void {
 /// it does not have to rewind all state, like the board view, since we setup the board
 /// display before calling this to replay moves.
 ///
-gotoStartForGameSwap(): void {
-  // Comments for cur move have already been saved and cleared.  Put initial board comments in
-  // place in case this.Game is sitting at the intial board state.
-  this.setComments?.(this.comments);
-  this.board.gotoStart?.();
-  if (this.handicapMoves !== null) {
-    for (const m of this.handicapMoves) this.board.addStone(m);
-  }
-  this.nextColor = this.handicap === 0 ? StoneColors.Black : StoneColors.White;
-  this.currentMove = null;
-  this.moveCount = 0;
-  this.blackPrisoners = 0;
-  this.whitePrisoners = 0;
-  //this.LastVisited = DateTime.Now;  Moving to MRU order on games list, so can toss last one.
-  this.onChange?.();
-}
+// gotoStartForGameSwap(): void {
+//   // Comments for cur move have already been saved and cleared.  Put initial board comments in
+//   // place in case this.Game is sitting at the intial board state.
+//   this.setComments?.(this.comments);
+//   this.board.gotoStart?.();
+//   if (this.handicapMoves !== null) {
+//     for (const m of this.handicapMoves) this.board.addStone(m);
+//   }
+//   this.nextColor = this.handicap === 0 ? StoneColors.Black : StoneColors.White;
+//   this.currentMove = null;
+//   this.moveCount = 0;
+//   this.blackPrisoners = 0;
+//   this.whitePrisoners = 0;
+//   //this.LastVisited = DateTime.Now;  Moving to MRU order on games list, so can toss last one.
+//   this.onChange!.();
+//   this.onTreeHighlightChange!();
+// }
 
 
 
-  /// replay_move adds the next move that follows the current move.  Move made (see make_move).
+  /// replay_move -- command entry point.
+  /// Adds the next move that follows the current move.  Move made (see make_move).
   /// Other than marking the next move as the current move with a UI adornment, this handles
   /// replaying game moves. The next move is always move.next, which points to the selected
   /// branch if there is more than one next move. If the game hasn't started, or there's no
@@ -553,8 +564,8 @@ gotoStartForGameSwap(): void {
             (this.currentMove === null && this.firstMove !== null));
   }
 
-  /// goto_last_move handles jumping to the end of the game record following all the currently
-  /// selected branches.  This handles all game/board model.
+  /// goto_last_move -- command entry point.  Handles jumping to the end of the game record 
+  /// following all the currently selected branches.  This handles all game/board model.
   ///
   async gotoLastMove(): Promise<void> {
     let current = this.currentMove;
@@ -594,7 +605,8 @@ gotoStartForGameSwap(): void {
     this.currentMove = current;
     this.moveCount = current.number;
     this.nextColor = oppositeColor(current.color);
-    this.onChange?.(); 
+    this.onChange!(); 
+    this.onTreeHighlightChange!();
   }
 
 
@@ -705,7 +717,15 @@ gotoStartForGameSwap(): void {
     return [oneGood ? move : null, hadErr];
   } // readyForRendering()
 
-  treeViewNodeForMove (move : Move) {move}
+  /// treeViewNodeForMove signals the UI rendering that any tracking it has of this ParsedNode
+  /// needs updating to the new Move object.
+  ///
+  treeViewNodeForMove (move: Move): void {
+    const pn = move.parsedNode;
+    if (pn !== null) {
+      this.onParsedNodeReified?.(pn, move);
+    }
+  }
 
 /// _replay_unrendered_adornments is just a helper for _replay_move_update_model.  This does not 
 /// need to check add_adornment for a None result since we're trusting the file was written correctly,
@@ -981,6 +1001,7 @@ buildSGFStringFlipped (): string {
       else
         this.firstMove = branches[idx - 1]
       this.onChange!();
+      this.onTreeHighlightChange!()
     } else {
       alert("Already on highest branch.");
     }
@@ -1010,6 +1031,7 @@ buildSGFStringFlipped (): string {
       else
         this.firstMove = branches[idx + 1]
       this.onChange!();
+      this.onTreeHighlightChange!();
     } else {
       alert("Already on highest branch.");
     }
@@ -1017,9 +1039,10 @@ buildSGFStringFlipped (): string {
   } // moveBranchDown()
   
 
-  /// moveBranchUpp and moveBranchDown move the current move (if it follows a move or initial board 
-  /// state with branching) to be higher or lower in the previous branches list.  If the game hasn't
-  /// started, or the conditions aren't met, this informs the user.
+  /// moveBranchUpp and moveBranchDown -- command entry points
+  /// Move the current move (if it follows a move or initial board state with branching) to be 
+  /// higher or lower in the previous branches list.  If the game hasn't started, or the conditions
+  /// aren't met, this informs the user.
   ///
   async moveBranchUp (): Promise<void> {
     const res = await this.branchesForMoving();
@@ -1027,7 +1050,8 @@ buildSGFStringFlipped (): string {
     const [branches, curIndex] = res;
     await this.moveBranch(branches, curIndex, -1);
     this.isDirty = true;
-    this.onChange?.(); // title/tree refresh is derived from state in the React layer
+    this.onChange!(); 
+    this.onTreeLayoutChange!();
   }
 
   // Move the current branch down in the sibling list.
@@ -1037,7 +1061,8 @@ buildSGFStringFlipped (): string {
     const [branches, curIndex] = res;
     await this.moveBranch(branches, curIndex, +1);
     this.isDirty = true;
-    this.onChange?.();
+    this.onChange!();
+    this.onTreeLayoutChange!();
   }
 
   /// branchesForMoving returns the branches list (from previous move or
@@ -1110,7 +1135,11 @@ buildSGFStringFlipped (): string {
   //// Adornments
   ///
 
-  /** Single unified toggle, per your C#: remove if present, otherwise add (letters A..Z, reuse freed). */
+  /// toggleAdornment -- command entry point.  Adds or removes an adornment to the current board 
+  /// state.  It removes an adornment of kind kind at row,col if one already exisits there.  
+  /// Otherwise, it adds the new adornment.  If the kind is letter, and all letters A..Z have been 
+  /// used, then this informs the user.
+  ///
   toggleAdornment (kind: AdornmentKind, row: number, col: number): void {
     const move = this.currentMove;
     const arr = this.adornmentsFor(move);
@@ -1124,7 +1153,7 @@ buildSGFStringFlipped (): string {
     }
     // Add (for letters, A..Z with reuse semantics)
     const a = this.addAdornment(move, row, col, kind, null);
-    if (!a && kind === AdornmentKinds.Letter) {
+    if (a === null) { //&& kind === AdornmentKinds.Letter) {
       // ASYNC MODEL / REACT STYLE vs C#/XAML
       // gpt5 wants this void to declare we are ignoring the promise explicitly.  fire and forget.
       // gpt5 wants the model code purely synchronous, but ok if need to confirm an action.
@@ -1134,29 +1163,33 @@ buildSGFStringFlipped (): string {
       // event handler caller didn't await, and more model state changed after the message box.
       // You can void foo() in typescript to fire and forget, as well as foo().catch(() => {}) in
       // case it could have an error to avoid unhandled rejected promises.
-      void this.message?.message?.("All 26 letters (A–Z) are already used on this node.");
+      void this.message!.message!("All 26 letters (A–Z) are already used on this node.");
+    } else {
+      this.isDirty = true;
+      this.onChange?.();
     }
   }
 
-  /** AddAdornment(moveOrNull, ...) like C#: affects startAdornments if move is null */
   addAdornment (move: Move | null, row: number, col: number, kind: AdornmentKind, 
                 data?: string | null): Adornment | null {
-    const arr = this.adornmentsFor(move);
-    const a = this.makeAdornment(arr, row, col, kind, data);
-    if (!a) return null;
+    const adornments = this.adornmentsFor(move);
+    const a = this.makeAdornment(adornments, row, col, kind, data);
+    if (a === null) return null;
     if (move) move.addAdornment(a);
     else this.startAdornments.push(a);
-    this.isDirty = true;
-    this.onChange?.();
     return a;
   }
 
-  /** C#-style AddAdornmentMakeAdornment: constructs the Adornment or returns null (e.g. no letters left). */
-  private makeAdornment (arr: Adornment[], row: number, col: number, kind: AdornmentKind, 
+  /// makeAdornment returns a new adornment or null (for example, running out of letters).
+  /// When porting this from C# app, it turned out we don't use data here.  ReplayUnrenderedAdornments
+  /// has ParseNode explicit letters, but it doesn't need to call this since adornments have less
+  /// maintenance in react.
+  ///
+  private makeAdornment (adornments: Adornment[], row: number, col: number, kind: AdornmentKind, 
                          data: string | null = null): Adornment | null {
     if (kind === AdornmentKinds.Letter) {
       if (data === null) {
-        const letter = this.chooseLetterAdornment(arr);
+        const letter = this.chooseLetterAdornment(adornments);
         if (letter === null) return null;
         return { kind: AdornmentKinds.Letter, row, column: col, letter };
       }
@@ -1169,13 +1202,13 @@ buildSGFStringFlipped (): string {
     return null; 
   }
 
-  /** GetAdornment(row,col,kind) like C#: returns the first (should be only) adornment at that point. */
-  getAdornment (row: number, col: number, kind: AdornmentKind): Adornment | null {
-    const move = this.currentMove;
-    const arr = this.adornmentsFor(move);
-    const i = this.indexOfAdornment(arr, row, col, kind);
-    return i >= 0 ? arr[i] : null;
-  }
+  /// returns the first (should be only) adornment at that point.
+  // getAdornment (row: number, col: number, kind: AdornmentKind): Adornment | null {
+  //   const move = this.currentMove;
+  //   const arr = this.adornmentsFor(move);
+  //   const i = this.indexOfAdornment(arr, row, col, kind);
+  //   return i >= 0 ? arr[i] : null;
+  // }
 
   
   /// currentAdornmentsArray returns the current move's adornment array or the starting empty

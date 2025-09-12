@@ -357,3 +357,245 @@ Perfect—paste this at the very end of `spec.md`:
 * File activation events reuse browser open flow; writer/reader identical.
 
 ---
+
+# Tree View (React/TypeScript) — Final Design Notes
+
+## Goals
+
+* **Parity with C#** logic and appearance where it matters (layout, lines, highlights).
+* **React-first UI**: no imperative element cleanup; render from model state.
+* **Performance** for 200–500 moves; avoid recomputing layout on paint-only changes.
+
+---
+
+## Ownership & Responsibilities
+
+* **`models/treeview.ts`** (pure model):
+
+  * Computes the **layout matrix** (`treeViewModel: (TreeViewNode|null)[][]`) from the `Game`.
+  * No UI concerns; **does not** build click maps or manage highlights.
+  * Growth policy (spec): when inserting beyond bounds, **grow matrix by \~50%** (and grow `maxRows` in lockstep). (Implementation can be incremental; keep the policy here.)
+
+* **`components/TreeView.tsx`** (view):
+
+  * Builds an **identity map** `Map<IMoveNext | "start", TreeViewNode>` from the layout matrix (with a `"start"` key).
+  * Renders **SVG** nodes/edges; handles **scroll-to-current**.
+  * **Registers a remapper** so the model can signal `ParsedNode → Move` swaps without recomputing layout.
+  * Implements **highlights** (current, next-branch, comment) and **move labeling**.
+
+* **`Game.ts`** (model):
+
+  * Emits **layout** vs **paint** change signals:
+
+    * `onTreeLayoutChange()` → topology changed (new/removed/reordered nodes) → recompute layout.
+    * `onTreeHighlightChange()` → highlights/scroll only → do **not** recompute layout.
+  * Emits `onParsedNodeReified(parsed, move)` during replay to eagerly remap identity in the UI.
+
+* **`AppGlobals.tsx`** (provider):
+
+  * **Single place** that wires callbacks on a `Game` **inside `setGame(g)`** (initial game and all new ones).
+  * Exposes `setTreeRemapper(fn)` to let `TreeView` register its remap function; forwards `onParsedNodeReified` to it.
+
+---
+
+## Versioning & Re-renders
+
+* **Layout token**: `treeLayoutVersion`
+  `getGameTreeModel(game)` is memoized on this token → **recreates** the layout matrix when topology changes.
+
+* **Paint token**: `treePaintVersion`
+  Highlights/scrolling depend on this token → **do not** recreate the layout matrix.
+
+**Result:** paint-only changes (navigate, select next branch, toggle comment) re-render a few SVG attributes but **do not** rebuild layout or the identity map.
+
+---
+
+## Data Structures & Keys
+
+* **`treeViewModel`**: matrix of `TreeViewNode | null`.
+
+* **Identity Map** (UI-owned):
+  `Map<IMoveNext | "start", TreeViewNode>`
+
+  * Every placed node (including Start) is keys → node.
+  * `"start"` maps to `[0,0]` cell for convenience (we don’t keep a stable faux `Move` object outside the model).
+
+* **Remapping** (two paths, both active):
+
+  1. **Proactive**: `Game` calls `onParsedNodeReified(parsed, move)`. The UI deletes the `parsed` key, adds `move` key, and sets `node.node = move`.
+  2. **Lazy**: UI lookups use `lookupOrRemap(key)`; if `move` isn’t found but `move.parsedNode` is, UI swaps on the spot (C# parity).
+
+---
+
+## Rendering Rules (SVG)
+
+### Edge drawing (lines)
+
+* Traverse the **`TreeViewNode` graph**, not the grid:
+
+  * For each node:
+
+    * If it has `branches`: draw an edge to **each** branch child (covers “2nd/3rd branch” diagonals).
+    * Else: draw an edge to `next`.
+* Draw **center → center**; stones render **above** lines so tips are hidden (C# parity).
+* Use `strokeLinecap="round"` and `strokeLinejoin="round"` for pleasant diagonals.
+* **Line bends**: no circle/marker at bend cells (just the lines touching).
+
+### Node drawing (order = z-index)
+
+1. **Current move**: filled **fuchsia** rectangle *behind* the node (for Start too).
+   *No extra bolding of circles for current.*
+2. **Node shape**:
+
+   * **Move**: filled circle (`#000` black or `#fff` white).
+   * **Start**: **letter “S”** centered; **no circle**.
+3. **Label**:
+
+   * **Move number**: `Move.number` when available; if not (parsed-only), **fallback to `cell.column`** (matches C#).
+   * Text color: white on black stones; black on white stones.
+4. **Comment**: green outline rectangle, **strokeWidth 3**, `fill="none"` (and `fillOpacity=0`).
+5. **Selected next branch**: fuchsia outline rectangle, drawn **last** so it sits on top of the green comment box.
+
+**Constants** (current values):
+`CELL_W=40`, `CELL_H=28`, `NODE_R=8`, `HILITE_PAD=4`, background `#ead6b8` (light tan).
+
+---
+
+## Highlight Logic
+
+* **Current**: if `current === null`, highlight `"start"`. Otherwise resolve via `lookupOrRemap(current)` so forward navigation highlights immediately even before eager remap fires.
+
+* **Selected next branch** (outline):
+  Derive from the **placed graph**: `currentCell.next ?? currentCell.branches?.[0]` (or same logic anchored at Start when `current === null`).
+  Only show the outline when there’s actually a next/branch.
+
+---
+
+## Scrolling Policy
+
+* Only scroll when the **current cell’s rect is partially out of view**.
+* **Horizontal**: bias left → place node near the **left** edge.
+* **Vertical**:
+
+  * If the node is **below**: bring it near the **bottom** (leave a bottom margin).
+  * If **above**: bring it near the **top**.
+* No “always-center” behavior (avoids jerky UI and preserves context ahead/behind).
+
+---
+
+## Click Behavior (hit testing)
+
+* You can either:
+
+  * Use the **matrix** directly (`grid[row][col]`) for **O(1)** hit test; or
+  * Scan the **map** (exact C# parity) if you prefer the dictionary-style hit test.
+* Once you find the `TreeViewNode`, you compute a path and replay via `Game` (same flow as C#).
+
+---
+
+## Wiring (AppGlobals)
+
+* **Single wiring point**: inside `setGame(g)`
+  Assign:
+
+  * `g.onChange` → `bumpVersion`
+  * `g.onTreeLayoutChange` → `bumpTreeLayoutVersion`
+  * `g.onTreeHighlightChange` → `bumpTreeHighlightVersion`
+  * `g.onParsedNodeReified` → forward to `treeRemapperRef.current(oldKey, newMove)`
+* The initial `Game` is created via `useRef(new Game())`; on mount we call `setGame(g)` to make it current and **wire** callbacks the same way we do for any new/loaded game.
+
+---
+
+## Invariants & Debugging Aids
+
+* **Invariant**: `treeViewModel[0][0]` exists and is the Start cell.
+* **Assertion** (UI): if `current` (or its `parsedNode`) isn’t found in the identity map, it usually means a topology change happened without a `onTreeLayoutChange` bump.
+* **Optional overlay** (dev only): draw a faint grid and row/col labels to verify placement (can be toggled via a local boolean).
+
+---
+
+## Appearance Parity (summary)
+
+* Start node = **“S”** (no circle).
+* Comments = green **outline** (not filled).
+* Current = **filled fuchsia** block; circle stroke **unchanged**.
+* Selected next branch = **fuchsia outline**; only when branches exist.
+* Moves show **numbers** inside stones (fallback to column for parsed nodes).
+* Diagonals for 2nd/3rd… branches via **graph traversal**, not grid adjacency.
+* No black dot at bend cells.
+
+---
+
+## Performance Notes
+
+* Layout recompute and identity map rebuild happen **only** on layout version changes.
+* Paint-only bumps update a handful of attributes and run a **scroll check**; no geometry recompute.
+* Mutating the map **in place** on remap avoids reallocation and preserves object identity used by React keys.
+
+---
+
+## Minimal API Snippets (for reference)
+
+**Game → UI remap signal:**
+
+```ts
+// Game.ts
+onParsedNodeReified?: (oldKey: ParsedNode, newMove: Move) => void;
+
+// During replay, when a move is materialized:
+this.onParsedNodeReified?.(parsedNode, move);
+```
+
+**Provider wiring (single place):**
+
+```ts
+// AppGlobals.tsx inside setGame(g)
+g.onChange = bumpVersion;
+g.onTreeLayoutChange = bumpTreeLayoutVersion;
+g.onTreeHighlightChange = bumpTreeHighlightVersion;
+g.onParsedNodeReified = (oldKey, newMove) => {
+  treeRemapperRef.current?.(oldKey, newMove);
+};
+```
+
+**TreeView remapper registration & lazy remap:**
+
+```ts
+// TreeView.tsx
+// Register eagerly:
+useEffect(() => {
+  app.setTreeRemapper?.((oldKey, newMove) => {
+    const node = map.get(oldKey);
+    if (!node) return;
+    map.delete(oldKey);
+    map.set(newMove, node);
+    (node as any).node = newMove;
+  });
+  return () => app.setTreeRemapper?.(null);
+}, [app, map]);
+
+// Lazy fallback when resolving a Move key:
+function lookupOrRemap(key: IMoveNext): TreeViewNode | null {
+  const n = map.get(key);
+  if (n) return n;
+  const pn = (key as any).parsedNode as IMoveNext | undefined;
+  if (pn && map.has(pn)) {
+    const node = map.get(pn)!;
+    map.delete(pn);
+    map.set(key, node);
+    (node as any).node = key;
+    return node;
+  }
+  return null;
+}
+```
+
+---
+
+## Future Refinements
+
+* Optional dev overlay/legend toggle for verifying highlights visually.
+* Virtualize very large trees (> 1–2k nodes).
+* Configurable scroll anchor (e.g., center-center vs top-left) as a preference.
+
+---

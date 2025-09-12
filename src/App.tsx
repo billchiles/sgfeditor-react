@@ -16,8 +16,11 @@ import styles from "./App.module.css";
 import { GameProvider, GameContext, addOrGotoGame } from "./models/AppGlobals";
 import NewGameDialog from "./components/NewGameDialog";
 import { Game } from "./models/Game";
+//import type { IMoveNext } from "./models/Board";
 import HelpDialog from "./components/HelpDialog";
 import { HELP_TEXT } from "./components/helpText";
+import TreeView from "./components/TreeView";
+import { getGameTreeModel, type TreeViewNode } from "./models/treeview";
 
 
 /// App function only provides context from GameProvider, and AppContent function spews all the UI
@@ -70,7 +73,10 @@ function AppContent({
   const appGlobals = useContext(GameContext);
   // Game status area definition and updating
   const g = appGlobals?.game;
-  // useMemo's run on firsr render and when dependencies change.
+  const grid: (TreeViewNode | null)[][] =
+    useMemo(() => getGameTreeModel(g as any), [g, appGlobals!.treeLayoutVersion]);
+  //let index: Map<IMoveNext | "start", TreeViewNode>;
+  // useMemo's run on first render and when dependencies change.
   const statusTop = 
     useMemo(() => {
               if (!g) return "SGF Editor --"; // First render this is undefined.
@@ -173,8 +179,8 @@ function AppContent({
         {/* 4) Game tree / variations placeholder */}
         <div className={styles.panel} style={{ flex: 1, display: "flex", minHeight: 0 }}>
           <div className={styles.treeArea} aria-label="Game tree area">
-            <div className={styles.treePlaceholder}>
-              (game tree goes here)
+            <div className="tree-pane">
+              <TreeView treeViewModel={grid} current={g!.currentMove} />
             </div>
           </div>
         </div>
@@ -228,8 +234,6 @@ function CommandButtons() {
   // home, prev, next, end buttons
   const onHome = useCallback(async () => {
     if (!game?.gotoStart || !bumpVersion) return;
-    //if (!game.canUnwindMove?.()) return;
-    //game.saveCurrentComment?.(); should be done by go to start
     game.gotoStart(); // signals onchange
     // bumpVersion();
   }, [game, bumpVersion]);
@@ -241,18 +245,18 @@ function CommandButtons() {
     //bumpVersion(); unwindmove call onchange and always returns a move
   }, [game, bumpVersion]);
   const onNext = useCallback(async () => {
-    if (!game?.replayMove || !bumpVersion) return;
+    if (!game?.replayMove || !bumpVersion) return; // no idea why this test is here
     if (!game.canReplayMove?.()) return;
-    //game.saveCurrentComment?.();
     const m = await game.replayMove();
-    if (m !== null) bumpVersion();
+    if (m !== null) {
+      bumpVersion();
+      app.bumpTreeHighlightVersion();
+    }
   }, [game, bumpVersion]);
   const onEnd = useCallback(async () => {
     if (!game?.gotoLastMove || !bumpVersion) return;
     if (!game.canReplayMove?.()) return;
-    //game.saveCurrentComment?.();
     await game.gotoLastMove(); // signal onchange
-    //bumpVersion();
   }, [game, bumpVersion]);
   // Branches reporting button
   // Need to declare next two vars so they are in scope for branchesLabel computation.

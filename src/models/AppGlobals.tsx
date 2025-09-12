@@ -20,10 +20,9 @@ import type { MessageOrQuery } from "./Game";
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
 import { browserFileBridge, browserAppStorageBridge, browserKeybindings } from "../platforms/browser-bridges";
 import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platforms/bridges";
-import {parseFile, SGFError} from "./sgfparser";
+import {parseFile, SGFError, ParsedNode} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
-//import { debugAssert } from "../debug-assert";
-
+import type { Move } from "./Board";
 ///
 //// Define types for passing global state to React and command state handlers.
 ///
@@ -58,6 +57,15 @@ export type AppGlobals = {
   version: number;
   // Manually force a redraw from any UI or model code
   bumpVersion: () => void;
+  // Tree rendering control (layout recompute vs. highlight-only re-render)
+  treeLayoutVersion: number;
+  treeHighlightVersion: number;
+  bumpTreeLayoutVersion: () => void;
+  bumpTreeHighlightVersion: () => void;
+  // UI layer (TreeView) can register a remapper to swap a ParsedNode for its new Move during replay
+  setTreeRemapper?: (fn: ((oldKey: ParsedNode, newMove: Move) => void) | null) => void;
+
+
   // UI commands exposed to components:
   //
   showHelp: () => void;
@@ -129,6 +137,8 @@ type CmdDependencies = {
   // Then change cmd implementers to getGame: () => Game instead of gameref param
   gameRef: React.MutableRefObject<Game>; 
   bumpVersion: () => void;
+  bumpTreeLayoutVersion: () => void;
+  bumpTreeHighlightVersion: () => void;
   commonKeyBindingsHijacked: boolean; // true in browser, false in Electron
   fileBridge: FileBridge;
   appStorageBridge: AppStorageBridge;
@@ -205,9 +215,18 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   gameRef.current.setComments = setComment;
   gameRef.current.message = browserMessageOrQuery;
   // game.onchange = bumpVersion wired up below in a useEffect, same with setting defaultGame and games
-  // useState initial value used first render, same every time unless call setter.
+  // useState initial value used first render, same value every time unless call setter.
   const [version, setVersion] = useState(0); 
   const bumpVersion = useCallback(() => setVersion(v => v + 1), []); // always same function, no deps
+  const [treeLayoutVersion, setTreeLayoutVersion] = useState(0);
+  const bumpTreeLayoutVersion = useCallback(() => setTreeLayoutVersion(v => v + 1), []);
+  const [treeHighlightVersion, setTreeHighlightVersion] = useState(0);
+  const bumpTreeHighlightVersion    = useCallback(() => setTreeHighlightVersion(v => v + 1), []);
+  // Holds a function that TreeView will provide to swap a new Move for a ParsedNode
+  const treeRemapperRef = useRef<((oldKey: ParsedNode, newMove: Move) => void) | null>(null);
+  const setTreeRemapper = useCallback((fn: ((oldKey: ParsedNode, newMove: Move) => void) | null) => {
+    treeRemapperRef.current = fn;
+  }, []);
   // stable accessors for the current game, getGame never changes, setGame updates with version
   const getGame = useCallback(() => gameRef.current, []);
   const setGame = useCallback((g: Game) => {
@@ -215,10 +234,16 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     gameRef.current = g;
     //  g may have already existed and been wired up, but need to set for new games.
     g.onChange = bumpVersion;
+    g.onTreeLayoutChange = bumpTreeLayoutVersion;
+    g.onTreeHighlightChange  = bumpTreeHighlightVersion;
+    g.onParsedNodeReified = (oldKey, newMove) => {
+      // calls into TreeView to: delete(oldKey); set(newMove, node); node.node = newMove;
+      treeRemapperRef.current?.(oldKey, newMove); 
+    };
     g.getComments = getComment;
     g.setComments = setComment;    
     bumpVersion();
-  }, [bumpVersion, getComment, setComment]);
+  }, [bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion, getComment, setComment]);
   // useState initial value used first render, same every time unless call setter.
   const [games, setGames] = useState<Game[]>([]);
   const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);
@@ -232,23 +257,31 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     await checkDirtySave(gameRef.current, fileBridge);
     openNewGameDialog?.();
   }, [fileBridge, openNewGameDialog]);
-
-  // Add next line if want to avoid deprecated MutableRefObject warning
-  //const getGame = useCallback(() => gameRef.current, []);
+  //
   // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
   // This way the model and UI are isolated, but the model can signal model changes for re-rendering
   // by signalling the game changed.
-  useEffect(() => {
-    const game = gameRef.current;
-    game.onChange = bumpVersion;
-  }, [bumpVersion]);
+  // LATER GPT5 SAID I don't need this, that setgame() does it at the right time on the first pass.
+  // useEffect(() => {
+  //   const game = gameRef.current;
+  //   game.onChange = bumpVersion;
+  //   game.onTreeLayoutChange = bumpTreeLayoutVersion; // topology changed
+  //   game.onTreeHighlightChange  = bumpTreeHighlightVersion; // highlights and scrolling
+  //   game.onParsedNodeReified = (oldKey, newMove) => {treeRemapperRef.current?.(oldKey, newMove);}
+  //   return () => {
+  //     game.onChange = undefined;
+  //     game.onTreeLayoutChange = undefined;
+  //     game.onTreeHighlightChange = undefined;
+  //     game.onParsedNodeReified = undefined;
+  //   };
+  // }, [bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion]);
   // Setup global state for initial game -- this runs once due to useEffect.
   // useEffect's run after the DOM has rendered.  useState runs first, when GameProvider runs.
   useEffect(() => {
     if (games.length === 0 ) {//&& defaultGame === null) {
       const g = gameRef.current;
       // ensure model-to-UI notifications are wired, executes after render, g is default game from above
-      g.onChange = bumpVersion;
+      //g.onChange = bumpVersion;   done in setgame()
       setGames([g]);
       setDefaultGame(g); 
       // Don't set lastCreatedGame (only used when creating a new game throws and needs cleaning up).
@@ -264,13 +297,15 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // One deps object to pass to top-level commands that updates if any member changes ref ID.
   // React takes functions anywhere it takes a value and invokes it to get the value if types match.
   const deps = useMemo<CmdDependencies>(
-      () => ({gameRef, bumpVersion, commonKeyBindingsHijacked, fileBridge, appStorageBridge, 
+      () => ({gameRef, bumpVersion, bumpTreeLayoutVersion: bumpTreeLayoutVersion, 
+              bumpTreeHighlightVersion: bumpTreeHighlightVersion,
+              commonKeyBindingsHijacked, fileBridge, appStorageBridge, 
               getGames: () => games, setGames, setGame, getLastCreatedGame: () => lastCreatedGame, 
               setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
               showHelp: () => { openHelpDialog?.(); } }), 
              [gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ games, setGames, setGame, 
               lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
-              openHelpDialog, commonKeyBindingsHijacked]);
+              openHelpDialog, commonKeyBindingsHijacked, bumpTreeLayoutVersion, bumpTreeHighlightVersion]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
   const saveSgf   = useCallback(() => doWriteGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
@@ -299,11 +334,14 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
             getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
             getComment, setComment,
             version, bumpVersion,
+            treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, bumpTreeHighlightVersion,
+            setTreeRemapper,
             showHelp: () => { openHelpDialog?.(); }, openSgf, saveSgf, saveSgfAs, newGame,
             getLastCommand, setLastCommand,}),
     [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs,
      games, setGames, defaultGame, setDefaultGame, lastCreatedGame, setLastCreatedGame,
-     getGame, setGame]
+     getGame, setGame, treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, 
+     bumpTreeHighlightVersion, setTreeRemapper]
   );
   // Instead of the following line that requires this file be a .tsx file, I could have used this
   // commented out code:
@@ -559,20 +597,23 @@ function undoLastGameCreation (game: Game | null) {
 async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastCommand }: CmdDependencies):
     Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
-  // GATHER STATE FIRST -- commit dirty comment to game or move, then save
   const g = gameRef.current;
+  g.saveCurrentComment();
   const data = g.buildSGFString();
   const hint = g.filename ?? "game.sgf";
   const res = await fileBridge.save(g.saveCookie ?? null, hint, data);
   focusOnRoot(); // call before returning to ensure back at top
   if (!res) return; // user cancelled dialog when there was no saveCookie or filename.
+  g.isDirty = false;
+  // TODO delete autosave file
   const { fileName, cookie } = res;
   if (fileName !== g.filename || cookie !== g.saveCookie) {
-    g.filename = fileName;
-    const parts = fileName.split(/[/\\]/); 
-    g.filebase = parts[parts.length - 1];
-    g.saveCookie = cookie;
-    bumpVersion();
+    g.saveGameFileInfo(cookie, fileName);
+    // g.filename = fileName;
+    // const parts = fileName.split(/[/\\]/); 
+    // g.filebase = parts[parts.length - 1];
+    // g.saveCookie = cookie;
+    bumpVersion(); // update status area
   }
 }
 
@@ -580,9 +621,12 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
     CmdDependencies): Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
+  g.saveCurrentComment();
   const data = g.buildSGFString();
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
   if (!res) return; // cancelled
+  g.isDirty = false;
+  // TODO delete autosave file
   const { fileName, cookie } = res;
   if (fileName !== g.filename || cookie !== g.saveCookie) {
     g.filename = fileName;
@@ -742,7 +786,10 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     const m = curgame.replayMove();
-    if (m !== null) deps.bumpVersion();
+    if (m !== null) {
+      deps.bumpVersion();
+      deps.bumpTreeHighlightVersion();
+    }
     return;
   }
   if (lower === "arrowup" && !e.ctrlKey) {
@@ -803,7 +850,7 @@ function isEditingTarget (t: EventTarget | null): boolean {
 }
 
 
-
+  /// todo -- consider checkDirtySave, confirm not losing comment changes
   async function gotoNextGameCmd(deps : CmdDependencies, last: LastCommand): Promise<void> {
     const games = deps.getGames();
     if (games.length < 2) {
@@ -820,10 +867,12 @@ function isEditingTarget (t: EventTarget | null): boolean {
       // user started repeatedly invoking this command.  Now if we promote the last game every time
       // the user sees each game in order of most recently visited at the time they started the cmd.
       idx = idx === games.length ? idx - 1 : idx;
-    } 
+    }
+    deps.gameRef.current.saveCurrentComment();
     addOrGotoGame({idx}, games, deps.setGame, deps.setGames);
     deps.setLastCommand({ type: CommandTypes.GotoNextGame, cookie: { idx } })
     deps.bumpVersion();
+    deps.bumpTreeLayoutVersion();
   }
   
 
