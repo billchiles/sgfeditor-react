@@ -33,13 +33,14 @@ type Props = {
 };
 
 // Layout constants (SVG coordinates from grid cells)
+// invariant 2 * (node_r + hilite_pad) < min(cell_w,cell_h)
 const CELL_W = 40;
-const CELL_H = 28;
-const NODE_R = 8;
-const HILITE_PAD = 4;
+const CELL_H = 40;
+const NODE_R = 13;
+const HILITE_PAD = 5;
 
 const PAD_LEFT   = 0;
-const PAD_TOP    = 0;
+const PAD_TOP    = 5;
 const PAD_RIGHT  = 24;
 const PAD_BOTTOM = 24;
 
@@ -317,7 +318,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
                     y={cy}
                     textAnchor="middle"
                     dominantBaseline="central"
-                    fontSize={10}
+                    fontSize={12}
                     fontWeight={700}
                   >
                     S
@@ -332,13 +333,15 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
                   let num = typeof n?.number === "number" ? n.number : null;
                   if (num == null) num = cell.column;
                   const numFill = cell.color === StoneColors.Black ? "#fff" : "#000";
+                  const numStr = String(num);
+                  const numFontSize = numStr.length >= 3 ? "10pt" : "12pt";
                   return (
                     <text
                       x={cx}
                       y={cy}
                       textAnchor="middle"
                       dominantBaseline="central"
-                      fontSize={10}
+                      fontSize={numFontSize}
                       fontWeight={400}
                       fill={numFill}
                     >

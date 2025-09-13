@@ -209,6 +209,10 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // This is global.currentgame essentially, any new games set this to be current for commands to ref.
   // useRef exeucutes during first render only.
   const gameRef = useRef<Game>(new Game()); // net yet current, games, defaultGame.
+  // Must always call setgames before you call setgame because setgame removes the defaultgame if it
+  // is not dirty, and if you setgames to a list that included the default game after calling setgame
+  // you would just restore it
+  const [games, setGames] = useState<Game[]>([]);
   // Enable first game to access comments and messaging/confirming UI.
   // These execute every render but store teh same functions every time.
   gameRef.current.getComments = getComment;
@@ -229,10 +233,12 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   }, []);
   // stable accessors for the current game, getGame never changes, setGame updates with version
   const getGame = useCallback(() => gameRef.current, []);
+  // SETGAME -- Callers must call this after setGames if there is a command flow within one render
+  //            cycle that calls both so that any computed games list doesn't put back defaultgame
   const setGame = useCallback((g: Game) => {
     g.message = gameRef.current?.message ?? browserMessageOrQuery;
     gameRef.current = g;
-    //  g may have already existed and been wired up, but need to set for new games.
+    // g may have already existed and been wired up, but need to set for new games.
     g.onChange = bumpVersion;
     g.onTreeLayoutChange = bumpTreeLayoutVersion;
     g.onTreeHighlightChange  = bumpTreeHighlightVersion;
@@ -245,7 +251,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     bumpVersion();
   }, [bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion, getComment, setComment]);
   // useState initial value used first render, same every time unless call setter.
-  const [games, setGames] = useState<Game[]>([]);
   const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);
   const fileBridge: FileBridge = browserFileBridge;
   const appStorageBridge: AppStorageBridge = browserAppStorageBridge;
@@ -275,7 +280,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   //     game.onParsedNodeReified = undefined;
   //   };
   // }, [bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion]);
-  // Setup global state for initial game -- this runs once due to useEffect.
+  // SETUP INITIAL STATE FOR GAME -- this runs once due to useEffect.
   // useEffect's run after the DOM has rendered.  useState runs first, when GameProvider runs.
   useEffect(() => {
     if (games.length === 0 ) {//&& defaultGame === null) {
@@ -283,10 +288,11 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
       // ensure model-to-UI notifications are wired, executes after render, g is default game from above
       //g.onChange = bumpVersion;   done in setgame()
       setGames([g]);
+      setGame(g);
+      // must call set default after setgame so that setgame doesn't remove this default now
       setDefaultGame(g); 
       // Don't set lastCreatedGame (only used when creating a new game throws and needs cleaning up).
       // make it the active game (also bumps version)
-      setGame(g);
     }
     // run once on mount; guard prevents re-entry
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -303,7 +309,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
               getGames: () => games, setGames, setGame, getLastCreatedGame: () => lastCreatedGame, 
               setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
               showHelp: () => { openHelpDialog?.(); } }), 
-             [gameRef, bumpVersion, fileBridge, appStorageBridge, /* size,*/ games, setGames, setGame, 
+             [gameRef, bumpVersion, fileBridge, appStorageBridge, games, setGames, setGame, 
               lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
               openHelpDialog, commonKeyBindingsHijacked, bumpTreeLayoutVersion, bumpTreeHighlightVersion]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
@@ -413,8 +419,8 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, games: readon
                         setGame: (g: Game) => void, setGames: (gs: Game[]) => void): void {
   const newGames =
     "idx" in arg ? moveGameToMRU(games, arg.idx) : [arg.g, ...games];
+  setGames(newGames); // must call this first in case setgame removes the not dirty defaultgame
   setGame(newGames[0]);
-  setGames(newGames);
 }
 
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
@@ -519,26 +525,26 @@ async function getFileGameCheckingAutoSave
     if (autoHandle !== null) {
       // TODO: THIS ALL NEEDS TO CHANGE now with appStorageBridge and expecting to always autosave
       if (fileBridge.getWriteDate(autoHandle) > fileBridge.getWriteDate(fileHandle) &&
-          await curgame.message!.confirm!(
-            `Found more recent auto saved file for ${(fileHandle as any).name}.  Confirm opening auto saved file,` +
-            `OK for auto saved version, Cancel/Escape to open older original file.`)) {
-          // TODO: PROPERLY, I should test handle and read data here, but autosave mgt will all change
-          parseAndCreateGame(autoHandle, autoSaveName, fileBridge, "", gamemgt.gameRef, 
-                             {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
-                              setGames: gamemgt.setGames});
-          const nowCurrent = gamemgt.gameRef.current;
-          nowCurrent.isDirty = true; // actual file is not saved up to date
-          // Persist actual file name and handle for future save operations.
-          nowCurrent.filename = (fileHandle as any).name; // if there is a path, this is it.
-          const parts = nowCurrent.filename!.split(/[/\\]/); 
-          nowCurrent.filebase = parts[parts.length - 1];
-          // old code updated the title here, but we fully data bind it
-        } else {// Not saving current game ...
-          parseAndCreateGame(fileHandle, filenName, fileBridge, data, gamemgt.gameRef, 
-                             {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
-                              setGames: gamemgt.setGames})
-        }
-        (autoHandle as any).deleteFile();
+        await curgame.message!.confirm!(
+          `Found more recent auto saved file for ${(fileHandle as any).name}.  Confirm opening auto saved file,` +
+          `OK for auto saved version, Cancel/Escape to open older original file.`)) {
+        // TODO: PROPERLY, I should test handle and read data here, but autosave mgt will all change
+        parseAndCreateGame(autoHandle, autoSaveName, fileBridge, "", gamemgt.gameRef, 
+                            {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+                            setGames: gamemgt.setGames});
+        const nowCurrent = gamemgt.gameRef.current;
+        nowCurrent.isDirty = true; // actual file is not saved up to date
+        // Persist actual file name and handle for future save operations.
+        nowCurrent.filename = (fileHandle as any).name; // if there is a path, this is it.
+        const parts = nowCurrent.filename!.split(/[/\\]/); 
+        nowCurrent.filebase = parts[parts.length - 1];
+        // old code updated the title here, but we fully data bind it
+      } else {// Not saving current game ...
+        parseAndCreateGame(fileHandle, filenName, fileBridge, data, gamemgt.gameRef, 
+                            {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+                            setGames: gamemgt.setGames})
+      }
+      (autoHandle as any).deleteFile();
     } else {// No autoHandle, no auto saved file to worry about ...
       parseAndCreateGame(fileHandle, filenName, fileBridge, data, gamemgt.gameRef, 
                          {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
@@ -651,22 +657,6 @@ function moveGameToMRU (games: readonly Game[], idx: number /*, setGame: (g: Gam
   const newGames = [target, ...rest];
   return newGames;
 }
-
-// function moveGameToFront (games: Game[], idx: number): Game[] {
-//   if (idx <= 0 || idx >= games.length) return games.slice();
-//   const target = games[idx];
-//   const rest = games.slice(0, idx).concat(games.slice(idx + 1));
-//   return [target, ...rest];
-//}
-
-// Add a new game to the front
-// function addGameAsMRU(games: readonly Game[], g: Game, setGames: (gs: Game[]) => void,
-//                       setGame: (g: Game) => void): Game[] {
-//   const newGames = [g, ...games];
-//   setGames(newGames);
-//   setGame(g);
-//   return newGames;
-// }
 
 ///
 //// Keybindings

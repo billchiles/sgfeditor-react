@@ -73,7 +73,7 @@ function AppContent({
   const appGlobals = useContext(GameContext);
   // Game status area definition and updating
   const g = appGlobals?.game;
-  const grid: (TreeViewNode | null)[][] =
+  const treeViewLayout: (TreeViewNode | null)[][] =
     useMemo(() => getGameTreeModel(g as any), [g, appGlobals!.treeLayoutVersion]);
   //let index: Map<IMoveNext | "start", TreeViewNode>;
   // useMemo's run on first render and when dependencies change.
@@ -116,7 +116,9 @@ function AppContent({
       </div>
 
       {/* RIGHT: Sidebar */}
-      <aside className={styles.rightPane}>
+      {/* Make sidebar a flex column and allow inner scroll areas to size properly */}
+      <aside className={styles.rightPane} style={{ display: "flex", flexDirection: "column", 
+                        minHeight: 0, minWidth: 0 }}>
         {/* 1) Command buttons panel */}
         <div className={styles.panel}>
           <div className={styles.buttonRow}>
@@ -166,22 +168,36 @@ function AppContent({
           </div>
         </div>
 
-        {/* 3) Comment editor */}
-        <div className={styles.panel}>
-          <textarea
-            className={styles.commentBox}
-            ref={commentRef}
-            placeholder="Add a comment for the current move…"
-            defaultValue=""
-          />
-        </div>
+        {/* 3+4) Comment + Tree grouped so we can control their relative heights */}
+        <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* 3) Comment editor — ~40% of the available sidebar height */}
+          <div
+            className={styles.panel}
+            style={{ display: "flex", minHeight: 0, minWidth: 0, padding: 0, flex: "0 0 40%" }}
+          >
+            <textarea
+              className={styles.commentBox}
+              ref={commentRef}
+              placeholder="Add a comment for the current move…"
+              defaultValue=""
+              style={{
+                flex: 1,
+                width: "100%",
+                maxWidth: "100%",
+                minWidth: 0,
+                minHeight: 0,
+                boxSizing: "border-box",
+                resize: "vertical"
+              }}
+            />
+          </div>
 
-        {/* 4) Game tree / variations placeholder */}
-        <div className={styles.panel} style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          <div className={styles.treeArea} aria-label="Game tree area">
-            <div className="tree-pane">
-              <TreeView treeViewModel={grid} current={g!.currentMove} />
-            </div>
+          {/* 4) Game tree — remaining ~60% */}
+          <div
+            className={styles.panel}
+            style={{ flex: "1 1 60%", minHeight: 0, minWidth: 0, padding: 0, display: "flex" }}
+          >
+            <TreeView treeViewModel={treeViewLayout} current={g!.currentMove} />
           </div>
         </div>
       </aside>

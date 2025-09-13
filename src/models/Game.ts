@@ -645,8 +645,6 @@ gotoStart(): void {
       hadParseErr = err;
       // Don't need view model object in code here, but need to ensure there is one mapped by move.
       this.treeViewNodeForMove(move);
-      // If you maintain a tree view mapping: ensure node exists
-      // TODO: Tree view node mapping hook (no-op here)
     }
     this.moveCount += 1;
     // Apply captures
@@ -737,21 +735,18 @@ replayUnrenderedAdornments (move: Move): void {
       for (const coord of props["TR"]) {
         const [row, col] = parsedToModelCoordinates(coord);
         move.addAdornment({ kind: AdornmentKinds.Triangle, row, column: col });
-        // const a = this.addAdornment.(move, row, col, "triangle");    // TODO: your impl
       }
     }
     if (props["SQ"]) { // Squares: SQ[aa]...
       for (const coord of props["SQ"]) {
         const [row, col] = parsedToModelCoordinates(coord);
         move.addAdornment({ kind: AdornmentKinds.Square, row, column: col });
-        // const a = this.addAdornment?.(move, row, col, "square");
       }
     }
     if (props["LB"]) { // Labels: LB[aa:A]...
       for (const token of props["LB"]) {
         const [row, col, char] = parsedLabelModelCoordinates(token);
         move.addAdornment({ kind: AdornmentKinds.Letter, row, column: col, letter: char });
-        // const a = this.addAdornment?.(move, row, col, "letter", char);
       }
     }
       
@@ -956,22 +951,38 @@ buildSGFStringFlipped (): string {
       this.setComments?.(this.comments);
   }
 
-  /// save_comment takes a move to update with the current comment from the UI.
+  /// saveComment takes a move to update with the current comment from the UI.
   /// If move is null, the comment belongs to the game start or empty board.
+  /// React fucks with strings and modifies them to change line endigs randomly, so need to
+  /// compare them specially.
   ///
   private saveComment (move: Move | null = null): void {
     const curComment = this.getComments?.() ?? "";
     if (move !== null) {
-      if (move.comments !== curComment) {
-        move.comments = curComment;
+      const [same, newStr] = this.compareComments(move.comments, curComment);
+      if (! same) {
+        move.comments = newStr!;
         this.isDirty = true;
       }
     } else {
-      if (this.comments !== curComment) {
-        this.comments = curComment;
+      const [same, newStr] = this.compareComments(this.comments, curComment);
+      if (! same) {
+        this.comments = newStr!;
         this.isDirty = true;
       }
     }
+  }
+
+  /// compareComments compares the string ignoring line endings and if different returns a repaired
+  /// uiStr to save in the model.
+  ///
+  private compareComments (modelStr: string, uiStr: string): [boolean, string | null] {
+    // Convert UI text to CRLF (handles bare LF and already-CRLF safely)
+    const uiCRLF = uiStr.replace(/\r?\n/g, "\r\n");
+    if (modelStr === uiCRLF) {
+      return [true, null]; 
+    }
+    return [false, uiCRLF];
   }
 
   ///
@@ -1650,7 +1661,7 @@ return createGame(Board.MaxSize, 0, Game.DefaultKomi, null, null, setGame, getGa
 
 /// createGame makes the game and makes it current game.  The constructor adds handicap stones to
 /// the board.
-/// TODO does this need to clear the UI comment box?
+/// TODO does this need to clear the UI comment box? think that was done earlier
 ///
 export function createGame (size : number, handicap : number, komi : string, 
                             handicapStones: Move[] | null = null, all_white : Move[] | null = null,
@@ -1658,8 +1669,8 @@ export function createGame (size : number, handicap : number, komi : string,
                             setGames: (gs: Game[]) => void):
         Game {
     var g = new Game(size, handicap, komi, handicapStones, all_white);
-    setGame(g);
     setGames([g, ...getGames()]);
+    setGame(g); // musr call this second because it delete a not dirty default game
     return g;
 }
 
