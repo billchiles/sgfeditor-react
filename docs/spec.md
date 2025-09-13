@@ -172,8 +172,14 @@ React UI (App/AppContent/GoBoard)     Model (Game, Board, Move, ParsedNode)     
 * **StoneColor**:
 
   ```ts
-  export type StoneColor = "black" | "white";
-  export const StoneColors = { Black: "black", White: "white" } as const;
+  // We keep a sentinel for “no color” to represent start/pass/bad nodes in
+  // the tree and for UI messaging/adornments.
+  export type StoneColor = "black" | "white" | "nocolor";
+  export const StoneColors = {
+    Black: "black",
+    White: "white",
+    NoColor: "nocolor",
+  } as const;
   ```
 * **Board coords**: Model uses **1-based** row/col for Go vernacular; board’s underlying array is **0-based**. Helpers convert.
 * **Row labels**: UI displays rows **bottom (1) → top (19)**; internal math accounts for display orientation when needed.

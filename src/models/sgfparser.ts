@@ -1,6 +1,4 @@
 /// Gpt5 translation of my C# code.
-/// It says it made the following changes:
-///    Parse entry is parseText(text) (instead of ParseFile).
 ///
 import { StoneColors } from "./Board";
 import type { StoneColor, IMoveNext } from "./Board";
@@ -46,9 +44,10 @@ export class ParsedNode implements IMoveNext {
   get IMNNext (): IMoveNext | null {
       return this.next;
   }
-
+  /// IMNBranches is read only by convention, no code ever needs to change this.branches once made
   get IMNBranches (): IMoveNext[] | null {
-      return this.branches ? [...this.branches] : null;
+      //return this.branches ? [...this.branches] : null;
+      return this.branches;
   }
 
   get IMNColor (): StoneColor {
@@ -115,7 +114,8 @@ function parseNodes(lexer: Lexer): ParsedNode {
   while (lexer.hasData()) {
     const ch = lexer.scanFor(";()", undefined);
     if (ch === ";") {
-      if (branchingYet) throw new SGFError("Found node after branching started.");
+      if (branchingYet) 
+        throw new SGFError(`Found node after branching started -- file location ${lexer.location}.`);
       cur.next = parseNode(lexer);
       cur.next.previous = cur;
       cur = cur.next;
@@ -137,7 +137,7 @@ function parseNodes(lexer: Lexer): ParsedNode {
       throw new SGFError(`SGF file is malformed at char ${lexer.location}`);
     }
   }
-  throw new SGFError("Unexpectedly hit EOF!");
+  throw new SGFError(`Unexpectedly hit EOF -- file location ${lexer.location}.`);
 }
 
 function parseNode(lexer: Lexer): ParsedNode {
@@ -165,7 +165,7 @@ function parseNode(lexer: Lexer): ParsedNode {
       lexer.location = pos;
     }
   }
-  throw new SGFError("Unexpectedly hit EOF!");
+  throw new SGFError(`Unexpectedly hit EOF -- file location ${lexer.location}.`);
 }
 
 ///

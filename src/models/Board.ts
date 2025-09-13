@@ -5,7 +5,7 @@ import type { ParsedNode } from "./sgfparser";
 export const StoneColors = {
   Black: "black",
   White: "white",
-  NoColor: "Pass"
+  NoColor: "nocolor"
 } as const;
 
 export type StoneColor = typeof StoneColors[keyof typeof StoneColors];
@@ -37,7 +37,7 @@ export class Board {
     this.moves[move.row -1][move.column -1] = move;
   }
 
-  removeStone (move: Move) {// NEED TO FIX, moves have 1 based, model is zero-based
+  removeStone (move: Move) {
     this.moves[move.row -1][move.column -1] = null;
   }
 

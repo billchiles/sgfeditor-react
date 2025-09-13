@@ -219,7 +219,8 @@ function NewGameOverlay ({ open, onClose, }: { open: boolean; onClose: () => voi
         const g = new Game(19, handicap, komi.trim());
         g.playerWhite = white;
         g.playerBlack = black;
-        addOrGotoGame({ g }, appGlobals.getGames(), appGlobals.setGame, appGlobals.setGames);
+        addOrGotoGame({ g }, appGlobals.game, appGlobals.getGames(), appGlobals.setGame, 
+                      appGlobals.setGames, appGlobals.getDefaultGame, appGlobals.setDefaultGame);
         onClose();
       }}
       defaults={{

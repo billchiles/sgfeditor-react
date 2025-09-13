@@ -1,4 +1,5 @@
 import { debugAssert } from '../debug-assert';
+import { addOrGotoGame } from './AppGlobals';
 import { Board, Move, StoneColors, oppositeColor, parsedToModelCoordinates,
          parsedLabelModelCoordinates, modelCoordinateToDisplayLetter,
          getParsedCoordinates, flipParsedCoordinates } from './Board';
@@ -1479,8 +1480,9 @@ export function flipCoordinates(coords: string[], size: number, labels: boolean 
 /// up the first moves so that the user can start advancing through the moves.
 ///
 export async function createGameFromParsedGame 
-    (pgame: ParsedGame, curgame: Game, setGame: (g: Game) => void, getGames: () => readonly Game[],
-     setGames: (gs: Game[]) => void):
+    (pgame: ParsedGame, curGame: Game, setGame: (g: Game) => void, getGames: () => Game[],
+     setGames: (gs: Game[]) => void, getDefaultGame: () => Game | null, 
+     setDefaultGame: (g: Game | null) => void):
     Promise<Game> {
   // consoleWritePG(pgame.nodes!); // integrity check code for parsed file structure.
   const props = pgame.nodes!.properties;
@@ -1504,7 +1506,7 @@ export async function createGameFromParsedGame
   if ("SZ" in props) {
     size = parseInt(props["SZ"][0], 10);
   } else {
-    await curgame.message!.message(`"No SZ, size, property in .sgf.  Default is 19x19"`);
+    await curGame.message!.message(`"No SZ, size, property in .sgf.  Default is 19x19"`);
   }
   if (size != Board.MaxSize) {
     throw new SGFError(`Only work with size 19 currently, got ${size}.`);
@@ -1512,7 +1514,8 @@ export async function createGameFromParsedGame
   // Komi
   const komi = "KM" in props ? props["KM"][0] : (handicap === 0 ? Game.DefaultKomi : "0.5");
   // Create new game and clean up current game
-  const g = createGame(size, handicap, komi, allBlack, allWhite, setGame, getGames, setGames);
+  const g = createGame(size, handicap, komi, allBlack, allWhite, 
+                       {curGame, setGame, getGames, setGames, getDefaultGame, setDefaultGame});
   // Players
   if ("PB" in props) g.playerBlack = props["PB"][0];
   if ("PW" in props) g.playerWhite = props["PW"][0];
@@ -1654,10 +1657,10 @@ function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
 /// createDefaultGame stashes the new game in Game Context globals defaultGame so that we can throw
 ///  it away if the user does not use it and opens a file or creates a new game.
 ///
-export function createDefaultGame (setGame: (g: Game) => void, getGames: () => readonly Game[], 
-                                   setGames: (gs: Game[]) => void): Game {
-return createGame(Board.MaxSize, 0, Game.DefaultKomi, null, null, setGame, getGames, setGames);
-}
+// export function createDefaultGame (setGame: (g: Game) => void, getGames: () => Game[], 
+//                                    setGames: (gs: Game[]) => void): Game {
+// return createGame(Board.MaxSize, 0, Game.DefaultKomi, null, null, setGame, getGames, setGames);
+// }
 
 /// createGame makes the game and makes it current game.  The constructor adds handicap stones to
 /// the board.
@@ -1665,12 +1668,16 @@ return createGame(Board.MaxSize, 0, Game.DefaultKomi, null, null, setGame, getGa
 ///
 export function createGame (size : number, handicap : number, komi : string, 
                             handicapStones: Move[] | null = null, all_white : Move[] | null = null,
-                            setGame: (g: Game) => void, getGames: () => readonly Game[], 
-                            setGames: (gs: Game[]) => void):
+                            gamemgt: {curGame: Game, setGame: (g: Game) => void, 
+                                      getGames: () => Game[], setGames: (gs: Game[]) => void,
+                                      getDefaultGame: () => Game | null, 
+                                      setDefaultGame: (g: Game | null) => void}):
         Game {
     var g = new Game(size, handicap, komi, handicapStones, all_white);
-    setGames([g, ...getGames()]);
-    setGame(g); // musr call this second because it delete a not dirty default game
+    addOrGotoGame({g}, gamemgt.curGame, gamemgt.getGames(), gamemgt.setGame, gamemgt.setGames,
+                  gamemgt.getDefaultGame, gamemgt.setDefaultGame);
+    // setGames([g, ...getGames()]);
+    // setGame(g); // musr call this second because it delete a not dirty default game
     return g;
 }
 

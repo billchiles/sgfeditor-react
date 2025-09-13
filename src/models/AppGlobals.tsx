@@ -45,7 +45,7 @@ export type AppGlobals = {
   game: Game; // snapshot of current game (from gameRef.current), set each render by GameProvider.
   getGame: () => Game; // accessor to the live ref
   setGame: (g: Game) => void; // replace current game and trigger redraw because calls bumpVersion.
-  getGames: () => readonly Game[];
+  getGames: () => Game[];
   setGames: (gs: Game[]) => void;
   getDefaultGame: () => Game | null;
   setDefaultGame: (g: Game | null) => void;
@@ -143,9 +143,11 @@ type CmdDependencies = {
   fileBridge: FileBridge;
   appStorageBridge: AppStorageBridge;
   //size: number;
-  getGames: () => readonly Game[];
+  getGames: () => Game[];
   setGames: (gs: Game[]) => void;
   setGame: (g: Game) => void;
+  getDefaultGame: () => Game | null;
+  setDefaultGame: (g: Game | null) => void;
   getLastCreatedGame: () => Game | null;
   setLastCreatedGame: (g: Game | null) => void;
   getLastCommand: () => LastCommand;
@@ -289,7 +291,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
       //g.onChange = bumpVersion;   done in setgame()
       setGames([g]);
       setGame(g);
-      // must call set default after setgame so that setgame doesn't remove this default now
       setDefaultGame(g); 
       // Don't set lastCreatedGame (only used when creating a new game throws and needs cleaning up).
       // make it the active game (also bumps version)
@@ -306,10 +307,12 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
       () => ({gameRef, bumpVersion, bumpTreeLayoutVersion: bumpTreeLayoutVersion, 
               bumpTreeHighlightVersion: bumpTreeHighlightVersion,
               commonKeyBindingsHijacked, fileBridge, appStorageBridge, 
-              getGames: () => games, setGames, setGame, getLastCreatedGame: () => lastCreatedGame, 
+              getGames: () => games.slice(), setGames, setGame, getDefaultGame: () => defaultGame,
+              setDefaultGame, getLastCreatedGame: () => lastCreatedGame, 
               setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
               showHelp: () => { openHelpDialog?.(); } }), 
-             [gameRef, bumpVersion, fileBridge, appStorageBridge, games, setGames, setGame, 
+             [gameRef, bumpVersion, fileBridge, appStorageBridge, 
+              games, setGames, setGame, setDefaultGame, 
               lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
               openHelpDialog, commonKeyBindingsHijacked, bumpTreeLayoutVersion, bumpTreeHighlightVersion]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
@@ -335,7 +338,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // }, []);
   // Code to provide the values when the UI rendering code runs
   const api: AppGlobals = useMemo(
-    () => ({game: gameRef.current, getGame, setGame, getGames: () => games, setGames,
+    () => ({game: gameRef.current, getGame, setGame, getGames: () => games.slice(), setGames,
             getDefaultGame: () => defaultGame, setDefaultGame,
             getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
             getComment, setComment,
@@ -374,7 +377,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
 ///
 async function doOpenButtonCmd (
     {gameRef, bumpVersion, fileBridge, getGames, setGames, setGame, getLastCreatedGame,
-     setLastCreatedGame, setLastCommand}: CmdDependencies): 
+     setLastCreatedGame, setLastCommand, getDefaultGame, setDefaultGame}: CmdDependencies): 
     Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   await checkDirtySave (gameRef.current, fileBridge);
@@ -396,15 +399,16 @@ async function doOpenButtonCmd (
   }
   // Now fileHandle is non-null, or data should have contents.  fileName is a path or filebase.
   // Check if file already open and in Games
-  const games: readonly Game[] = getGames();
+  const games: Game[] = getGames();
   const openidx = games.findIndex(g => g.filename === fileName);
   if (openidx != -1) {
     // Show existing game, updating games MRU and current game.
-    addOrGotoGame({idx: openidx}, games, setGame, setGames);
+    addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
   } else {
     // TODO test failures and cleanups or no cleanup needed
     await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
-                           {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames});
+                           {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames,
+                            getDefaultGame, setDefaultGame });
     // drawgametree
     // focus on stones
     bumpVersion();
@@ -415,11 +419,23 @@ async function doOpenButtonCmd (
 /// addGame adds g to the front of the MRU and makes it the current game, or it moves game at idx to
 /// the front of thr MRU and makes it the current game.
 ///
-export function addOrGotoGame (arg: { g: Game } | { idx: number }, games: readonly Game[],
-                        setGame: (g: Game) => void, setGames: (gs: Game[]) => void): void {
-  const newGames =
-    "idx" in arg ? moveGameToMRU(games, arg.idx) : [arg.g, ...games];
-  setGames(newGames); // must call this first in case setgame removes the not dirty defaultgame
+export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game, games: Game[],
+                               setGame: (g: Game) => void, setGames: (gs: Game[]) => void,
+                               getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void
+                              ): void {
+  // Remove default game if unused
+  const defaultGame = getDefaultGame();
+  let newGames: Game[] | null = games;
+  let idx: number = "idx" in arg ? arg.idx : 0;
+  if (curGame === defaultGame && ! defaultGame.isDirty) {
+    const defaultIdx = games.indexOf(defaultGame);
+    if (idx > defaultIdx)
+      idx --; // if arg.idx, then game to move is one location less now
+    newGames = games.slice(0, defaultIdx).concat(games.slice(defaultIdx + 1));
+    setDefaultGame(null);
+  }
+  newGames = "idx" in arg ? moveGameToMRU(newGames, idx) : [arg.g, ...newGames];
+  setGames(newGames); 
   setGame(newGames[0]);
 }
 
@@ -462,22 +478,23 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge): Promise<void> {
 /// doOpenGetFileGame in the C# code had to cover the UI to prevent mutations and then read the
 /// file and made the new game.  Here we just have a try-catch in case file processing throws.
 ///
-async function doOpenGetFileGame (fileHandle: unknown, fileName: string, data: string, 
-                                  fileBridge: FileBridge, gameref: React.MutableRefObject<Game>, 
-                                  cleanup: {getLastCreatedGame: () => Game | null,
-                                            setLastCreatedGame: (g: Game | null) => void,
-                                            setGame: (g: Game) => void,
-                                            getGames: () => readonly Game[]
-                                            setGames: (gs: Game[]) => void}) {
+async function doOpenGetFileGame (
+    fileHandle: unknown, fileName: string, data: string, fileBridge: FileBridge, 
+    gameref: React.MutableRefObject<Game>, 
+    cleanup: {getLastCreatedGame: () => Game | null, setLastCreatedGame: (g: Game | null) => void,
+              setGame: (g: Game) => void, getGames: () => Game[], setGames: (gs: Game[]) => void,
+              getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void}) {
   if (fileHandle !== null && data == "") {
     const curgame = gameref.current; // Stash in case we have to undo due to file error.
-    console.log(`opening: ${(fileHandle as any).name}`)
+    //console.log(`opening: ${(fileHandle as any).name}`)
     try {
       cleanup.setLastCreatedGame(null);
       // THIS LINE is the essence of this function.
       await getFileGameCheckingAutoSave(fileHandle, fileName, fileBridge, data, 
                                         {gameRef: gameref, setGame: cleanup.setGame, 
-                                         getGames: cleanup.getGames, setGames: cleanup.setGames});
+                                         getGames: cleanup.getGames, setGames: cleanup.setGames,
+                                         getDefaultGame: cleanup.getDefaultGame,
+                                         setDefaultGame: cleanup.setDefaultGame});
     }
     catch (err: unknown) {
       // At this point Game Context appglobals could have a new bad game in the games list.
@@ -516,7 +533,8 @@ async function doOpenGetFileGame (fileHandle: unknown, fileName: string, data: s
 async function getFileGameCheckingAutoSave 
     (fileHandle: unknown, filenName: string, fileBridge: FileBridge, data: string,
      gamemgt: {gameRef: React.MutableRefObject<Game>, setGame: (g: Game) => void,
-               getGames: () => readonly Game[], setGames: (gs: Game[]) => void}) {
+               getGames: () => Game[], setGames: (gs: Game[]) => void,
+               getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void}) {
   // TODO Check auto save file exisitence and ask user which to use.
   const curgame = gamemgt.gameRef.current;
   if (fileBridge.canPickFiles()) { // Can do autosaving
@@ -530,8 +548,9 @@ async function getFileGameCheckingAutoSave
           `OK for auto saved version, Cancel/Escape to open older original file.`)) {
         // TODO: PROPERLY, I should test handle and read data here, but autosave mgt will all change
         parseAndCreateGame(autoHandle, autoSaveName, fileBridge, "", gamemgt.gameRef, 
-                            {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
-                            setGames: gamemgt.setGames});
+                           {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+                            setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
+                            setDefaultGame: gamemgt.setDefaultGame});
         const nowCurrent = gamemgt.gameRef.current;
         nowCurrent.isDirty = true; // actual file is not saved up to date
         // Persist actual file name and handle for future save operations.
@@ -541,14 +560,16 @@ async function getFileGameCheckingAutoSave
         // old code updated the title here, but we fully data bind it
       } else {// Not saving current game ...
         parseAndCreateGame(fileHandle, filenName, fileBridge, data, gamemgt.gameRef, 
-                            {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
-                            setGames: gamemgt.setGames})
+                           {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+                            setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
+                            setDefaultGame: gamemgt.setDefaultGame})
       }
       (autoHandle as any).deleteFile();
     } else {// No autoHandle, no auto saved file to worry about ...
       parseAndCreateGame(fileHandle, filenName, fileBridge, data, gamemgt.gameRef, 
                          {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
-                              setGames: gamemgt.setGames});
+                          setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
+                          setDefaultGame: gamemgt.setDefaultGame});
 
     }
   } else {
@@ -556,7 +577,8 @@ async function getFileGameCheckingAutoSave
   // Need to pass gameref down so that when we make a new game, we can poach the platform callbacks.
   parseAndCreateGame(null, filenName, fileBridge, data ?? "", gamemgt.gameRef, 
                      {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
-                      setGames: gamemgt.setGames});
+                      setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
+                      setDefaultGame: gamemgt.setDefaultGame});
   }
 } // getFileGameCheckingAutoSave()
 
@@ -567,8 +589,10 @@ async function getFileGameCheckingAutoSave
 async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBridge: FileBridge,  
                                    data: string, gameRef : React.MutableRefObject<Game>,
                                    cleanup: {curGame: Game, setGame: (g: Game) => void,
-                                             getGames: () => readonly Game[], 
-                                             setGames: (gs: Game[]) => void}): 
+                                             getGames: () => Game[], 
+                                             setGames: (gs: Game[]) => void,
+                                             getDefaultGame: () => Game | null, 
+                                             setDefaultGame: (g: Game | null) => void}): 
       Promise<Game> {
   if (fileHandle !== null) {
     debugAssert(data == "", "If fileHandle non-null, then data should not have contents yet???");
@@ -584,7 +608,8 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
   }
   const pg = parseFile(data);
   const g = await createGameFromParsedGame(pg, cleanup.curGame, cleanup.setGame, 
-                                     cleanup.getGames, cleanup.setGames);
+                                           cleanup.getGames, cleanup.setGames,
+                                           cleanup.getDefaultGame, cleanup.setDefaultGame);
   // 
   gameRef.current.saveGameFileInfo(fileHandle, fileName);   
   return g; 
@@ -649,7 +674,7 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
 
 /// moveGameToMRU moves an existing game from idx to the front (MRU).
 ///
-function moveGameToMRU (games: readonly Game[], idx: number /*, setGame: (g: Game) => void,
+function moveGameToMRU (games: Game[], idx: number /*, setGame: (g: Game) => void,
                        setGames: (gs: Game[]) => void */): Game[] {
   if (idx < 0 || idx >= games.length) throw new Error("Must call with valid index.");
   const target = games[idx];
@@ -859,7 +884,8 @@ function isEditingTarget (t: EventTarget | null): boolean {
       idx = idx === games.length ? idx - 1 : idx;
     }
     deps.gameRef.current.saveCurrentComment();
-    addOrGotoGame({idx}, games, deps.setGame, deps.setGames);
+    addOrGotoGame({idx}, deps.gameRef.current, games, deps.setGame, deps.setGames,
+                  deps.getDefaultGame, deps.setDefaultGame);
     deps.setLastCommand({ type: CommandTypes.GotoNextGame, cookie: { idx } })
     deps.bumpVersion();
     deps.bumpTreeLayoutVersion();

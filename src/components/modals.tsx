@@ -47,11 +47,11 @@
 import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
-type ModalProps = {
-  open: boolean;
-  onClose: () => void;  // called on Escape
-  children: React.ReactNode;
-};
+// type ModalProps = {
+//   open: boolean;
+//   onClose: () => void;  // called on Escape
+//   children: React.ReactNode;
+// };
 
 export default function Modal({ open, onClose, children, contentStyle, }: 
                               { open: boolean; onClose: () => void; children: React.ReactNode;
@@ -129,8 +129,8 @@ export default function Modal({ open, onClose, children, contentStyle, }:
           borderRadius: 12,
           padding: 16,
           width: "min(520px, 92vw)",
-          ...(contentStyle || {}),  // apply overrides like wider for Help
           boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+          ...(contentStyle || {}),  // apply overrides like wider for Help
         }}
         onMouseDown={(e) => e.stopPropagation()}
         ref={contentRef}
