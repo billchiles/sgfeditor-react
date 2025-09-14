@@ -717,22 +717,17 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   //
   // If a modal dialog is open, ignore global key bindings completely.
   if (document.body.dataset.modalOpen === "true") return;
+  // Collect some modifiers we repeatedly look at and whether preferred keybindings are hijacked.
   const lower = e.key.toLowerCase();
   const control = e.getModifierState("Control") || e.ctrlKey; //e.getModifierState("CapsLock") || 
   const shift = e.getModifierState("Shift") || e.shiftKey;
   const alt = e.getModifierState("Alt") || e.altKey;
   const browser = deps.commonKeyBindingsHijacked;
-  /// todo move these to where relevant, maybe rerstructure if-then-else to only compute needed
-  const ctrl_s = control && !shift && e.code === "KeyS"; //lower === "s";&& !e.metaKey
-  const ctrl_shift_s = browser ? control && alt && e.code === "KeyS" : //lower === "s") ||
-                                 control && shift && e.code === "KeyS";
-  const ctrl_o = e.ctrlKey && !e.shiftKey && lower === "o"; //&& !e.metaKey 
-  // Browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
-  const alt_n = !e.ctrlKey && !e.shiftKey && !e.metaKey && e.altKey && lower === "n";
-  const f1 = !control && !shift && !alt && (e.code === "F1" || lower === "f1");
+  // Use if-then-else flow to make it easier to not fire multiple keys, for example, I test for c-m-
+  // before c-s-m-, which would fire both branches unless I test for not several modifiers always.
 
   // ESC: alway move focus to root so all keybindings work.
-  if (lower === "escape" ) { //&& isEditingTarget(e.target)) { maybe always, what about dialogs?
+  if (lower === "escape" || e.code === "Escape") {
     e.preventDefault();
     // GPT5 gen, of course, don't blur comment 1) Blur the current editable element
     //(document.activeElement as HTMLElement | null)?.blur();
@@ -740,8 +735,9 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     // Move focus to a safe, focusable container so arrows work immediately
     focusOnRoot();
     return;
-  }
-  if (ctrl_shift_s) {
+  // Save As
+  } else if (browser && control && alt && e.code === "KeyS" || //lower === "s") ||
+             ! browser && control && shift && e.code === "KeyS") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     e.stopPropagation();
@@ -749,6 +745,15 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     void saveAsCommand(deps);
     return;
   }
+
+  const ctrl_s = control && !shift && e.code === "KeyS"; //lower === "s";&& !e.metaKey
+  const ctrl_o = e.ctrlKey && !e.shiftKey && lower === "o"; //&& !e.metaKey 
+  // Browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
+  const alt_n = !e.ctrlKey && !e.shiftKey && !e.metaKey && e.altKey && lower === "n";
+  const f1 = !control && !shift && !alt && (e.code === "F1" || lower === "f1");
+
+
+
   if (ctrl_s) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();

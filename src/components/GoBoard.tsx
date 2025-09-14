@@ -233,7 +233,8 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
     const left = geom.gridStart - labelGridPad; // ditto
     const right = geom.gridEnd + labelGridPad; // ditto
     return (
-      <g fontSize={fontSize} fill="#222" textAnchor="middle">
+      <g fontSize={fontSize} fill="#222" textAnchor="middle" pointerEvents="none"
+         aria-hidden="true" style={{ userSelect: "none", WebkitUserSelect: "none" }} >
         {/* Column letters */}
         {boardToPx.xs.map((x, i) => (
           <React.Fragment key={`colLabels-${i}`}>
@@ -428,6 +429,17 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
     return <g>{nodes}</g>;
   }, [appGlobals, appGlobals?.version, boardToPx, geom.radius, boardSize]);
 
+  // Prevent the browser's Shift+Click (and other modifiers) from selecting SVG <text> labels.
+  const preventSelectionMouseDown = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      // You can make this unconditional; keeping it to modifiers is a bit gentler.
+      if (e.shiftKey || e.ctrlKey || e.altKey) 
+        e.preventDefault();
+    },
+    []
+  );
+
+
   // Now render ...
   return (
     <div className={styles.boardWrap} ref={wrapRef}>
@@ -436,6 +448,7 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
         width={geom.sizePx}
         height={geom.sizePx}
         viewBox={`0 0 ${geom.sizePx} ${geom.sizePx}`}
+        onMouseDown={preventSelectionMouseDown}
         onClick={handleClick}
         role="img"
         aria-label="Go board"

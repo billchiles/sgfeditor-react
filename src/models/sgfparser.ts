@@ -1,3 +1,10 @@
+/// sgfparser.cs parses .sgf files.  Each parse takes a file and creates a list
+/// of ParsedNodes.  The list of nodes may not adhere to normal game moves such
+/// as alternating colors, or starting with B in an even game and W with
+/// handicaps.  The first node is the root node and should be game properties
+/// while following nodes should represent a game, but the nodes could
+/// represent setup for a problem.
+///
 /// Gpt5 translation of my C# code.
 ///
 import { StoneColors } from "./Board";
@@ -5,18 +12,22 @@ import type { StoneColor, IMoveNext } from "./Board";
 
 
 export class ParsedGame {
+  // Only public member.
   nodes: ParsedNode | null = null;
 
   toString(): string {
-    if (!this.nodes) return ""; // C# returns "", not "(;)" for empty
+    if (this.nodes === null) return ""; // Min tree is "(;)", but that implies one empty node
     return "(" + this.nodesString(this.nodes) + ")";
   }
 
+  /// _nodes_string returns a string for a series of nodes, and the caller
+  /// needs to supply the open and close parens that bracket the series.
+  ///
   private nodesString(nodes: ParsedNode): string {
     let res = "";
     let cur: ParsedNode | null = nodes;
-
     while (cur && cur.next) {
+      // Get one node's string with a leading newline if it is not the first.
       res += cur.nodeString(res !== "");
       if (cur.branches && cur.branches.length) {
         for (const n of cur.branches) {
@@ -29,14 +40,18 @@ export class ParsedGame {
     if (cur) res += cur.nodeString(res !== "");
     return res;
   }
-}
+} // ParsedGame class
 
 export class ParsedNode implements IMoveNext {
   next: ParsedNode | null = null;
   previous: ParsedNode | null = null;
   branches: ParsedNode[] | null = null;
   properties: Record<string, string[]> = {};
-  /** Non-null if an issue was detected while preparing for render. */
+
+  /// BadNodeMessage is non-null if processing or readying a node for rendering detects
+  /// an erroneous situation (SGF features not supported or something bogus).  Thsi then
+  /// contains the error msg that should be reported if not swalling the processing error.
+  ///
   badNodeMessage: string | null = null;
 
   /// IMoveNext interface
@@ -53,6 +68,9 @@ export class ParsedNode implements IMoveNext {
   get IMNColor (): StoneColor {
       if (this.properties["B"]) return StoneColors.Black;
       if (this.properties["W"]) return StoneColors.White;
+      // Note, setup nodes in the middle of game moves initially show up transparent in the game tree.
+      // That signals an odd node. Converting to a Move object as we reify moves gives it color
+      // when the tree redraws.
       return StoneColors.NoColor;
   }
 
