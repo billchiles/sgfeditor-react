@@ -137,6 +137,102 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   const width  = cols * CELL_W + PAD_LEFT + PAD_RIGHT;
   const height = rows * CELL_H + PAD_TOP + PAD_BOTTOM;
 
+  /// gameTreeMouseDown handles clicks on game tree nodes, navigating to the move clicked on.
+  ///
+  const gameTreeMouseDown = React.useCallback(async (e: React.MouseEvent<SVGSVGElement>) => {
+    // find TreeViewNode model for click location on canvas.
+    const target = e.currentTarget;
+    if (target === null) return;
+    const rect = target.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const elt_x = Math.floor((x - PAD_LEFT) / CELL_W);   
+    const elt_y = Math.floor((y - PAD_TOP) / CELL_H);   
+    let n: TreeViewNode | null = null;
+    let found = false;
+    for (const moveNode of Array.from(treeViewMoveMap.values())) {
+      n = moveNode;
+      if (n.row === elt_y && n.column === elt_x) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return; // User did not click on node.
+    // Reset board before advancing to move.
+    //const move = n!.node as Move; total fucking lie in typescript returns non-null for everthing.
+    const g = app.getGame();
+    if (g.currentMove !== null) { 
+      g.gotoStart();
+    } else
+      g.saveCurrentComment?.(); 
+    const oopsmsg = 
+      "You are replaying moves from a pasted branch that has conflicts with stones on the " +
+      "board, or replaying moves with bad properties from an SGF file.  If you clicked in " +
+      "the tree view, try clicking an earlier node and using arrows to advance to the move.";
+    if (n!.node instanceof Move) {
+      const move = n!.node as Move;
+      if (move.row !== -1 && move.column !== -1 && ! gotoGameTreeMove(move)) {
+        // move is NOT dummy move for start node of game tree view, so advance to it.
+        // Hit conflicting move location due to pasted node or rendering bad parsed node
+        // Do not go back to start, then user sees where the issue is.
+        await g.message?.message(oopsmsg);
+      }
+    }
+    else {
+      // Move is ParsedNode, not a move that's been rendered.
+      if (! gotoGameTreeParsedNode(n!.node  as ParsedNode)) {
+        // Hit conflicting move location due to pasted node or rendering bad parsed node
+        await g.message?.message(oopsmsg);
+      }
+    }
+    app.bumpVersion();
+    app.bumpTreeLayoutVersion();
+    //app.bumpTreeHighlightVersion!();
+    // return focus so global keybindings work immediately, not calling focusOnRoot to avid
+    // cirular dependencies.
+    (document.getElementById("app-focus-root") as HTMLElement | null)?.focus?.();
+  }, [app, treeViewMoveMap]);
+
+  function gotoGameTreeMove(move: Move): boolean {
+  const g = app.getGame();
+  //if (!g) return false;
+  let res = true;
+  const path = g.getPathToMove(move);
+  if (path !== g.TheEmptyMovePath) {
+    if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
+    // Do not update UI using move, use CurrentMove because we didn't make it to move's position.
+    const curmove = g.currentMove;
+    if (curmove !== null) //{
+      app.setComment?.(curmove.comments);
+    // } else {
+    //   app.setComment?.(g.comments);
+    // }
+  }
+  return res;
+}
+
+function gotoGameTreeParsedNode(move: ParsedNode): boolean {
+  // Hack attempt to abort tree clicks on bad parsenodes.  sgfparser.ts ParseNode funct didn't store
+  // msg, game.ts ParsedNodeToMove adds bad node msg, but this is a hack to see a sentinel taint
+  // (don't compare string's contents), then disallow clicking on bad parsenodes in the game tree.
+  if (move.badNodeMessage !== null)
+    return false;
+  const g = app.getGame();
+  //if (!g) return false;
+  let res = true;
+  const path = g.getPathToParsedNode(move);
+  if (path !== g.TheEmptyMovePath) {
+    if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
+    const curmove = g.currentMove;
+    if (curmove !== null) //{
+      app.setComment?.(curmove.comments);
+    // } else {
+    //   app.setComment?.(g.comments);
+    // }
+  }
+  return res;
+}
+
   // Locate the current node’s rect in client coords and adjust scroll if out of view
   // Scroll-to-current behavior
   //    - Runs after render.  Derives the cell’s rectangle in the scroll container’s
@@ -261,136 +357,137 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
         background: "#ead6b8", // light tan
       }}
     >
-      <svg width={width} height={height} role="img" aria-label="Game Tree">
-        {/* Edges */}
-        <g stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round">
-          {lines.map((ln, i) => (
-            <line key={i} x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2} />
-          ))}
-        </g>
+    <svg width={width} height={height} role="img" aria-label="Game Tree"
+         onMouseDown={gameTreeMouseDown} style={{ cursor: "pointer" }} >
+      {/* Edges */}
+      <g stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round">
+        {lines.map((ln, i) => (
+          <line key={i} x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2} />
+        ))}
+      </g>
 
-        {/* Nodes */}
-        {treeViewModel.map((row, r) =>
-          row.map((cell, c) => {
-            if (!cell) return null;
-            const { cx, cy } = cellCenter(r, c);
+      {/* Nodes */}
+      {treeViewModel.map((row, r) =>
+        row.map((cell, c) => {
+          if (!cell) return null;
+          const { cx, cy } = cellCenter(r, c);
 
-            // visual for node
-            const isCurrent = !!currentCell && cell === currentCell;
-            const isNext = !!nextCell && cell === nextCell;
-            const fill =
-              cell.kind === TreeViewNodeKinds.StartBoard ? "none" :
-              cell.color === StoneColors.Black ? "#000" : "#fff";
-            const stroke = cell.kind === TreeViewNodeKinds.LineBend ? "#999" : "#000";
-            const strokeWidth = 1.25;
+          // visual for node
+          const isCurrent = !!currentCell && cell === currentCell;
+          const isNext = !!nextCell && cell === nextCell;
+          const fill =
+            cell.kind === TreeViewNodeKinds.StartBoard ? "none" :
+            cell.color === StoneColors.Black ? "#000" : "#fff";
+          const stroke = cell.kind === TreeViewNodeKinds.LineBend ? "#999" : "#000";
+          const strokeWidth = 1.25;
 
-            return (
-              <g key={`${r}:${c}`}>
-                {/* current-move filled fuchsia block (behind) */}
-                {isCurrent && (
-                  <rect
-                    x={cx - (NODE_R + HILITE_PAD)}
-                    y={cy - (NODE_R + HILITE_PAD)}
-                    width={(NODE_R + HILITE_PAD) * 2}
-                    height={(NODE_R + HILITE_PAD) * 2}
-                    fill="#ff00ff"
-                    opacity={0.50}
-                    rx={3}
-                    ry={3}
-                  />
-                )}
+          return (
+            <g key={`${r}:${c}`}>
+              {/* current-move filled fuchsia block (behind) */}
+              {isCurrent && (
+                <rect
+                  x={cx - (NODE_R + HILITE_PAD)}
+                  y={cy - (NODE_R + HILITE_PAD)}
+                  width={(NODE_R + HILITE_PAD) * 2}
+                  height={(NODE_R + HILITE_PAD) * 2}
+                  fill="#ff00ff"
+                  opacity={0.50}
+                  rx={3}
+                  ry={3}
+                />
+              )}
 
-                {/* main disc */}
-                {cell.kind === TreeViewNodeKinds.Move && (
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={NODE_R}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth={strokeWidth}
-                  />
-                )}
-                {/* Start node as letter 'S' */}
-                {cell.kind === TreeViewNodeKinds.StartBoard && (
+              {/* main disc */}
+              {cell.kind === TreeViewNodeKinds.Move && (
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={NODE_R}
+                  fill={fill}
+                  stroke={stroke}
+                  strokeWidth={strokeWidth}
+                />
+              )}
+              {/* Start node as letter 'S' */}
+              {cell.kind === TreeViewNodeKinds.StartBoard && (
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={12}
+                  fontWeight={700}
+                >
+                  S
+                </text>
+              )}
+
+              {/* Move number inside the stone (if available) 
+              {cell.kind !== TreeViewNodeKinds.StartBoard && cell.kind !== TreeViewNodeKinds.LineBend && (() => {
+              */}
+              {cell.kind === TreeViewNodeKinds.Move && (() => {
+                const n: any = cell.node;
+                let num = typeof n?.number === "number" ? n.number : null;
+                if (num == null) num = cell.column;
+                const numFill = cell.color === StoneColors.Black ? "#fff" : "#000";
+                const numStr = String(num);
+                const numFontSize = numStr.length >= 3 ? "10pt" : "12pt";
+                return (
                   <text
                     x={cx}
                     y={cy}
                     textAnchor="middle"
                     dominantBaseline="central"
-                    fontSize={12}
-                    fontWeight={700}
+                    fontSize={numFontSize}
+                    fontWeight={400}
+                    fill={numFill}
                   >
-                    S
+                    {num}
                   </text>
-                )}
+                );
+              })()}
 
-                {/* Move number inside the stone (if available) 
-                {cell.kind !== TreeViewNodeKinds.StartBoard && cell.kind !== TreeViewNodeKinds.LineBend && (() => {
-                */}
-                {cell.kind === TreeViewNodeKinds.Move && (() => {
-                  const n: any = cell.node;
-                  let num = typeof n?.number === "number" ? n.number : null;
-                  if (num == null) num = cell.column;
-                  const numFill = cell.color === StoneColors.Black ? "#fff" : "#000";
-                  const numStr = String(num);
-                  const numFontSize = numStr.length >= 3 ? "10pt" : "12pt";
-                  return (
-                    <text
-                      x={cx}
-                      y={cy}
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      fontSize={numFontSize}
-                      fontWeight={400}
-                      fill={numFill}
-                    >
-                      {num}
-                    </text>
-                  );
-                })()}
-
-                {/* Comment highlight (green outline, not filled) */}
-                {(() => {
-                  const n: any = cell.node;
-                  const hasComment =
-                    (typeof n?.comments === "string" && n.comments.length > 0) ||
-                    (n?.properties?.C && n.properties.C[0] && n.properties.C[0].length > 0);
-                  if (!hasComment) return null;
-                  return (
-                    <rect
-                      x={cx - (NODE_R + HILITE_PAD)}
-                      y={cy - (NODE_R + HILITE_PAD)}
-                      width={(NODE_R + HILITE_PAD) * 2}
-                      height={(NODE_R + HILITE_PAD) * 2}
-                      fill="none"
-                      stroke="#2ecc71"
-                      strokeWidth={4}
-                      rx={3}
-                      ry={3}
-                    />
-                  );
-                })()}
-
-                {/* next-branch fuchsia outline */}
-                {isNext && (
+              {/* Comment highlight (green outline, not filled) */}
+              {(() => {
+                const n: any = cell.node;
+                const hasComment =
+                  (typeof n?.comments === "string" && n.comments.length > 0) ||
+                  (n?.properties?.C && n.properties.C[0] && n.properties.C[0].length > 0);
+                if (!hasComment) return null;
+                return (
                   <rect
                     x={cx - (NODE_R + HILITE_PAD)}
                     y={cy - (NODE_R + HILITE_PAD)}
                     width={(NODE_R + HILITE_PAD) * 2}
                     height={(NODE_R + HILITE_PAD) * 2}
                     fill="none"
-                    stroke="#ff00ff"
-                    strokeWidth={1}
+                    stroke="#2ecc71"
+                    strokeWidth={4}
                     rx={3}
                     ry={3}
                   />
-                )}
+                );
+              })()}
 
-              </g>
-            );
-          })
-        )}
+              {/* next-branch fuchsia outline */}
+              {isNext && (
+                <rect
+                  x={cx - (NODE_R + HILITE_PAD)}
+                  y={cy - (NODE_R + HILITE_PAD)}
+                  width={(NODE_R + HILITE_PAD) * 2}
+                  height={(NODE_R + HILITE_PAD) * 2}
+                  fill="none"
+                  stroke="#ff00ff"
+                  strokeWidth={1}
+                  rx={3}
+                  ry={3}
+                />
+              )}
+
+            </g>
+          );
+        })
+      )}
       </svg>
     </div>
   );

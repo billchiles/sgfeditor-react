@@ -1250,6 +1250,151 @@ buildSGFStringFlipped (): string {
       return null; // all 26 in use
   }
 
+  ///
+  //// Game Tree Nav Helpers
+  ///
+
+  public TheEmptyMovePath: Array<[number, number]> = [[0, -1]];
+
+  /// getPathToMove returns a list of tuples, the first int of which is a move
+  /// number to move to paired with what branch to take at that move.  The last
+  /// move (the argument) has a sentinel -1 branch int.  Only moves that take
+  /// an alternative branch (not branch zero) are in the result.  This assumes
+  /// move is in the game and on the board, asserting if not.  The 0,-1 tuple
+  /// indicates the empty initial board state, or the empty path.
+  ///
+  public getPathToMove (move: Move): Array<[number, number]> {
+    debugAssert(move !== null, "Must call with non-null move.");
+    let parent = move.previous;
+    const res: Array<[number, number]> = [[move.number, -1]];
+    while (parent !== null) {
+      if (parent.branches !== null && parent.branches[0] !== move) {
+        const loc = parent.branches.indexOf(move);
+        debugAssert(loc !== -1, "Move must be in game.");
+        res.push([parent.number, loc]);
+      }
+      move = parent;
+      parent = move.previous;
+    }
+    if (this.branches !== null && this.branches[0] !== move) {
+      const loc = this.branches.indexOf(move);
+      debugAssert(loc !== -1, "Move must be in game.");
+      res.push([0, loc]);
+    }
+    return res.reverse();
+  }
+
+  public getPathToParsedNode (move: ParsedNode): Array<[number, number]> {
+    debugAssert(move !== null, "Must call with non-null parsed node.");
+    let parent = move.previous;
+    if (parent === null)
+      return this.TheEmptyMovePath;
+    // No move nums in parsed nodes, so count down, then fix numbers at end.
+    let moveNum = 1000000;
+    const res: Array<[number, number]> = [[moveNum, -1]];
+    while (parent !== this.parsedGame!.nodes) {
+      moveNum -= 1;
+      if (parent.branches !== null && parent.branches[0] !== move) {
+        const loc = parent.branches.indexOf(move);
+        debugAssert(loc !== -1, "Move must be in game.");
+        res.push([moveNum, loc]);
+      }
+      move = parent;
+      parent = move.previous!;
+    }
+    moveNum -= 1;
+    // Add tuple for move zero if we need to select a branch from the empty board state.
+    if (this.parsedGame!.nodes.branches !== null) {
+      const loc = this.parsedGame!.nodes.branches.indexOf(move);
+      debugAssert(loc !== -1, "Move must be in game.");
+      res.push([moveNum, loc]); // moveNum becomes a zero when we fix numbers below.
+    }
+    // Fix up numbers to match move numbers.
+    const final = res.map(pair => [pair[0] - moveNum, pair[1]] as [number, number]);
+    return final.reverse();
+  }
+
+  //// AdvanceToMovePath takes a path, where each tuple is a move number and the
+  //// branch index to take at that move.  The branch is -1 for the last move.
+  //// This returns true if successful, null if the path was bogus, or we encounter
+  //// a move conflict in the game tree (can happen from pastes).
+  ////
+  public AdvanceToMovePath (path: Array<[number, number]>): boolean {
+    debugAssert(this.currentMove === null, "Must be at beginning of empty game board.");
+    debugAssert(this.firstMove !== null || path === this.TheEmptyMovePath,
+                "If first move is null, then path must be the empty path.");
+    if (this.firstMove === null) return true;
+    // Setup for loop ...
+    if (path[0][0] === 0) {// taking not main branch from game start
+      this.setCurrentBranch(path[0][1]);
+      path.splice(0, 1);
+    }
+    else if (this.branches !== null && this.firstMove !== this.branches[0]) {
+      // taking main branch from start, but it is not current branch right now
+      this.setCurrentBranch(0);
+    }
+    let curMove = this.firstMove!; // Set after possible call to SetCurrentBranch.
+    const stuff = this.replayMoveUpdateModel(curMove);
+    const retmove = stuff[0];
+    if (retmove === null || stuff[1]) { // return false even if move to keep old behavior here.
+      // Current move comes back if some branches had bad parsenodes, but some branches good.
+      // However due to the uses of AdvanceToMovePath (clicking in game tree, switching games,
+      // undoing game creation as a cleanup), we stop propagating the difference of no possible move
+      // vs. a move that works while a sibling move has a parsenode issue.  Users can use arrows
+      // after the ffwd op to see the error display.
+      // BUG: If user clicks on treeview nodes representing bad parsenodes, the code will try to
+      // advance to it, users gets an err display, but you cannot then arrow around even when if you
+      // had only arrowed around to begin with, you could arrow all around the tree's good nodes.
+      return false;
+    }
+    let next = curMove.next;
+    // Walk to last move on path ...
+    for (const n of path) {
+      const target = n[0];
+      // Play moves with no branches or all taking default zero branch ...
+      while (curMove.number !== target) {
+        if (curMove.branches !== null && curMove.branches[0] !== next) {
+          this.currentMove = curMove; // Must set this before calling SetCurrentBranch.
+          this.setCurrentBranch(0);
+          next = curMove.next; // Update next, now that curMove is updated.
+        }
+        if (this.replayMoveUpdateModel(next!) == null) {
+          // had issue with rendering parsed node or conflicting location for pasted move
+          this.currentMove = curMove;  // Restore state to clean up.
+          return false;
+        }
+        curMove = next!;
+        next = curMove.next;
+      }
+      // Select next moves branch correctly ...
+      var branch = n[1];
+      if (branch == -1) break;
+      debugAssert(curMove.branches != null && branch > 0 && branch < curMove.branches.length,
+                  "Move path does not match game's tree.");
+      this.currentMove = curMove; // Needs to be right for SetCurrentBranch.
+      this.setCurrentBranch(branch);
+      next = curMove.next; // Update next, now that curMove is updated.
+      if (this.replayMoveUpdateModel(next!) == null)
+        return false;
+      curMove = next!; // until we get to the end, there is always a next
+      next = curMove.next;
+    }
+    this.currentMove = curMove;
+    return true;
+  } // advanceToMovePath()
+
+    /// set_current_branch is a helper for UI that changes which branch to take
+    /// following the current move.  Cur is the index of the selected item in
+    /// the branches combo box, which maps to the branches list for the current
+    /// move.
+    ///
+    public setCurrentBranch (cur : number) : void {
+        if (this.currentMove === null)
+            this.firstMove = this.branches![cur];
+        else
+          this.currentMove.next = this.currentMove.branches![cur];
+    }
+
 } // Game class
 
 

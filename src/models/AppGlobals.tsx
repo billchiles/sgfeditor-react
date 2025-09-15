@@ -183,11 +183,11 @@ type ProviderProps = {
 const browserMessageOrQuery: MessageOrQuery = {
   //  message: (msg) => alert(msg),
   //  confirm: async (msg) => window.confirm(msg),
-  message: (msg) => {
+  message: (msg: string) => {
     alert(msg);                   // synchronous
     return Promise.resolve();     // present async surface
   },
-  confirm: (msg) => {
+  confirm: (msg: string) => {
     const ok = window.confirm(msg);        // synchronous
     return Promise.resolve(ok);            // present async surface
   },
@@ -904,7 +904,6 @@ function isEditingTarget (t: EventTarget | null): boolean {
 function focusOnRoot () {
   const root = document.getElementById("app-focus-root") as HTMLElement | null;
   root?.focus();
-
 }
 
 ///

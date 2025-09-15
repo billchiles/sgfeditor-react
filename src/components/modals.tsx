@@ -69,7 +69,8 @@ export default function Modal({ open, onClose, children, contentStyle, }:
         e.stopPropagation();
         e.preventDefault();
         onClose();
-        // return focus so global hotkeys work immediately
+        // return focus so global keybindings work immediately, not calling focusOnRoot to avid
+        // cirular dependencies.
         requestAnimationFrame(() => {
           const root = document.getElementById("app-focus-root") as HTMLElement | null;
           root?.focus();

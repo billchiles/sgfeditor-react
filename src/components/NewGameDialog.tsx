@@ -62,7 +62,8 @@ export default function NewGameDialog({ open, onClose, onCreate, defaults,}:
 
   const close = () => {
     onClose();
-    // Return focus so global hotkeys are immediately active again
+    // return focus so global keybindings work immediately, not calling focusOnRoot to avid
+    // cirular dependencies.
     requestAnimationFrame(() => {
       const root = document.getElementById("app-focus-root") as HTMLElement | null;
       root?.focus();
