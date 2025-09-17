@@ -10,13 +10,41 @@
 ///
 /// Cancel calls onClose(), and Modal will return focus to #app-focus-root.
 ///
-// Encapsulates: field state, input parsing/validation, submit/cancel semantics.
-// Isolates: model updates and global UI from form internals.
-
-
-
-
-
+/// Encapsulates: field state, input parsing/validation, submit/cancel semantics.
+/// Isolates: model updates and global UI from form internals.
+///
+/// Dialog parts and e2e flow ...
+/// Keyboard event fires
+///    handleKeyPressed in AppGlobals sets e.preventDefault() and calls deps.startNewGameFlow(). 
+/// Ask the shell to open the dialog
+///    startNewGameFlow runs check-dirty-save, then asks the shell to open the dialog via openNewGameDialog(),
+///       which App.tsx gave to GameProvider. 
+/// In App.tsx, openNewGameDialog() sets showNewGameDlg = true, 
+///    which mounts the <NewGameOverlay/> that contains <NewGameDialog/>
+/// Dialog lifecycle (mount, seed, validate) -- 
+///    when NewGameDialog opens, it:
+///       Resets its local field state from defaults (handicap + komi).
+///          NewGameOverlay passes defaults as { handicap: appGlobals.getGame().handicap ?? 0, 
+///                                              komi: appGlobals.getGame().komi ?? "6.5" }
+///       Focuses the White input on the next animation frame.
+///       Wraps everything in <form onSubmit={handleCreate}> so Enter === Create. 
+///    On Create (or Enter) it:
+///       Parses handicapText → integer; enforces 0–9 (alerts on invalid).
+///       Normalizes komi; then calls the parent onCreate({ white, black, handicap, komi }). 
+///    On Cancel/Esc, calls onClose() and returns focus to #app-focus-root. 
+///       The Modal infrastructure also locks body scrolling, sets dataset.modalOpen="true", and 
+///          traps Tab within the dialog. 
+/// Commit → create game → update UI
+///    NewGameOverlay receives the onCreate payload and does the work:
+///       Creates new game, sets player names, adds game via addorgotogame()
+///       Closes the dialog via onClose().
+///    When a game becomes current, GameProvider code wires game callbacks and bumps version. 
+///    The status area and other memoized bits re-compute based on version/game change. 
+/// Executive Summary
+///    keybinding global handler -> startNewGameFlow (dirty-save) -> openNewGameDialog() -> 
+///       Modal + NewGameDialog (seed, focus, form) -> Create -> new Game(...) -> addOrGotoGame(...) -> 
+///       setGame(...) -> provider wires callbacks + bumps version -> UI updates. 
+///
 import { useEffect, useState, useRef } from "react";
 import Modal from "./modals"; // shared portal modal
 

@@ -53,9 +53,10 @@ import { createPortal } from "react-dom";
 //   children: React.ReactNode;
 // };
 
-export default function Modal({ open, onClose, children, contentStyle, }: 
+export default function Modal({ open, onClose, children, contentStyle, labelledById, }: 
                               { open: boolean; onClose: () => void; children: React.ReactNode;
-                                contentStyle?: React.CSSProperties; }) {
+                                contentStyle?: React.CSSProperties;
+                                labelledById?: string;  }) { // id of the heading inside this dialog
   // Reference to the dialog content; used for TAB focus trapping only.
   const contentRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function Modal({ open, onClose, children, contentStyle, }:
         // return focus so global keybindings work immediately, not calling focusOnRoot to avid
         // cirular dependencies.
         requestAnimationFrame(() => {
-          const root = document.getElementById("app-focus-root") as HTMLElement | null;
+          const root = document.getElementById("app-focus-root");
           root?.focus();
         });
       }
@@ -124,7 +125,7 @@ export default function Modal({ open, onClose, children, contentStyle, }:
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="newgame-title"
+        aria-labelledby= { labelledById ?? "newgame-title" }
         style={{
           background: "#fff",
           borderRadius: 12,

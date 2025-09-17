@@ -14,7 +14,7 @@
 /// commentBox has focus.
 
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { Game, createGameFromParsedGame } from "./Game";
+import { Game, createGameFromParsedGame, copyProperties } from "./Game";
 import type { MessageOrQuery } from "./Game";
 //import { StoneColors, Board, Move, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
@@ -69,6 +69,7 @@ export type AppGlobals = {
   // UI commands exposed to components:
   //
   showHelp: () => void;
+  showGameInfo?: () => void; // ask App.tsx to open the Game Info dialog
   // File I/O provided by src/platforms/bridges.ts declarations
   // Promise<void> is style choice because it feels like a command, not a query, and the caller
   // doesn't need the file contents because the openSGF handler creates the new game and model state.
@@ -154,6 +155,7 @@ type CmdDependencies = {
   setLastCommand: (c: LastCommand) => void;
   startNewGameFlow: () => Promise<void>;
   showHelp?: () => void;
+  showGameInfo?: () => void;
 };
 
 /// ProviderProps just describes the args to GameProvider function.
@@ -167,7 +169,7 @@ type ProviderProps = {
   // App provides these as callbacks to the provider.
   openNewGameDialog?: () => void; 
   openHelpDialog?: () => void;
-
+  openGameInfoDialog?: () => void;
   // Board size for the game model (defaults to 19)
   //size: number;
 };
@@ -203,7 +205,7 @@ const browserMessageOrQuery: MessageOrQuery = {
 /// layer, etc., and makes this available to UI content below <GameProvider> under <App>.
 ///
 export function GameProvider ({ children, getComment, setComment, openNewGameDialog: openNewGameDialog,
-                                openHelpDialog: openHelpDialog }: ProviderProps) {
+                                openHelpDialog: openHelpDialog, openGameInfoDialog }: ProviderProps) {
   //const size = DEFAULT_BOARD_SIZE;
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
   // render, which would replace game and all the move state (new Game).  This holds it's value
@@ -310,11 +312,14 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
               getGames: () => games.slice(), setGames, setGame, getDefaultGame: () => defaultGame,
               setDefaultGame, getLastCreatedGame: () => lastCreatedGame, 
               setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
-              showHelp: () => { openHelpDialog?.(); } }), 
+              showHelp: () => { openHelpDialog?.(); },
+              showGameInfo: () => { openGameInfoDialog?.(); }
+             }), 
              [gameRef, bumpVersion, fileBridge, appStorageBridge, 
               games, setGames, setGame, setDefaultGame, 
               lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
-              openHelpDialog, commonKeyBindingsHijacked, bumpTreeLayoutVersion, bumpTreeHighlightVersion]);
+              openHelpDialog, commonKeyBindingsHijacked, bumpTreeLayoutVersion, 
+              bumpTreeHighlightVersion, openGameInfoDialog]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
   const saveSgf   = useCallback(() => doWriteGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
@@ -345,7 +350,8 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
             version, bumpVersion,
             treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, bumpTreeHighlightVersion,
             setTreeRemapper,
-            showHelp: () => { openHelpDialog?.(); }, openSgf, saveSgf, saveSgfAs, newGame,
+            showHelp: () => { openHelpDialog?.(); }, showGameInfo: () => { openGameInfoDialog?.(); },
+            openSgf, saveSgf, saveSgfAs, newGame,
             getLastCommand, setLastCommand,}),
     [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs,
      games, setGames, defaultGame, setDefaultGame, lastCreatedGame, setLastCreatedGame,
@@ -717,6 +723,8 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   //
   // If a modal dialog is open, ignore global key bindings completely.
   if (document.body.dataset.modalOpen === "true") return;
+  // Need game in various places
+  const curgame = deps.gameRef.current;
   // Collect some modifiers we repeatedly look at and whether preferred keybindings are hijacked.
   const lower = e.key.toLowerCase();
   const control = e.getModifierState("Control") || e.ctrlKey; //e.getModifierState("CapsLock") || 
@@ -744,6 +752,13 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     (e as any).stopImmediatePropagation?.(); // stop any addins from granning keys
     void saveAsCommand(deps);
     return;
+  // Game Info
+  } else if ( control && lower === "i") {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
+    e.preventDefault();
+    e.stopPropagation();
+    gameInfoCmd(curgame, deps.showGameInfo!);
+    return;
   }
 
   const ctrl_s = control && !shift && e.code === "KeyS"; //lower === "s";&& !e.metaKey
@@ -751,8 +766,6 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   // Browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
   const alt_n = !e.ctrlKey && !e.shiftKey && !e.metaKey && e.altKey && lower === "n";
   const f1 = !control && !shift && !alt && (e.code === "F1" || lower === "f1");
-
-
 
   if (ctrl_s) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
@@ -795,7 +808,6 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   if (isEditingTarget(e.target)) {
     return; // let the content-editable elt handle cursor movement
   }
-  const curgame = deps.gameRef.current;
   if (lower === "arrowleft" && curgame.canUnwindMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
@@ -896,21 +908,31 @@ function isEditingTarget (t: EventTarget | null): boolean {
     deps.bumpTreeLayoutVersion();
   }
   
+  /// gameInfoCmd saves the game comment if shown currently, lifts any parsed game properties to
+  /// game.miscGameInfo, and launches the dialog.
+  ///
+  function gameInfoCmd (curgame: Game, showGameInfo: () => void) {
+    // in case we're on the empty board state and comment is modified.
+    curgame.saveCurrentComment(); 
+    // Lift parsed game properties to .miscGameInfo if it isn't already superceding game properties.
+    if (curgame.parsedGame != null) {
+      if (curgame.miscGameInfo == null) {
+        // If misc properties still in parsed structure, capture them all to pass them through
+        // if user saves file.  When miscGameInfo non-null, it supercedes parsed structure.
+        curgame.miscGameInfo = copyProperties(curgame.parsedGame.nodes!.properties);
+      }
+    } else if (curgame.miscGameInfo == null)
+      curgame.miscGameInfo = {};
+    // Launch dialog
+    showGameInfo!();
+  }
 
   /// focusOnRoot called from input handling on esc to make sure all keybindings work.
 /// May need to call this if, for example, user uses c-s in comment box, that is, command impls
 /// may need to call at end to ensure all keys are working.
 ///
 function focusOnRoot () {
-  const root = document.getElementById("app-focus-root") as HTMLElement | null;
+  const root = document.getElementById("app-focus-root");
   root?.focus();
 }
-
-///
-//// Game Tree of Variations
-///
-
-// function drawGameTree () {
-
-// }
 

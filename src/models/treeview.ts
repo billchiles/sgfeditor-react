@@ -77,6 +77,10 @@ export function getTreeViewModelColumnsSize () {return treeViewModelColumns;}
 /// tree view, as well as where lines between moves need to bend, or where lines need
 /// to descend straight downward before angling to draw next move in a branch.
 ///
+/// gpt5 promoted this function signature originally to be specific and not rely on shape of Game,
+/// but later it complained this wasn't of type Game.  I left this as example of something you can
+/// do in typescript.
+///
 export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: ParsedGame | null;
                                          branches: Move[] | null;}): (TreeViewNode | null)[][] {
   let start: IMoveNext | null = null;
@@ -201,16 +205,16 @@ export function layoutGameTree(
   const model = setupTreeLayoutModel(pn, layoutData, cum_max_row, tree_depth);
 
   // Adjust last node and return, or get next model node.
+  const next = getLayoutGameTreeNext(pn);
   let next_model: TreeViewNode;
-  if (getLayoutGameTreeNext(pn) == null) {
+  if (next == null) {
     // If no next, then no branches to check below
     storeTreeViewNode(layoutData, tree_depth, model);
     return maybeAddBendNode(layoutData, model.row, tree_depth,
                             branch_depth, branch_root_row, model);
   }
   else {
-    next_model = layoutGameTree(getLayoutGameTreeNext(pn) as IMoveNext, layoutData, model.row,
-                                tree_depth + 1,
+    next_model = layoutGameTree(next, layoutData, model.row, tree_depth + 1,
                                 (branch_depth === 0 ? 0 : branch_depth + 1),
                                 branch_root_row);
     // new_branch_depth, branch_root_row

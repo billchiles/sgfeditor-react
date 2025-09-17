@@ -64,7 +64,7 @@ export class ParsedNode implements IMoveNext {
       //return this.branches ? [...this.branches] : null;
       return this.branches;
   }
-
+  ///
   get IMNColor (): StoneColor {
       if (this.properties["B"]) return StoneColors.Black;
       if (this.properties["W"]) return StoneColors.White;
@@ -79,7 +79,7 @@ export class ParsedNode implements IMoveNext {
     const props = this.properties;
     let s = newline ? "\n;" : ";";
 
-    // Print move property first for human readability
+    // Print move property first for human  readability
     if (props["B"]) s += "B" + this.escapePropertyValues("B", props["B"]);
     if (props["W"]) s += "W" + this.escapePropertyValues("W", props["W"]);
 

@@ -19,6 +19,7 @@ import { Game } from "./models/Game";
 //import type { IMoveNext } from "./models/Board";
 import HelpDialog from "./components/HelpDialog";
 import { HELP_TEXT } from "./components/helpText";
+import GameInfoDialog from "./components/GameInfoDialog";
 import TreeView from "./components/TreeView";
 import { getGameTreeModel, type TreeViewNode } from "./models/treeview";
 
@@ -41,13 +42,15 @@ export default function App() {
   // Modal visibility lives here so the provider can ask us to open it.
   const [showNewGameDlg, setShowNewGameDlg] = useState(false);
   const [showHelpDlg, setShowHelpDlg] = useState(false);
-
+  const [showGameInfoDlg, setShowGameInfoDlg] = useState(false);
   return (<GameProvider getComment={getComment} setComment={setComment}
                         openNewGameDialog={() => setShowNewGameDlg(true)} 
-                        openHelpDialog={() => setShowHelpDlg(true)} >
+                        openHelpDialog={() => setShowHelpDlg(true)}
+                        openGameInfoDialog={() => setShowGameInfoDlg(true)} >
             <AppContent commentRef={commentRef} />
             <NewGameOverlay open={showNewGameDlg} onClose={() => setShowNewGameDlg(false)} />
             <HelpOverlay open={showHelpDlg} onClose={() => setShowHelpDlg(false)}/>
+            <GameInfoOverlay open={showGameInfoDlg} onClose={() => setShowGameInfoDlg(false)} />
           </GameProvider>
   );
 } // App function
@@ -74,7 +77,7 @@ function AppContent({
   // Game status area definition and updating
   const g = appGlobals?.game;
   const treeViewLayout: (TreeViewNode | null)[][] =
-    useMemo(() => getGameTreeModel(g as any), [g, appGlobals!.treeLayoutVersion]);
+    useMemo(() => getGameTreeModel(g as Game), [g, appGlobals!.treeLayoutVersion]);
   //let index: Map<IMoveNext | "start", TreeViewNode>;
   // useMemo's run on first render and when dependencies change.
   const statusTop = 
@@ -82,8 +85,8 @@ function AppContent({
               if (!g) return "SGF Editor --"; // First render this is undefined.
               const filebase = g.filebase;
               return `SGF Editor -- ${g.isDirty ? "[*] " : ""}${filebase !== null ? filebase : ""}`;
-            },
-            [appGlobals?.version, appGlobals?.game, appGlobals?.game.filebase, appGlobals?.game.isDirty]);
+            }, // gpt5 said to narrow the dependencies from citing all refs used due to version tick
+            [appGlobals?.version]);
   const statusBottom = 
     useMemo(() => {
             // First render g is undefined.
@@ -93,9 +96,8 @@ function AppContent({
             const passStr = (curMove !== null && curMove.isPass) ? "**PASS**" : "";
             return `Move ${num} ${passStr}  Black captures: ${g.blackPrisoners}   ` +
                    `White captures: ${g.whitePrisoners}`;
-            },
-            [appGlobals?.version, appGlobals?.game, appGlobals?.game.currentMove, 
-             appGlobals?.game.blackPrisoners, appGlobals?.game.whitePrisoners]
+            }, // gpt5 said to narrow the dependencies from citing all refs used due to version tick
+            [appGlobals?.version]
   );
   //
   // Rendering ...
@@ -147,6 +149,13 @@ function AppContent({
             >
               Save As…
             </button>
+            {/* <button
+              className={styles.btn}
+              onClick={() => { appGlobals?.showGameInfo?.(); }}
+              title="c-i"
+            >
+              Game Info…
+            </button> */}
             <button
               className={styles.btn}
               onClick={() => { appGlobals?.showHelp(); }}
@@ -156,7 +165,7 @@ function AppContent({
             </button>
           </div>
           <div className={styles.buttonRow}>
-            <CommandButtons/>
+            <MoveNavCommandButtons/>
           </div>
         </div>
 
@@ -205,7 +214,10 @@ function AppContent({
       {/* Ended up moving Dialog to <App/> so provider can open it via openNewGameDialog) */}
     </div>
   );
-}
+} // AppContent()
+
+///
+//// Dialog Overlays to 
 
 /// Renders the New Game dialog inside the game provider's context
 function NewGameOverlay ({ open, onClose, }: { open: boolean; onClose: () => void;}) {
@@ -236,8 +248,66 @@ function HelpOverlay({ open, onClose }: { open: boolean; onClose: () => void }) 
   return <HelpDialog open={open} onClose={onClose} text={HELP_TEXT} />;
 }
 
+/// Renders the Game Info dialog inside the provider's context and applies line-by-line diffs like C#.
+function GameInfoOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const app = useContext(GameContext);
+  if (!app) return null;
+  const g = app.game;
+  if (!g) return null;
+  return (
+    <GameInfoDialog
+      open={open}
+      onClose={onClose}
+      game={g}
+      onConfirm={(dlgFields) => {
+        // See what changed and save to model.
+        if (dlgFields.playerBlack !== g.playerBlack) 
+          { g.playerBlack = dlgFields.playerBlack; g.isDirty = true; }
+        if (dlgFields.playerWhite !== g.playerWhite) 
+          { g.playerWhite = dlgFields.playerWhite; g.isDirty = true; }
+        if (dlgFields.komi !== g.komi) { g.komi = dlgFields.komi; g.isDirty = true; }
+        // React randomly changed text line endings, so normalize them, and display if board start
+        const uiCRLF = dlgFields.comments.replace(/\r?\n/g, "\r\n");
+        if (uiCRLF !== g.comments) {
+          g.comments = uiCRLF;
+          g.isDirty = true;
+          if (g.currentMove === null) app!.setComment!(uiCRLF);
+        }
+        // Misc SGF props we pass through -- BR/WR/BT/WT/RU/DT/TM/EV/PC/GN/ON/RE
+        const props: Record<string, string[]> = g.miscGameInfo!; // Filled in on dialog launch.
+        const saveOrDelete = (k: string, dlgValue: string) => {
+          if (k in props) { // if k had a value in g.miscGameInfo ...
+            if (dlgValue !== props[k][0]) { // If dialog different, keep its value.
+              if (dlgValue === "") 
+                delete props[k]; // However, if user deleted it, then remove it from model.
+              else
+                props[k] = [dlgValue];
+              g.isDirty = true;
+            }
+          } else if (dlgValue !== "") { // No value in game model, and dialog has value, so keep it.
+            props[k] = [dlgValue];
+            g.isDirty = true;
+          }
+          //if (v && v.trim() !== "") props[k] = [v.trim()]; else delete props[k];
+        };
+        saveOrDelete("BR", dlgFields.BR); saveOrDelete("WR", dlgFields.WR);
+        saveOrDelete("BT", dlgFields.BT); saveOrDelete("WT", dlgFields.WT);
+        saveOrDelete("RU", dlgFields.RU); saveOrDelete("DT", dlgFields.DT); 
+        saveOrDelete("TM", dlgFields.TM);
+        saveOrDelete("EV", dlgFields.EV); saveOrDelete("PC", dlgFields.PC);
+        saveOrDelete("GN", dlgFields.GN); saveOrDelete("ON", dlgFields.ON); 
+        saveOrDelete("RE", dlgFields.RE); // should confirm form is b+2, b+2.5, b+resign, etc. format.
+        // Signal UI updates in case some edit is visible, like game comment or future proofing.
+        g.onChange?.();
+        onClose();
+        // Return focus to app root (same pattern as NewGameDialog)
+        requestAnimationFrame(() => document.getElementById("app-focus-root")?.focus());
+      }}
+    />
+  );
+} // GameInfoOverlay() 
 
-function CommandButtons() {
+function MoveNavCommandButtons() {
   const app = useContext(GameContext);
   // ok to use appglobals.game instead of gameref because these callbacks update when game/version
   // change, so they won't become stale closures binding to an inactive game.  If they might become
@@ -257,23 +327,23 @@ function CommandButtons() {
   const onPrev = useCallback(async () => {
     if (!game?.unwindMove || !bumpVersion) return;
     if (!game.canUnwindMove?.()) return;
-    //game.saveCurrentComment?.();
-    game.unwindMove();
-    //bumpVersion(); unwindmove call onchange and always returns a move
+    game.unwindMove(); // unwindmove call onchange and always returns a move
   }, [game, bumpVersion]);
   const onNext = useCallback(async () => {
-    if (!game?.replayMove || !bumpVersion) return; // no idea why this test is here
+    // apparently need tests like these for first renders that just punt, but not sure if this ever
+    // fires what the UI would look like.  Can't invoke this command until all UI and game is loaded.
+    if (!game?.replayMove || !bumpVersion) return; 
     if (!game.canReplayMove?.()) return;
     const m = await game.replayMove();
     if (m !== null) {
-      bumpVersion();
+      bumpVersion(); // call this because captured stones changes board.
       app.bumpTreeHighlightVersion();
     }
   }, [game, bumpVersion]);
   const onEnd = useCallback(async () => {
     if (!game?.gotoLastMove || !bumpVersion) return;
     if (!game.canReplayMove?.()) return;
-    await game.gotoLastMove(); // signal onchange
+    await game.gotoLastMove(); // signals onchange
   }, [game, bumpVersion]);
   // Branches reporting button
   // Need to declare next two vars so they are in scope for branchesLabel computation.

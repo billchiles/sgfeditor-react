@@ -98,10 +98,11 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   const app = React.useContext(GameContext)!;
   React.useEffect(() => {
     if (!app?.setTreeRemapper) return;
-    const remap = (oldKey: ParsedNode, newMove: IMoveNext) => {
-      const node = treeViewMoveMap.get(oldKey as IMoveNext);
+    const remap = (oldKey: IMoveNext, newMove: IMoveNext) => {
+      // oldkey is a ParsedNode
+      const node = treeViewMoveMap.get(oldKey);
       if (!node) return;
-      treeViewMoveMap.delete(oldKey as IMoveNext);
+      treeViewMoveMap.delete(oldKey);
       treeViewMoveMap.set(newMove, node);
       // Update the node to point at the new Move so subsequent lookups/labels use Move data.
       (node as any).node = newMove;
@@ -117,8 +118,9 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   const lookupMoveOrRemap = React.useCallback((key: IMoveNext): TreeViewNode | null => {
     let n = treeViewMoveMap.get(key) ?? null;
     if (n) return n;
-    const pn = (key as any)?.parsedNode as IMoveNext | undefined;
-    if (pn && treeViewMoveMap.has(pn)) {
+    const pn = !!key && typeof key === "object" && "parsedNode" in key! ? 
+               key.parsedNode as IMoveNext : null;
+    if (pn !== null && treeViewMoveMap.has(pn)) {
       const node = treeViewMoveMap.get(pn)!;
       treeViewMoveMap.delete(pn);
       treeViewMoveMap.set(key, node);
@@ -190,7 +192,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     //app.bumpTreeHighlightVersion!();
     // return focus so global keybindings work immediately, not calling focusOnRoot to avid
     // cirular dependencies.
-    (document.getElementById("app-focus-root") as HTMLElement | null)?.focus?.();
+    (document.getElementById("app-focus-root"))?.focus?.();
   }, [app, treeViewMoveMap]);
 
   function gotoGameTreeMove(move: Move): boolean {
@@ -377,7 +379,8 @@ function gotoGameTreeParsedNode(move: ParsedNode): boolean {
           const isNext = !!nextCell && cell === nextCell;
           const fill =
             cell.kind === TreeViewNodeKinds.StartBoard ? "none" :
-            cell.color === StoneColors.Black ? "#000" : "#fff";
+            cell.color === StoneColors.Black ? "#000" : 
+            cell.color === StoneColors.White ? "#fff" : "none";
           const stroke = cell.kind === TreeViewNodeKinds.LineBend ? "#999" : "#000";
           const strokeWidth = 1.25;
 

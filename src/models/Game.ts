@@ -174,9 +174,9 @@ export class Game {
       return null;
     }
     // Can check new moves captures now, so can check for ko.
-    if (curMove && curMove.deadStones.length === 1 && move.deadStones.length === 1 &&
+    if (curMove !== null && curMove.deadStones.length === 1 && move.deadStones.length === 1 &&
         // curMove and move capture one stone, are they capturing each other ...
-        curMove.deadStones[0] === move.deadStones[0] && 
+        move.deadStones[0] === curMove && 
         curMove.deadStones[0].row === move.row && curMove.deadStones[0].column === move.column) {
       await this.message?.message("KO !!  Can't take back the ko.");
       return null;
@@ -467,7 +467,7 @@ export class Game {
     this.saveAndUpdateComments(current, previous);
     this.currentMove = previous;
     debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
-    this.onChange!();
+    this.onChange!(); // call this because captured stones changes board.
     this.onTreeHighlightChange!();
     return current;
   }
@@ -1241,7 +1241,12 @@ buildSGFStringFlipped (): string {
   private chooseLetterAdornment (arr: Adornment[]): string | null {
       // Collect letter adornments for this node only
       const used = new Set(
-        arr.filter(a => a.kind === AdornmentKinds.Letter).map(a => (a as any).letter as string)
+        //arr.filter(a => a.kind === AdornmentKinds.Letter).map(a => (a as any).letter as string)
+        // gpt5 decided it liked the next line better later on, so I learned about Extract affordance
+        // the former looks a lot more straightforward and less ceremony over essence
+        arr.filter((a): a is Extract<Adornment, {kind: typeof AdornmentKinds.Letter}> => 
+                   a.kind === AdornmentKinds.Letter)
+           .map(a => a.letter)
       );
       for (let code = "A".charCodeAt(0); code <= "Z".charCodeAt(0); code++) {
         const c = String.fromCharCode(code);
@@ -1418,7 +1423,9 @@ export interface MessageOrQuery {
 //// Mapping Games to ParsedGames (for printing)
 ///
 
-function copyProperties(src: Record<string, string[]>): Record<string, string[]> {
+/// copyProperties copies parsed node properties down to leaves, exported for commands in AppGlobals.
+///
+export function copyProperties(src: Record<string, string[]>): Record<string, string[]> {
   const res: Record<string, string[]> = {};
   for (const k of Object.keys(src)) res[k] = [...src[k]];
   return res;
