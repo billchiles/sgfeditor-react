@@ -28,9 +28,9 @@ export default function HelpDialog({ open, onClose, text = HELP_TEXT,}:
   // render ...
   return (
     <Modal open={open} onClose={onClose} 
-           contentStyle={{ width: "min(96ch, 92vw)" }}  // wider than default to fit help text
-    >
-      <h3 style={{ marginTop: 0, marginBottom: 8 }}>SGF Editor — Help</h3>
+           contentStyle={{ width: "min(96ch, 92vw)" }} // wider than default to fit help text
+           labelledById="help-title"  >
+      <h3 id="help-title" style={{ marginTop: 0, marginBottom: 8 }}>SGF Editor — Help</h3>
       <form onSubmit={submitAndClose}>
       <div style={{
              // Let the container match the dialog width; keep a nice frame

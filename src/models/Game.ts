@@ -39,6 +39,8 @@ export class Game {
   // Adornments that live on the starting board.
   startAdornments: Adornment[] = [];
   miscGameInfo: Record<string, string[]> | null;
+  private _cutMove: Move | null = null;
+
 
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion, keeping model / UI isolation.
@@ -1169,7 +1171,7 @@ buildSGFStringFlipped (): string {
       // ASYNC MODEL / REACT STYLE vs C#/XAML
       // gpt5 wants this void to declare we are ignoring the promise explicitly.  fire and forget.
       // gpt5 wants the model code purely synchronous, but ok if need to confirm an action.
-      // need to ensure no useful work occurs after an await if the caller 1) does not await and
+      // Need to ensure no useful work occurs after an await if the caller 1) does not await and
       // continues executing when the promise comes back and 2) the caller relies on all work in the
       // callee to be done.  We had one example that typescript didn't flag: I think gotoLastMove's
       // event handler caller didn't await, and more model state changed after the message box.
@@ -1319,11 +1321,11 @@ buildSGFStringFlipped (): string {
     return final.reverse();
   }
 
-  //// AdvanceToMovePath takes a path, where each tuple is a move number and the
-  //// branch index to take at that move.  The branch is -1 for the last move.
-  //// This returns true if successful, null if the path was bogus, or we encounter
-  //// a move conflict in the game tree (can happen from pastes).
-  ////
+  /// AdvanceToMovePath takes a path, where each tuple is a move number and the
+  /// branch index to take at that move.  The branch is -1 for the last move.
+  /// This returns true if successful, null if the path was bogus, or we encounter
+  /// a move conflict in the game tree (can happen from pastes).
+  ///
   public AdvanceToMovePath (path: Array<[number, number]>): boolean {
     debugAssert(this.currentMove === null, "Must be at beginning of empty game board.");
     debugAssert(this.firstMove !== null || path === this.TheEmptyMovePath,
@@ -1388,17 +1390,294 @@ buildSGFStringFlipped (): string {
     return true;
   } // advanceToMovePath()
 
-    /// set_current_branch is a helper for UI that changes which branch to take
-    /// following the current move.  Cur is the index of the selected item in
-    /// the branches combo box, which maps to the branches list for the current
-    /// move.
-    ///
-    public setCurrentBranch (cur : number) : void {
-        if (this.currentMove === null)
-            this.firstMove = this.branches![cur];
-        else
-          this.currentMove.next = this.currentMove.branches![cur];
+  /// set_current_branch is a helper for UI that changes which branch to take
+  /// following the current move.  Cur is the index of the selected item in
+  /// the branches combo box, which maps to the branches list for the current
+  /// move.
+  ///
+  public setCurrentBranch (cur : number) : void {
+      if (this.currentMove === null)
+          this.firstMove = this.branches![cur];
+      else
+        this.currentMove.next = this.currentMove.branches![cur];
+  }
+
+  ///
+  //// Cutting and Pasting Sub Trees
+  ///
+ 
+  /// canPaste -- Command Entry Point
+  /// returns whether there is a cut sub tree, but it does not check whether the cut tree 
+  /// can actually be pasted at the current move.  It ignores whether the right move color will 
+  /// follow the current move, which pasteMove allows, but this does not check whether all the moves
+  /// will occupy open board locations, which pasteMove requires.
+  /// Could be called cutMoveExists.
+  ///
+  public canPaste (): boolean {
+    return this._cutMove !== null;
+  }
+
+  /// cutMove -- Command Entry Point
+  /// must be invoked on a current move.  It leaves the game state with the previous move 
+  /// or initial board as the current state.
+  ///
+  public cutMove (): void {
+    const cut_move = this.currentMove;
+    debugAssert(cut_move !== null,
+                "Must cut current move, so cannot be initial board state.");
+    // Unwind move with all game model updates (and saves comments).
+    this.unwindMove();
+    const prev_move = this.currentMove;
+    // Detach cut subtree root from its previous and clear transient kill list.
+    cut_move!.previous = null;
+    cut_move!.deadStones = [];
+    // Cutting a first move or other move?
+    if (prev_move === null) {
+      // Handle initial board state.
+      this.cutFirstMove(cut_move!);
+    } else {
+      // Handle regular move. 
+      this.cutNextMove(prev_move, cut_move!);
     }
+    // Only save for pasting if more interesting than last move
+    if (cut_move!.next !== null) this._cutMove = cut_move!;
+    // Mark dirty and signal UI to update
+    this.isDirty = true;
+    this.onChange?.();
+    this.onTreeLayoutChange?.();
+    //this.onTreeHighlightChange?.();
+  } // cutMove()
+
+  /// cutFirstMove takes a Move that is a first move of the game.  This function cleans up next 
+  /// pointers and branches lists appropriately for the move.
+  ///
+  private cutFirstMove (cut_move: Move): void {
+    // Handle initial board state, cannot reuse cutNextMove due to firstMove/branches shape
+    const branches = this.branches;
+    if (branches === null) {
+      this.firstMove = null;
+    } else {
+      const cutIndex = branches.indexOf(cut_move);
+      branches.splice(cutIndex, 1);
+      this.firstMove = branches[0];
+      if (branches.length === 1)
+        this.branches = null; 
+    }
+    if (this.parsedGame != null && this.parsedGame.nodes!.next != null && cut_move.parsedNode != null)
+      // If we have a game with a parsed node, then we need to cut the first parsed node tree
+      // too.  Need to check if cut_move.ParsedNode is null because it could have been added
+      // after parsing file and have no ParsedNode.  It also could be an auto-save stashed a
+      // parsed node tree in the game, in which case it would have a new parsed node we could not
+      // find anyway.  It does no harm if an extra branch hangs off the parsed node tree, and
+      // it goes away on the next auto save.
+      this.cutNextParsedNode(this.parsedGame.nodes!, cut_move.parsedNode);
+  } // cutFirstMove()
+
+  /// CutNextMove takes a Move that is the previous move of the second argument, and the move being 
+  /// cut.  This function cleans up next pointers and branches lists appropriately for the move. 
+  ///
+  private cutNextMove (move: Move, cut_move: Move): void {
+    const branches = move.branches;
+    if (branches === null) {
+      move.next = null;
+    } else {
+      const cutIndex = branches.indexOf(cut_move);
+      branches.splice(cutIndex, 1);
+      move.next = branches[0];
+      if (branches.length = 1) move.branches = null;
+    }
+    if (move.parsedNode != null && move.parsedNode.next != null && cut_move.parsedNode != null)
+      // If we have a Move with a parsed node, then we need to cut the parsed node tree
+      // too.  If have Move for parsed node, and move does not have branches, then parsed
+      // node does not either since we create Moves for parsed nodes ahead of fully rendering
+      // and consistently delete parsed nodes if delete moves.  Need to check if cut_move.ParsedNode
+      // is null because it could have been added after parsing file and have no ParsedNode.
+      this.cutNextParsedNode(move.parsedNode, cut_move.parsedNode);
+  }
+
+  /// CutNextParsedNode is the same as CutNextMove, except for ParsedNode.  This function assumes 
+  /// pn and cut-move are not null.
+  ///
+  private cutNextParsedNode(pn: ParsedNode, cut_move: ParsedNode): void {
+    const branches = pn.branches;
+    if (branches == null) {
+      pn.next = null;
+    } else {
+      const cut_index = branches.indexOf(cut_move);
+      if (cut_index !== -1) {
+        // VERY subtle interaction ... because we have an auto save timer, and we write files by
+        // gen'ing fresh parsenodes and storing them in the root (simply solves hassles with editing the
+        // tree and various state pointers), at any await or UI moment, the root parsenodes could be
+        // written.  We don't update all the move's parsenode properites since if a move is unrendered
+        // its parsenode properties are still accurate, and otherwise we ignore them.  This means
+        // deleting the first node read from a file can have a parsenode object that is NOT in the
+        // branches collection.
+        // GENERAL CASE NOT ... any interior rendered move has parsenodes removed on deletions, and we never
+        // add new ones.  We may clean it up here even though we would never see that parsenode again.
+        // REPRO SCENARIO ... open a file, move out a couple of moves to render, go back to home, and
+        // add a couple of moves so there's two branches.  Then wait a min to ensure autosave kicked in
+        // and go delete the first node read from the file.
+        branches.splice(cut_index, 1);
+        // the parser creates branches based on file syntax and does not have the invariant Move objects
+        // have (branches is null unless > 1).  OGS creates files where every node is the start of a new
+        // branch, which renders fine since we fix branches lists when we reify a Move.
+        if (branches.length === 0) {
+          pn.branches = null;
+          pn.next = null;
+        } else {
+          pn.next = branches[0];
+          if (branches.length === 1) pn.branches = null;
+        }
+      }
+    }
+  } // cutNextParsedNode()
+
+
+  /// paste_move -- Command Entry Point
+  /// makes this._cutMove be the next move of the current move displayed.  This does not 
+  /// check consistency of all moves in sub tree since which would involve replaying them all.  
+  /// It does check a few things with the first cut move.
+  ///
+  public async pasteMove (): Promise<void> {
+    const cutmove = this._cutMove;
+    debugAssert(cutmove !== null, "There is no cut sub tree to paste.");
+    if (cutmove.color !== this.nextColor) {
+      await this.message?.message("Cannot paste cut move that is same color as current move.");
+      return;
+    }
+    // Need to ensure first cut move doesn't conflict, else checking self capture throws in
+    // PasteMoveInsert.
+    if (! cutmove.isPass && this.board.hasStone(cutmove.row, cutmove.column)) {
+      await this.message?.message("Cannot paste cut move that is at same location as another stone.");
+      return;
+    }
+    if (await this.pasteMoveNextConflict(cutmove)) return;
+    await this.pasteMoveInsert(cutmove); // Updates model, signals UI, and sets this._cutMove to null.
+    // this.onChange?.();
+    // this.onTreeLayoutChange?.();
+    // this.onTreeHighlightChange?.();
+  }
+
+  /// PasteMoveNextConflict checks whether pasting at current would conflict with the existing next
+  /// move.  Returns true if there is a conflict.
+  /// PasteMoveNextConflict takes a move representing a cut move and checks that it does not conflict with
+  /// a next move.  Some moves in the pasted branch may be in conflict, but we catch those as we replay
+  /// moves.  This check prevents branches where two branches are the same move but different sub trees.
+  ///
+  private async pasteMoveNextConflict (new_move: Move): Promise<boolean> {
+    const curmove = this.currentMove;
+    const branches = curmove != null ? curmove.branches : this.branches;
+    // if (curmove != null)
+    //   branches = curmove.branches;
+    // else
+    //   branches = this.branches;
+    let error = false;
+    if (branches != null) {
+      const already_move = branches.findIndex(
+        (y) => new_move.row === y.row && new_move.column === y.column );
+      error = already_move !== -1;
+    } else if (curmove != null) {
+      error = (curmove.next != null &&
+               curmove.next.row === new_move.row && curmove.next.column === new_move.column);
+    } else
+      error = (this.firstMove != null &&
+               this.firstMove.row === new_move.row && this.firstMove.column === new_move.column);
+    if (error) {
+      await this.message?.message?.("You pasted a move that conflicts with a next move of the current move.");
+      return true;
+    }
+    return false;
+  }
+
+  /// PasteMoveInsert take a move represneting a cut move and does the work of inserting the move
+  /// into the game model.  This assumes new_move is not in conflict with a move on the board, which
+  /// is necessary; otherwise, CheckSelfCaptureNoKill throws.
+  ///
+  private async pasteMoveInsert (new_move: Move): Promise<void> {
+    // If CheckSelfCaptureNoKill returns false, then it updates cutMove to have dead
+    // stones hanging from it so that calling DoNextButton below removes them.
+    if (! new_move.isPass && this.checkSelfCaptureNoKill(new_move)) {
+      await this.message?.message?.("You cannot make a move that removes a group's last liberty");
+      return;
+    }
+    const cur_move = this.currentMove;
+    if (cur_move != null)
+      pasteNextMove(cur_move, new_move);
+    else {
+      if (this.firstMove != null) {
+        // branching initial board state
+        if (this.branches == null)
+          this.branches = [ this.firstMove, new_move ];
+        else
+          this.branches.push(new_move);
+        this.firstMove = new_move;
+        this.firstMove.number = 1;
+      }
+      else {
+        // If we had a move to cut, then clearly there are moves in the game.  If there is no first
+        // move, then user must have cut the only first move there was and is not pasting it back.
+        // There is branching initial board state if there was no first move.
+        this.firstMove = new_move;
+        this.firstMove.number = 1;
+      }
+      if (this.parsedGame != null && new_move.parsedNode != null)
+        pasteNextParsedNode(this.parsedGame.nodes!, new_move.parsedNode);
+    }
+    new_move.previous = cur_move;  // stores null appropriately when no current
+    this.isDirty = true;
+    renumberMoves(new_move);
+    // If pasting this game's cut move, then set to null so that UI disables pasting.
+    if (this._cutMove === new_move) this._cutMove = null;
+    await this.replayMove();
+    this.onChange!(); // replayMove doesn't signal change, but we know here we've changed things.
+    this.onTreeLayoutChange!();
+  } // pasteMoveInsert()
+
+
+  /// pasteMoveOtherGame -- Command Entry Point
+  /// Pastes from another open game, choosing first in MRU with a cut move.  This is nearly the
+  /// same as pasteMove.
+  ///
+  public async pasteMoveOtherGame (other: Game): Promise<void> {
+    const cutmove = other._cutMove!; // Must be called on game with cut move.
+    if (cutmove.color !== this.nextColor) {
+      await this.message?.message("Cannot paste cut move that is same color as current move.");
+      return;
+    }
+    // Need to ensure first cut move doesn't conflict, else checking self capture throws in
+    // PasteMoveInsert.
+    if (! cutmove.isPass && this.board.hasStone(cutmove.row, cutmove.column)) {
+      await this.message?.message("Cannot paste cut move that is at same location as another stone.");
+      return;
+    }
+    const newMove = await this.prepareMoveOtherGamePaste(other);
+    if (newMove === null) return;
+    await this.pasteMoveInsert(newMove); // Updates model, signals UI, and sets this.
+  } // pasteMoveOtherGame()
+
+    /// prepareMoveOtherGamePaste takes another game that has a cut move and makes a move to represent
+  /// that move in the current game with no aliasing into the other game's state.  The cut moves 
+  /// location has been vetted for not colliding with an existing move, but this function also 
+  /// checks that the there is no next move that is at the same location to keep the game model 
+  /// invariant that no two branches have the same move location.
+  private async prepareMoveOtherGamePaste (other: Game): Promise<Move | null> {
+    const newmove = new Move(other._cutMove!.row, other._cutMove!.column, this.nextColor);
+    if (await this.pasteMoveNextConflict(newmove)) return null;
+    // Convert cut moves to parsenodes to extract the moves from the other game's model
+    const pnodes = genParsedNodes(other._cutMove!, false, this.board.size); // false = no flipped coordinates
+    newmove.parsedNode = pnodes;
+    const [resmove, err] = this.readyForRendering(newmove);
+    // const resmove = stuff[0];
+    if (resmove == null || err) { // Issue with parsed node, cannot go forward.
+      // Current move comes back if some branches had bad parsenodes, but good moves existed. 
+      const msg = nextMoveGetMessage(resmove as Move) ?? "";
+      await this.message?.message?.(
+        "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
+        "in the SGF file.\nYou cannot play further down that branch... " + msg );
+      if (resmove == null) return null;
+    }
+    return newmove;
+  }
 
 } // Game class
 
@@ -1411,6 +1690,16 @@ buildSGFStringFlipped (): string {
 /// choice.  The signatures are Promise | void (boolean) to allow for future development where I may
 /// use a dialog or other UI that requires awaiting.  AppGlobals.tsx uses alert/confirm which are
 /// not async, but using await in typescript is ok on non-async calls and has no impact.
+///
+/// ASYNC MODEL / REACT STYLE vs C#/XAML
+/// gpt5 wants this void to declare we are ignoring the promise explicitly.  fire and forget.
+/// gpt5 wants the model code purely synchronous, but ok if need to confirm an action.
+/// Need to ensure no useful work occurs after an await if the caller 1) does not await and
+/// continues executing when the promise comes back and 2) the caller relies on all work in the
+/// callee to be done.  We had one example that typescript didn't flag: I think gotoLastMove's
+/// event handler caller didn't await, and more model state changed after the message box.
+/// You can void foo() in typescript to fire and forget, as well as foo().catch(() => {}) in
+/// case it could have an error to avoid unhandled rejected promises.
 ///
 export interface MessageOrQuery {
   message (msg: string): Promise<void>;
@@ -1624,7 +1913,7 @@ export function flipCoordinates(coords: string[], size: number, labels: boolean 
 
 
 ///
-//// Misc Helper Functions for Game Consumers
+//// Misc Helper Functions for Game Consumers and Creators
 ///
 
 /// create_parsed_game takes a ParsedGame and the current game (for messaging and poaching UI
@@ -2044,3 +2333,71 @@ export function nextMoveGetMessage (move: Move): string | null {
   return null;
 }
 
+///
+//// Cut / Paste Helpers
+///
+
+/// pasteNextMove takes a Move that is the current move to
+  /// which _paste_next_move adds cut_move as the next move.  This sets up next
+  /// pointers and the branches list appropriately for the move.
+  ///
+  function pasteNextMove (move: Move, cutMove: Move): void {
+    if (move.next != null) {
+      if (move.branches == null) {
+        // need branches
+        move.branches = [ move.next, cutMove ];
+      } else {
+        move.branches.push(cutMove);
+      }
+      move.next = cutMove;
+    } else {
+      move.next = cutMove;
+    }
+    cutMove.previous = move;
+    move.next.number = move.number + 1; // moves further out are renumbered by pastMoveInsert
+    if (move.parsedNode != null && cutMove.parsedNode != null)
+    pasteNextParsedNode(move.parsedNode, cutMove.parsedNode);
+  }
+
+/// pasteNextParsedNode is very much like _paste_next_move but for ParsedNodes.
+///
+function pasteNextParsedNode (pn: ParsedNode, cutmove: ParsedNode): void {
+  const branches = pn.branches;
+  if (pn.next != null) {
+    if (branches == null) {
+      pn.branches = [ pn.next, cutmove ];
+    } else {
+      branches.push(cutmove);
+    }
+    pn.next = cutmove;
+  } else {
+    pn.next = cutmove;
+  }
+  cutmove.previous = pn;
+}
+
+/// renumberMoves takes a move with the correct number assignment and walks
+/// the sub tree of moves to reassign new numbers to the nodes.  This is used
+/// by game.pasteMoveInsert
+///
+function renumberMoves (move: Move): void {
+ let count = move.number;
+ if (move.branches == null) {
+   move = move.next!;
+   while (move != null) {
+     move.number = count + 1;
+     count += 1;
+     if (move.branches == null)
+       move = move.next!;
+     else
+       break;
+   }
+  // Only get here when move is None, or we're recursing on branches.
+  if (move != null)
+    for (const m of move.branches!) {
+      m.number = count;
+      renumberMoves(m);
+    }
+  }
+
+} // renumberMoves()

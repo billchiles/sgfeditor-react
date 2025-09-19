@@ -55,6 +55,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import Modal from "./modals";
 import type { Game } from "../models/Game";
+import { debugAssert } from "../debug-assert";
 
 type Props = {
   open: boolean;
@@ -263,7 +264,8 @@ function initGameInfoDlg (game: Game, { setPlayerBlack, setPlayerWhite, setKomi,
   setPlayerWhite(game.playerWhite);
   setKomi(game.komi);
   setComments(game.comments);
-  const props = game.miscGameInfo!;
+  debugAssert(game.miscGameInfo !== null, "Must set game.miscGameInfo before launchging dialog.");
+  const props = game.miscGameInfo!; // AppGlobals.tsx gameInfoCmd() sets miscGameInfo before dialog
   if ("BR" in props) setBR(props["BR"][0]); if ("WR" in props) setWR(props["WR"][0]); // black/white rank
   if ("BT" in props) setBT(props["BT"][0]); if ("WT" in props) setWT(props["WT"][0]); // black/white team
   if ("RU" in props) setRU(props["RU"][0]); if ("DT" in props) setDT(props["DT"][0]); // rule set / date

@@ -552,7 +552,6 @@ async function getFileGameCheckingAutoSave
         await curgame.message!.confirm!(
           `Found more recent auto saved file for ${(fileHandle as any).name}.  Confirm opening auto saved file,` +
           `OK for auto saved version, Cancel/Escape to open older original file.`)) {
-        // TODO: PROPERLY, I should test handle and read data here, but autosave mgt will all change
         parseAndCreateGame(autoHandle, autoSaveName, fileBridge, "", gamemgt.gameRef, 
                            {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
                             setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
@@ -854,12 +853,48 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.gotoStart(); // signals onchange
     return;
   }
-if (lower === "end" && curgame.canReplayMove()) {
+  if (lower === "end" && curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     curgame.gotoLastMove(); // signals onchange, and don't await in handleKeyDown says gpt5
     return;
   }
+  // Cut Move
+  if ((control && e.code === "KeyX") || (e.code === "Delete")) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (curgame.canUnwindMove() &&
+      await curgame.message?.confirm?.("Cut current move from game tree?  OK, is yes.  Escape/Cancel is no."))
+      curgame.cutMove(); // signals UI to update if makes changes
+    return;
+  }
+  // Paste Move
+  if (control && !shift && e.code === "KeyV") {
+    e.preventDefault();
+    e.stopPropagation();
+    const g = deps.gameRef.current;
+    if (g.canPaste())
+      await g.pasteMove();
+    else
+      await curgame.message?.message("No cut move to paste at this time.");
+    return;
+  }
+  // Paste Move from Another Game
+  if (control && shift && e.code === "KeyV") {
+    e.preventDefault();
+    e.stopPropagation();
+    const games = deps.getGames();
+    if (games.length >= 2) {
+      const other = games.findIndex( (g) => curgame !== g && g.canPaste() );
+      if (other !== -1)
+        await curgame.pasteMoveOtherGame(games[other]);
+      else
+        await curgame.message?.message("No other game has a cut move at this time.");
+    } else
+        await curgame.message?.message("No other game has a cut move at this time.");
+    return;
+  }
+
 }
 
 

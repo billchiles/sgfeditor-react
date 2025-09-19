@@ -24,7 +24,7 @@ another branch or the main branch, down arrow selects another branch, home moves
 to the game start, and end moves to the end of the game following the currently
 selected branches.  You can always click a node in the game tree graph.  Ctrl-left
 arrow moves to the closest previous move that has branches.  If the current move
-has branches following it, the selected branch's first node has a fushia
+has branches following it, the selected branch's first node has a fucshia
 square outlining it.  Nodes that have comments have a light green highlight, and
 the current node has a fuchsia highlight.
 
@@ -47,7 +47,7 @@ SAVING FILES, SAVE AS
 The save button (or ctrl-s) saves to the associated file name if there is one;
 otherwise it prompts for a filename.  If there is a filename, but the game state
 is not dirty, then it prompts to save to a different filename (and tracks to the
-new name).  To explicitly get save-as behavior, use ctrl-alt-s.  Ctrl-c copies filepath to clipbard.
+new name).  To explicitly get save-as behavior, use ctrl-alt-s.  Ctrl-c copies filepath to clipboard.
 
 SAVING REVERSE VIEW
 To save the game so that your opponent can review it from his point of view, use
@@ -77,7 +77,7 @@ MISCELLANEOUS
    Ctrl-k clears the current node's comment and puts text on system clipboard.
    Ctrl-1, ..., ctrl-5 deletes the first, ..., fifth line of node's comment and
       puts entire comment's text on clipboard.
-   Ctrl-t changes the first occurence of the move's board coordinates in the comment
+   Ctrl-t changes the first occurrence of the move's board coordinates in the comment
       to 'this'; for example, 'd6 is strong cut' changes to 'this is strong cut'.
    Ctrl-m changes the first occurrence of board coordinates to 'marked stone',
       'square-marked stone', or a letter depending on what adornment is at that location.
