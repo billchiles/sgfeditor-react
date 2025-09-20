@@ -105,9 +105,67 @@ React UI (App/AppContent/GoBoard)     Model (Game, Board, Move, ParsedNode)     
 
   * Use `ParsedNodeToMove` to create `Move` with `Rendered=false`.
   * **On replay** (`replayMove`), if the move was never rendered, compute captures, adornments, and next/branches from parsed node and mark `Rendered=true`.
-* **Cut / Paste:**
 
-  * Cut subtree from current node; paste as new branch respecting invariants; handle conflicts and messages.
+* **Cut / Paste (overview):** Cut the **current** node (and its entire subtree); paste it as the next move after the current position, with safety checks and renumbering (see §5.4).
+
+---
+
+### 5.1 Selecting the Active Next Branch (Navigation)
+
+**Goal.** When a position has multiple candidate next moves, users can switch which branch is “selected next” without replaying.  
+**Keys.** `ArrowUp` selects the previous branch; `ArrowDown` selects the next branch (only when a next move exists). The board stays at the same position; only the “selected next” changes.  
+**Model.** `selectBranchUp()` / `selectBranchDown()` update `previous.next` (or `firstMove` at root) and fire `onChange` / `onTreeHighlightChange`. The selection index is derived from `branches.indexOf(next)`. :contentReference[oaicite:9]{index=9} :contentReference[oaicite:10]{index=10}
+
+---
+### 5.2 Reordering Branches (Structure)
+
+**Goal.** Change the display and default order of sibling branches.  
+**Keys.** `Ctrl+ArrowUp` moves the current branch up; `Ctrl+ArrowDown` moves it down.  
+**Preconditions.** You must be on the **first move of a branch** (either `previous.next` or `firstMove` for root). If not, the command politely informs the user.  
+**Model.** `moveBranchUp()` / `moveBranchDown()` call `branchesForMoving()` to (a) obtain the correct `branches` list (root vs interior) and (b) locate the current branch index; then `moveBranch()` swaps entries, marks dirty, and signals `onChange` and `onTreeLayoutChange`. Messages communicate “main branch”/“last branch” limits. :contentReference[oaicite:11]{index=11}
+
+---
+### 5.3 Tree Invariants (Recap)
+
+1) **Unique sibling locations.** Among a move’s siblings, no two “next moves” may occupy the **same board point**. This is enforced on paste/insert and respected during path advance. :contentReference[oaicite:12]{index=12}  
+2) **Branch lists are null unless needed.** `branches` is `null` when there is ≤1 next move; otherwise it contains all siblings with `next` always pointing at the **selected** one. (Root mirrors this via `firstMove` + `branches`.) :contentReference[oaicite:13]{index=13}  
+3) **Path semantics.** Move paths advance by numbers and branch indexes, with an initial (0, idx) tuple for non-main root branches. :contentReference[oaicite:14]{index=14}
+
+---
+### 5.4 Cutting & Pasting Move Subtrees
+
+**Goal.** Allow users to restructure the game tree quickly by cutting the current node (and all descendants) and pasting it elsewhere—either within the same game or from another open game.
+
+**Terminology.** The “cut subtree root” is the node previously at `CurrentMove`. The model caches it as a private field (think clipboard) and exposes `canPaste()` to enable/disable paste UI affordances.
+
+#### 5.4.1 Commands & Hotkeys
+- **Cut**: `Ctrl+X` or `Delete`. Confirm first; then remove the current node from the tree, unwind the model (restore captured stones), and set `_cutMove` if the removed node had descendants. UI invalidation and tree-layout ticks fire. :contentReference[oaicite:14]{index=14} :contentReference[oaicite:15]{index=15}
+- **Paste (same game)**: `Ctrl+V`. If `canPaste()` is false, show a message; otherwise, insert at the current position (see checks below), renumber from the inserted node, `replayMove()` to update board state, and tick UI/layout. If the paste used the same game’s cut node, clear `_cutMove`. :contentReference[oaicite:16]{index=16} :contentReference[oaicite:17]{index=17}
+- **Paste (from another game)**: `Ctrl+Shift+V`. Choose the first other open game in MRU order that has a cut subtree; the rest of the checks and insertion are identical. :contentReference[oaicite:18]{index=18}
+- Help text mirrors these bindings for discoverability. :contentReference[oaicite:19]{index=19}
+
+#### 5.4.2 Safety & Consistency Checks (before insert)
+On paste, the model enforces:
+1) **Turn color**: First pasted move’s color must equal `nextColor`. Otherwise, message and abort. :contentReference[oaicite:20]{index=20}
+2) **Board occupancy**: If the first pasted move is not a pass, its point must be empty. Otherwise, message and abort. :contentReference[oaicite:21]{index=21}
+3) **Sibling/location conflict**: No sibling “next” move at the **same location** may already exist (including degenerate “only next” cases and the initial board’s `firstMove`). Otherwise, message and abort. **This preserves the invariant “no two sibling next-moves at the same location.”** :contentReference[oaicite:22]{index=22} :contentReference[oaicite:23]{index=23}
+
+> Note: We do **not** pre-simulate the entire subtree for occupancy/captures; conflicts deeper in the subtree are surfaced naturally as the user replays into it. The first-move checks above avoid Ko/self-capture guard path explosions. :contentReference[oaicite:24]{index=24}
+
+#### 5.4.3 Insert & Renumber
+If checks pass:
+- For interior positions, set the parent’s `next` (or append to `branches` and update `next`), set `previous`, and **renumber** along the pasted path from the insertion point. Then `replayMove()` to apply captures and prisoner counts. Fire `onChange()` and `onTreeLayoutChange()`. :contentReference[oaicite:25]{index=25}
+- For the initial board, handle `firstMove` vs. `branches` appropriately (branching root rules mirror interior behavior). :contentReference[oaicite:26]{index=26}
+
+#### 5.4.4 Cutting the First Node vs. Interior Nodes
+- **First node**: Rebuild `firstMove/branches` and, if a parsed tree is present, splice the corresponding `ParsedNode` branch (keeping parser invariants sensible even for OGS-style per-node branches). :contentReference[oaicite:27]{index=27}
+- **Interior node**: Detach from its `previous`, clear transient `deadStones`, and update the parent’s `next/branches` ollections. If this node had an associated `ParsedNode`, adjust the parsed tree to match (best-effort; auto-save will ormalize over time). :contentReference[oaicite:28]{index=28}
+
+---
+### 5.5 Tree-View Rendering & Reification
+
+When a `ParsedNode` is **reified** into a `Move` during replay, the model calls `onParsedNodeReified(oldKey, newMove)`.  
+The UI registers a “remapper” to swap the identity used by the TreeView (delete `oldKey`, register `newMove`) so the layout stays stable and the node becomes interactive as a live `Move`. :contentReference[oaicite:15]{index=15}
 
 ---
 

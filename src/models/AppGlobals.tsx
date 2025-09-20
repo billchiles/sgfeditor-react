@@ -30,13 +30,15 @@ import type { Move } from "./Board";
 export const CommandTypes = {
   NoMatter: "inconsequential-command",
   GotoNextGame: "goto-next-game",
+  SavePromptHack: "browser-does-not-open-new-after-prompt",
 } as const;
 
 export type CommandType = typeof CommandTypes[keyof typeof CommandTypes];
 
 export type LastCommand =
   | { type: typeof CommandTypes.NoMatter }
-  | { type: typeof CommandTypes.GotoNextGame; cookie: {idx: number} };
+  | { type: typeof CommandTypes.GotoNextGame; cookie: {idx: number} }
+  | { type: typeof CommandTypes.SavePromptHack; cookie: {dirtyGame: Game} } ;
 
 
 /// AppGlobals is the shape of values bundled together and provided as GameContext to UI handlers.
@@ -263,7 +265,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const commonKeyBindingsHijacked = hotkeys.commonKeyBindingsHijacked; //!isElectron; 
   // One place to kick off the New Game flow (pre-check dirty, ask UI to open modal)
   const startNewGameFlow = useCallback(async () => {
-    await checkDirtySave(gameRef.current, fileBridge);
+    const lastCmd = getLastCommand();
+    setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
+    await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand);
     openNewGameDialog?.();
   }, [fileBridge, openNewGameDialog]);
   //
@@ -383,10 +387,13 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
 ///
 async function doOpenButtonCmd (
     {gameRef, bumpVersion, fileBridge, getGames, setGames, setGame, getLastCreatedGame,
-     setLastCreatedGame, setLastCommand, getDefaultGame, setDefaultGame}: CmdDependencies): 
-    Promise<void> {
-  setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
-  await checkDirtySave (gameRef.current, fileBridge);
+     setLastCreatedGame, getLastCommand, setLastCommand, getDefaultGame, 
+     setDefaultGame}: CmdDependencies):  Promise<void> {
+  // Don't change behavior if repeatedly invoke, but as a hack, checkDirtySave may change this to
+  // avoid reprompting to save on subsequent invocation due to browser failing to new / open dialog
+  const lastCmd = getLastCommand();
+  setLastCommand({ type: CommandTypes.NoMatter }); 
+  await checkDirtySave (gameRef.current, fileBridge, lastCmd, setLastCommand);
   // Get file info from user
   let fileHandle = null;
   let fileName = "";
@@ -448,21 +455,41 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
 /// game filename, or prompts for one if it is null. This is exported for use in app.tsx or
 /// process kick off code for file activation. It takes a game optionally for checking a game
-/// that is not the current game (when deleting games).
+/// that is not the current game (when deleting games).  lastCommand is set by caller after fetching
+/// lastCmd passed in.  This leaves lastCommand as caller set, unless it needs to signal no prompt
+/// to save on subsequent call due to browser failing to open new/open dialog after asking to save.
 ///
-async function checkDirtySave (g: Game, fileBridge: FileBridge): Promise<void> {
+/// MAJOR BROWSER / REACT issue:
+/// There is a browser (and maybe electron shell) issue with “transient user activation” rule where
+/// some things are only valid when the web stack can prove a user wanted it to happen.  As soon as
+/// you await anything (or even run window.confirm/alert), you often lose the original user-gesture,
+/// and then calls like showOpenFilePicker / showSaveFilePicker may be ignored or blocked, so the 
+/// Open dialog (and sometimes your New Game modal timing) never shows.
+///
+async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCommand,
+                               setLastCommand: (c: LastCommand) => void): Promise<void> {
   // Save the current comment back into the model
   g.saveCurrentComment();
+  // Consider HACK for browser event / dialog handling.  Sometimes when we prompt the user to save
+  // the browser doesn't show the new or open dialog, and you have to invoke the command again and
+  // try a different timing when you answer the prompt to save.  So, let's try not prompting the
+  // second time the command is invoked.
   if (g.isDirty && 
-      // g.message must be set if this is running, and the board is dirty.
-      (await g.message!.confirm?.("Game is unsaved, OK save, Cancel/Esc leave unsaved.")) === true) {
-    if (g.saveCookie !== null) {
-      // todo no op
-      fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
-    } else {
-      const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
-      if (tmp !== null) {
-        g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+      // Don't prompt to save if user just denied saving and had to re-invoke new/open game
+      ! (lastCmd.type === CommandTypes.SavePromptHack && lastCmd.cookie.dirtyGame === g)) {
+    // g.message must be set if this is running, and the board is dirty.
+    const savep = await g.message!.confirm?.("Game is unsaved, OK save, Cancel/Esc leave unsaved.")
+    if (! savep)
+      setLastCommand({ type: CommandTypes.SavePromptHack, cookie: { dirtyGame: g } })
+    else {
+      if (g.saveCookie !== null) {
+        // todo no op
+        fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
+      } else {
+        const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
+        if (tmp !== null) {
+          g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+        }
       }
     }
   } else {
@@ -780,21 +807,22 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return;
   }
   if (alt_n) {
-    deps.setLastCommand( {type: CommandTypes.NoMatter });
+    //deps.setLastCommand( {type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
+    // startNewGameFlow sets last command type to NoMatter, but checkDirtySave() may change it
     void deps.startNewGameFlow(); // void explicitly ignores result
     return;
   }
-  if (/*!isTextInputFocused() &&*/
-      !e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "w") {
+  if (!e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "w") {
     e.preventDefault();
     //e.stopPropagation(); Can't stop chrome from taking c-w, so using s-w
-    gotoNextGameCmd(deps,deps.getLastCommand());
+    gotoNextGameCmd(deps,deps.getLastCommand()); // sets last command type
     return;
   }
   // F1: show Help dialog
   if (f1) {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
     deps.showHelp?.();
@@ -861,6 +889,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   }
   // Cut Move
   if ((control && e.code === "KeyX") || (e.code === "Delete")) {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
     if (curgame.canUnwindMove() &&
@@ -870,6 +899,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   }
   // Paste Move
   if (control && !shift && e.code === "KeyV") {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
     const g = deps.gameRef.current;
@@ -881,6 +911,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   }
   // Paste Move from Another Game
   if (control && shift && e.code === "KeyV") {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
     const games = deps.getGames();
