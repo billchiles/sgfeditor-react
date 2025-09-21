@@ -15,6 +15,7 @@ import GoBoard from "./components/GoBoard";
 import styles from "./App.module.css";
 import { GameProvider, GameContext, addOrGotoGame } from "./models/AppGlobals";
 import NewGameDialog from "./components/NewGameDialog";
+import MessageDialog, { type MessageRequest, type ConfirmOptions }  from "./components/MessageDialog";
 import { Game } from "./models/Game";
 //import type { IMoveNext } from "./models/Board";
 import HelpDialog from "./components/HelpDialog";
@@ -43,14 +44,23 @@ export default function App() {
   const [showNewGameDlg, setShowNewGameDlg] = useState(false);
   const [showHelpDlg, setShowHelpDlg] = useState(false);
   const [showGameInfoDlg, setShowGameInfoDlg] = useState(false);
+  const [msgOpen, setMsgOpen] = useState(false);
+  const [msgReq, setMsgReq] = useState<MessageRequest | null>(null);
+  function message (text: string, opts?: ConfirmOptions): Promise<boolean> {
+    return new Promise<boolean>((resolve) => { setMsgReq({ text, opts, resolve });
+                                               setMsgOpen(true); });
+  }
   return (<GameProvider getComment={getComment} setComment={setComment}
                         openNewGameDialog={() => setShowNewGameDlg(true)} 
                         openHelpDialog={() => setShowHelpDlg(true)}
-                        openGameInfoDialog={() => setShowGameInfoDlg(true)} >
+                        openGameInfoDialog={() => setShowGameInfoDlg(true)} 
+                        openMessageDialog={message} >
             <AppContent commentRef={commentRef} />
             <NewGameOverlay open={showNewGameDlg} onClose={() => setShowNewGameDlg(false)} />
             <HelpOverlay open={showHelpDlg} onClose={() => setShowHelpDlg(false)}/>
             <GameInfoOverlay open={showGameInfoDlg} onClose={() => setShowGameInfoDlg(false)} />
+            <MessageDialog open={msgOpen} message={msgReq} 
+                           onClose={() => { setMsgOpen(false); setMsgReq(null); }} />
           </GameProvider>
   );
 } // App function

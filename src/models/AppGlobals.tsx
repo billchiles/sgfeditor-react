@@ -23,6 +23,8 @@ import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platform
 import {parseFile, SGFError, ParsedNode} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
 import type { Move } from "./Board";
+import type { ConfirmOptions } from "../components/MessageDialog";
+
 ///
 //// Define types for passing global state to React and command state handlers.
 ///
@@ -75,6 +77,7 @@ export type AppGlobals = {
   // File I/O provided by src/platforms/bridges.ts declarations
   // Promise<void> is style choice because it feels like a command, not a query, and the caller
   // doesn't need the file contents because the openSGF handler creates the new game and model state.
+  showMessage?: ProviderProps["openMessageDialog"];
   openSgf: () => Promise<void>;
   saveSgf: () => Promise<void>;
   saveSgfAs: () => Promise<void>;
@@ -158,6 +161,7 @@ type CmdDependencies = {
   startNewGameFlow: () => Promise<void>;
   showHelp?: () => void;
   showGameInfo?: () => void;
+  showMessage?: ProviderProps["openMessageDialog"];
 };
 
 /// ProviderProps just describes the args to GameProvider function.
@@ -172,8 +176,7 @@ type ProviderProps = {
   openNewGameDialog?: () => void; 
   openHelpDialog?: () => void;
   openGameInfoDialog?: () => void;
-  // Board size for the game model (defaults to 19)
-  //size: number;
+  openMessageDialog?: (text: string, opts?: ConfirmOptions) => Promise<boolean>;
 };
 
 
@@ -207,7 +210,8 @@ const browserMessageOrQuery: MessageOrQuery = {
 /// layer, etc., and makes this available to UI content below <GameProvider> under <App>.
 ///
 export function GameProvider ({ children, getComment, setComment, openNewGameDialog: openNewGameDialog,
-                                openHelpDialog: openHelpDialog, openGameInfoDialog }: ProviderProps) {
+                                openHelpDialog: openHelpDialog, openGameInfoDialog,
+                                openMessageDialog }: ProviderProps) {
   //const size = DEFAULT_BOARD_SIZE;
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
   // render, which would replace game and all the move state (new Game).  This holds it's value
@@ -263,13 +267,24 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const hotkeys: KeyBindingBridge = browserKeybindings;
   //const isElectron = !!(window as any)?.process?.versions?.electron;
   const commonKeyBindingsHijacked = hotkeys.commonKeyBindingsHijacked; //!isElectron; 
+  //
   // One place to kick off the New Game flow (pre-check dirty, ask UI to open modal)
+  // My first solution to avoid browser losing user activation state and failing file prompt...
+  // const startNewGameFlow = useCallback(async () => {
+  //   const lastCmd = getLastCommand();
+  //   setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
+  //   await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand);
+  //   openNewGameDialog?.();
+  // }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand]);
+  const lastCommandRef = React.useRef<LastCommand>({ type: CommandTypes.NoMatter });
+  const getLastCommand = React.useCallback(() => lastCommandRef.current, []);
+  const setLastCommand = React.useCallback((c: LastCommand) => { lastCommandRef.current = c; }, []);
   const startNewGameFlow = useCallback(async () => {
     const lastCmd = getLastCommand();
     setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
-    await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand);
-    openNewGameDialog?.();
-  }, [fileBridge, openNewGameDialog]);
+    await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, openMessageDialog!,
+                         async () => { openNewGameDialog?.(); });
+  }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand]);
   //
   // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
   // This way the model and UI are isolated, but the model can signal model changes for re-rendering
@@ -304,9 +319,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     // run once on mount; guard prevents re-entry
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const lastCommandRef = React.useRef<LastCommand>({ type: CommandTypes.NoMatter });
-  const getLastCommand = React.useCallback(() => lastCommandRef.current, []);
-  const setLastCommand = React.useCallback((c: LastCommand) => { lastCommandRef.current = c; }, []);
   // One deps object to pass to top-level commands that updates if any member changes ref ID.
   // React takes functions anywhere it takes a value and invokes it to get the value if types match.
   const deps = useMemo<CmdDependencies>(
@@ -317,13 +329,14 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
               setDefaultGame, getLastCreatedGame: () => lastCreatedGame, 
               setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
               showHelp: () => { openHelpDialog?.(); },
-              showGameInfo: () => { openGameInfoDialog?.(); }
+              showGameInfo: () => { openGameInfoDialog?.(); },
+              showMessage: openMessageDialog,
              }), 
              [gameRef, bumpVersion, fileBridge, appStorageBridge, 
               games, setGames, setGame, setDefaultGame, 
               lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
               openHelpDialog, commonKeyBindingsHijacked, bumpTreeLayoutVersion, 
-              bumpTreeHighlightVersion, openGameInfoDialog]);
+              bumpTreeHighlightVersion, openGameInfoDialog, openMessageDialog]);
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
   const saveSgf   = useCallback(() => doWriteGameCmd(deps),   [deps]);
   const saveSgfAs = useCallback(() => saveAsCommand(deps), [deps]);
@@ -385,48 +398,107 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
 /// Needs to handle all errors and message to user, which it should anyway, but callers don't
 /// await here due to event propagation and whatnot, meaning errors don't appear appropriately to users.
 ///
+/// Typescript evolving code function signature chanage that keeps current callers type compliant ...
+/// Change the function signature to essentially an optional argument to avoid having to change call
+/// sites:
+///    ..., setDefaultGame, confirmMessage}: CmdDependencies & 
+///                                          { confirmMessage?: ProviderProps["confirmMessage"] }
+/// The & intersection means the single arg to the function must be assignable to both CmdDependencies
+/// and { confirmMessage? ...} types.  Because confirmMessage is optional, anything that satisfies
+/// CmdDependencies also satisfies the intersection op's right operand.
+///
+/// I chose to update CmdDependencies because two call sites aren't a burden to update since there is
+/// no update if I add the message dialog to CmdDependencies the one place I create them.
+///
 async function doOpenButtonCmd (
     {gameRef, bumpVersion, fileBridge, getGames, setGames, setGame, getLastCreatedGame,
-     setLastCreatedGame, getLastCommand, setLastCommand, getDefaultGame, 
-     setDefaultGame}: CmdDependencies):  Promise<void> {
-  // Don't change behavior if repeatedly invoke, but as a hack, checkDirtySave may change this to
-  // avoid reprompting to save on subsequent invocation due to browser failing to new / open dialog
+     setLastCreatedGame, getLastCommand, setLastCommand, getDefaultGame, setDefaultGame, 
+     bumpTreeLayoutVersion, showMessage}: CmdDependencies):  Promise<void> {
   const lastCmd = getLastCommand();
   setLastCommand({ type: CommandTypes.NoMatter }); 
-  await checkDirtySave (gameRef.current, fileBridge, lastCmd, setLastCommand);
-  // Get file info from user
-  let fileHandle = null;
-  let fileName = "";
-  let data = "";
-  if (fileBridge.canPickFiles()) { // Normal path
-    const res = await fileBridge.pickOpenFile();
-    if (res === null) return;  // User aborted.
-    fileHandle = res.cookie;
-    fileName = res.fileName;
-  } else {
-    // Can't just get file info, prompt user and open file, not normal path, defensive programming.
-    const res = await fileBridge.open();
-    if (res === null) return; // User aborted.
-    fileName = res.path!; // res !== null, path has value.
-    data = res.data;  // Don't bind cookie, we know it is null because can't pick files.
-  }
-  // Now fileHandle is non-null, or data should have contents.  fileName is a path or filebase.
-  // Check if file already open and in Games
-  const games: Game[] = getGames();
-  const openidx = games.findIndex(g => g.filename === fileName);
-  if (openidx != -1) {
-    // Show existing game, updating games MRU and current game.
-    addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
-  } else {
-    // TODO test failures and cleanups or no cleanup needed
-    await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
-                           {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames,
-                            getDefaultGame, setDefaultGame });
-    // drawgametree
-    // focus on stones
-    bumpVersion();
-  }
-  focusOnRoot();
+  //
+  // TRYING WEIRD IMPL THAT MAKES THE ENTIRE BODY BE A CONTINUATION PASSED TO checkDirtySave SO THAT
+  // BROWSER DOESN'T DENY OPENING FILE DUE TO AWAITING FILE SAVE, DIALOG CLICK KEEPS USER ACTIVATION.
+  //
+  // doOpenContinuation is main work of doOpenButtonCmd, but it must be invoked from the click
+  // handler of the file save prompt in checkDirtySave to avoid the browser denying file open prompt
+  // down in doOpenGetFileGame.
+  const doOpenContinuation = async () => {
+    let fileHandle = null;
+    let fileName = "";
+    let data = "";
+    if (fileBridge.canPickFiles()) { // Normal path
+      const res = await fileBridge.pickOpenFile();
+      if (res === null) return;  // User aborted.
+      fileHandle = res.cookie;
+      fileName = res.fileName;
+    } else {
+      // Can't just get file info, prompt user and open file, not normal path, defensive programming.
+      const res = await fileBridge.open();
+      if (res === null) return; // User aborted.
+      fileName = res.path!; // res !== null, path has value.
+      data = res.data;  // Don't bind cookie, we know it is null because can't pick files.
+    }
+    // Now fileHandle is non-null, or data should have contents.  fileName is a path or filebase.
+    // Check if file already open and in Games
+    const games: Game[] = getGames();
+    const openidx = games.findIndex(g => g.filename === fileName);
+    if (openidx != -1) {
+      // Show existing game, updating games MRU and current game.
+      addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
+    } else {
+      // TODO test failures and cleanups or no cleanup needed
+      await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
+                             {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames,
+                              getDefaultGame, setDefaultGame });
+      bumpVersion();
+      bumpTreeLayoutVersion();
+    }
+    focusOnRoot();
+  }; // whole body as doOpenContinuation
+  // 
+  await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, 
+                       showMessage!, doOpenContinuation);
+  //
+  // WORKING VERSION WITH LAST CMD HACK TO AVOID BROWSER REFUSING TO OPEN FILES, before all the
+  // continuations passed down through checkDirtySave to MessageDialog.
+  //
+  // const lastCmd = getLastCommand();
+  // setLastCommand({ type: CommandTypes.NoMatter }); 
+  // await checkDirtySave (gameRef.current, fileBridge, lastCmd, setLastCommand);
+  // // Get file info from user
+  // let fileHandle = null;
+  // let fileName = "";
+  // let data = "";
+  // if (fileBridge.canPickFiles()) { // Normal path
+  //   const res = await fileBridge.pickOpenFile();
+  //   if (res === null) return;  // User aborted.
+  //   fileHandle = res.cookie;
+  //   fileName = res.fileName;
+  // } else {
+  //   // Can't just get file info, prompt user and open file, not normal path, defensive programming.
+  //   const res = await fileBridge.open();
+  //   if (res === null) return; // User aborted.
+  //   fileName = res.path!; // res !== null, path has value.
+  //   data = res.data;  // Don't bind cookie, we know it is null because can't pick files.
+  // }
+  // // Now fileHandle is non-null, or data should have contents.  fileName is a path or filebase.
+  // // Check if file already open and in Games
+  // const games: Game[] = getGames();
+  // const openidx = games.findIndex(g => g.filename === fileName);
+  // if (openidx != -1) {
+  //   // Show existing game, updating games MRU and current game.
+  //   addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
+  // } else {
+  //   // TODO test failures and cleanups or no cleanup needed
+  //   await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
+  //                          {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames,
+  //                           getDefaultGame, setDefaultGame });
+  //   // drawgametree
+  //   // focus on stones
+  //   bumpVersion();
+  // }
+  // focusOnRoot();
 } // doOpenButtonCmd()
 
 /// addGame adds g to the front of the MRU and makes it the current game, or it moves game at idx to
@@ -467,31 +539,41 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
 /// Open dialog (and sometimes your New Game modal timing) never shows.
 ///
 async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCommand,
-                               setLastCommand: (c: LastCommand) => void): Promise<void> {
+                               setLastCommand: (c: LastCommand) => void,
+                               message: (text: string, opts?: ConfirmOptions) => Promise<boolean>,
+                               continuaton: () => Promise<void>): Promise<void> {
   // Save the current comment back into the model
   g.saveCurrentComment();
-  // Consider HACK for browser event / dialog handling.  Sometimes when we prompt the user to save
+  let ranContinuation = false;
+  // HACK for browser event / dialog handling.  Sometimes when we prompt the user to save
   // the browser doesn't show the new or open dialog, and you have to invoke the command again and
   // try a different timing when you answer the prompt to save.  So, let's try not prompting the
   // second time the command is invoked.
   if (g.isDirty && 
       // Don't prompt to save if user just denied saving and had to re-invoke new/open game
       ! (lastCmd.type === CommandTypes.SavePromptHack && lastCmd.cookie.dirtyGame === g)) {
-    // g.message must be set if this is running, and the board is dirty.
-    const savep = await g.message!.confirm?.("Game is unsaved, OK save, Cancel/Esc leave unsaved.")
-    if (! savep)
-      setLastCommand({ type: CommandTypes.SavePromptHack, cookie: { dirtyGame: g } })
-    else {
-      if (g.saveCookie !== null) {
-        // todo no op
-        fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
-      } else {
-        const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
-        if (tmp !== null) {
-          g.saveGameFileInfo(tmp.cookie, tmp.fileName);
-        }
-      }
-    }
+    await message("Game is unsaved.  Confirm saving game.",
+      { title: "Confirm Saving Game", primary: "Save", secondary: "Don’t Save",
+        onConfirm: async () => {
+          if (g.saveCookie !== null) {
+             fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
+             g.isDirty = false;
+           } else {
+             const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
+             if (tmp !== null) {
+               g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+               g.isDirty = false;
+             }
+           }
+           await continuaton(); // file opening, new game, etc.
+           ranContinuation = true;
+        },
+        onCancel: async () => {
+          setLastCommand({ type: CommandTypes.SavePromptHack, cookie: { dirtyGame: g } })
+          await continuaton(); // file opening, new game, etc.
+          ranContinuation = true;
+        },
+      });
   } else {
     // Clean up autosave file to avoid dialog when re-opening about unsaved file edits.
     // IF the user saved to cookie, then WriteGame cleaned up the auto save file.
@@ -505,8 +587,55 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
       // Unnamed scratch game: clean up the unnamed autosave
       // await g.deleteUnnamedAutoSave();
     }
-  }
-}
+   }
+  if (! ranContinuation) continuaton();
+} // checkDirtySave()
+//
+// WORKING VERSION WITH LAST CMD HACK TO AVOID BROWSER REFUSING TO OPEN FILES, before all the
+// continuations passed down from doOpenButtonCmd, startNewGameFlow, etc., through checkDirtySave,
+// to MessageDialog.
+//
+// async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCommand,
+//                                setLastCommand: (c: LastCommand) => void): Promise<void> {
+//   // Save the current comment back into the model
+//   g.saveCurrentComment();
+//   // Consider HACK for browser event / dialog handling.  Sometimes when we prompt the user to save
+//   // the browser doesn't show the new or open dialog, and you have to invoke the command again and
+//   // try a different timing when you answer the prompt to save.  So, let's try not prompting the
+//   // second time the command is invoked.
+//   if (g.isDirty && 
+//       // Don't prompt to save if user just denied saving and had to re-invoke new/open game
+//       ! (lastCmd.type === CommandTypes.SavePromptHack && lastCmd.cookie.dirtyGame === g)) {
+//     // g.message must be set if this is running, and the board is dirty.
+//     const savep = await g.message!.confirm?.("Game is unsaved, OK save, Cancel/Esc leave unsaved.")
+//     if (! savep)
+//       setLastCommand({ type: CommandTypes.SavePromptHack, cookie: { dirtyGame: g } })
+//     else {
+//       if (g.saveCookie !== null) {
+//         // todo no op
+//         fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
+//       } else {
+//         const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
+//         if (tmp !== null) {
+//           g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+//         }
+//       }
+//     }
+//   } else {
+//     // Clean up autosave file to avoid dialog when re-opening about unsaved file edits.
+//     // IF the user saved to cookie, then WriteGame cleaned up the auto save file.
+//     // If user saved to a new file name, then there was no storage or specific autosave file.
+//     // If the user didn't save, still clean up the autosave since they don't want it.
+//     if (g.saveCookie) {
+//       // If game had a saveCookie, we can compute an autosave name
+//       // const autoName = g.getAutoSaveName(g.saveCookie);
+//       // await g.deleteAutoSave(autoName);
+//     } else {
+//       // Unnamed scratch game: clean up the unnamed autosave
+//       // await g.deleteUnnamedAutoSave();
+//     }
+//   }
+// }
 
 /// doOpenGetFileGame in the C# code had to cover the UI to prevent mutations and then read the
 /// file and made the new game.  Here we just have a try-catch in case file processing throws.
