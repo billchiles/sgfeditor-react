@@ -79,9 +79,12 @@ export const browserFileBridge: FileBridge = {
     }
     // Fallback: no handle support -> download
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([data], { type: "text/plain" }));
+    const url = URL.createObjectURL(new Blob([data], { type: "text/plain" }));
+    a.href = url;
     a.download = suggestedName;
     a.click();
+    // Revoke the blob URL on the next tick so the click has time to start navigation.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
     return { fileName: suggestedName, cookie: null };
   },
 
@@ -103,9 +106,12 @@ export const browserFileBridge: FileBridge = {
     }
     // Fallback: download (no persistent cookie possible)
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([data], { type: "text/plain" }));
+    const url = URL.createObjectURL(new Blob([data], { type: "text/plain" }));
+    a.href = url;
     a.download = suggestedName;
     a.click();
+    // Clean up the object URL immediately after the click is dispatched.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
     return { fileName: suggestedName, cookie: null };
   },
 

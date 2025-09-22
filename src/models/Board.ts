@@ -113,25 +113,25 @@ export class Board {
   /// boardModelAsSTring returns a string to lightly display board state for debugging purposes.
   /// This is very old, first code debugging support.
   ///
-  boardModelAsSTring (): string {
-    let res = "";
-    for (let row = 0; row < this.size; row++) {
-      for (let col = 0; col < this.size; col++) {
-        const m = this.moves[row][col];
-        if (m == null) {
-          res += "+";
-        } else if (m.color === "white") {
-          res += "O";
-        } else if (m.color === "black") {
-          res += "X";
-        } else {
-          res += "?";
-        }
-      }
-      res += "\n";
-    }
-    return res;
-  }
+  // boardModelAsString (): string {
+  //   let res = "";
+  //   for (let row = 0; row < this.size; row++) {
+  //     for (let col = 0; col < this.size; col++) {
+  //       const m = this.moves[row][col];
+  //       if (m == null) {
+  //         res += "+";
+  //       } else if (m.color === "white") {
+  //         res += "O";
+  //       } else if (m.color === "black") {
+  //         res += "X";
+  //       } else {
+  //         res += "?";
+  //       }
+  //     }
+  //     res += "\n";
+  //   }
+  //   return res;
+  // }
 
 } // Board class
 

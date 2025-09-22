@@ -1,5 +1,7 @@
 /// MessageDialog — minimal 2-button modal that returns a boolean and can run
 /// follow-up actions inside the button click (to preserve browser user-activation state).
+/// Can use Game.ts's MessageOrQuery, supplied by AppGlobals.tsx's browserMessageOrQuery, confirm if
+/// we are not trying to prompt to open or save files after awaiting the message.
 ///
 /// WHY THIS EXISTS
 ///  - Browser-native file pickers (open/saveAs) require a "transient user activation".

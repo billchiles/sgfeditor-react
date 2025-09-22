@@ -24,17 +24,14 @@
 ///    Modal portals into document.body, locks body scroll, and paints the dialog.
 /// Seeding the form
 ///    Inside GameInfoDialog, a useEffect runs when open becomes true.
-///    The useEffect calls computeSeed(game), which:
-/// XXX rewrite
-///       prefers model fields (g.playerBlack, g.playerWhite, g.komi, g.comments),
-///       else uses overlay (g.miscGameInfo[key][0]),
-///       else falls back to parsed root props (g.parsedGame.nodes.properties[key][0]).
+///    The useEffect calls intiGameInfoDlg(game), which:
+///       some info from game fields (g.playerBlack, g.playerWhite, g.komi, g.comments)
+///       info from game.miscGameInfo supercedes game.parsedGame.nodes.properties
 ///    It then setState for all inputs (PB/PW/KM/… and comment text with \n) -- dialog maintains its state
 ///    A requestAnimationFrame focuses the “Player Black” input.
 /// User edits stuff and hits OK (or press Enter)
 ///    The form onSubmit={handleOk} prevents default and calls the parent’s onConfirm(current-fields-payload).
 /// Applying changes to the model (in App.tsx overlay’s onConfirm)
-/// XXX rewrite
 ///    Compare new values to the model; for each difference:
 ///       Update the field on the Game (g.playerBlack, g.playerWhite, g.komi, etc.).
 ///       Set g.isDirty = true.

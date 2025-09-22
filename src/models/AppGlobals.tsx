@@ -184,17 +184,54 @@ type ProviderProps = {
 //// Messaging for Model
 ///
 
-/// Quick and dirty messaging and confirming with user for model code.  Could have better, custom UI,
-/// but maybe good enough is just fine :-).
+/// I really should just move to my MessageDialog, and not use MessageOrConfirm/alert/confirm.
+/// Moving to MessageDialog may be the only way in Electron shell, but I want to keep the
+/// old/bootstrapping code around for now.
+///
+let USE_MESSAGE_DIALOG = true;
+/// Need GameProvider to set this when it gets openMessageDialog so that we have access to it.  See
+/// setMessageDialogOpener.
+let messageDialogOpener: | ((text: string, opts?: ConfirmOptions) => Promise<boolean>) | null 
+    = null;
+/// Turn MessageDialog usage on/off at runtime (leave false to use alert/confirm).  Don't really
+/// need this, will likely just change the default false to true to play with this.
+export function setUseMessageDialog(flag: boolean) {
+  USE_MESSAGE_DIALOG = !!flag;
+}
+
+// Provider wires this with App.tsx's openMessageDialog when available.
+export function setMessageDialogOpener(
+  fn: ((text: string, opts?: ConfirmOptions) => Promise<boolean>) | null
+) {
+  messageDialogOpener = fn;
+}
+
+/// Quick and dirty messaging and confirming with user for model code used in early development
+/// time, but now we have MessageDialog.  Updated this code to use a global flag to either do the
+/// old bootstrapping behavior, or use the new MessageDialog so that I can play with that.  Two
+/// things to NOTE:
+///  * using game.message.confirm still has the old behavior of only showing OK/Cancel and needs
+///    messages to be clear what each button means
+///  * using this confirm doesn't leverage the MessageDialog continuation to solve the user 
+///    activation issue when asking to save a dirty game and then trying to open a file
 ///
 const browserMessageOrQuery: MessageOrQuery = {
   //  message: (msg) => alert(msg),
   //  confirm: async (msg) => window.confirm(msg),
   message: (msg: string) => {
-    alert(msg);                   // synchronous
-    return Promise.resolve();     // present async surface
+    if (USE_MESSAGE_DIALOG && messageDialogOpener) {
+      // MessageDialog returns Promise<boolean>; discard result to match Promise<void>.
+      return messageDialogOpener(msg).then(() => {});
+    }
+    alert(msg);                       // synchronous
+    return Promise.resolve();         // present async surface
+
   },
   confirm: (msg: string) => {
+    if (USE_MESSAGE_DIALOG && messageDialogOpener) {
+      // For confirm we keep the boolean result.
+      return messageDialogOpener(msg);
+    }
     const ok = window.confirm(msg);        // synchronous
     return Promise.resolve(ok);            // present async surface
   },
@@ -267,6 +304,17 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const hotkeys: KeyBindingBridge = browserKeybindings;
   //const isElectron = !!(window as any)?.process?.versions?.electron;
   const commonKeyBindingsHijacked = hotkeys.commonKeyBindingsHijacked; //!isElectron; 
+  const lastCommandRef = React.useRef<LastCommand>({ type: CommandTypes.NoMatter });
+  const getLastCommand = React.useCallback(() => lastCommandRef.current, []);
+  const setLastCommand = React.useCallback((c: LastCommand) => { lastCommandRef.current = c; }, []);
+  // Keep the top-level opener function in sync with what App.tsx provided.  May not use this in the
+  // end, but for now can use game.message.message or openMessageDialog(msg).  Can't substitute
+  // game.message.confirm for openMessageDialog when need a continuation to run in the button click's
+  // user activation context.
+  useEffect(() => {
+    setMessageDialogOpener(openMessageDialog ?? null);
+    return () => setMessageDialogOpener(null);
+  }, [openMessageDialog]);
   //
   // One place to kick off the New Game flow (pre-check dirty, ask UI to open modal)
   // My first solution to avoid browser losing user activation state and failing file prompt...
@@ -276,9 +324,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   //   await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand);
   //   openNewGameDialog?.();
   // }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand]);
-  const lastCommandRef = React.useRef<LastCommand>({ type: CommandTypes.NoMatter });
-  const getLastCommand = React.useCallback(() => lastCommandRef.current, []);
-  const setLastCommand = React.useCallback((c: LastCommand) => { lastCommandRef.current = c; }, []);
   const startNewGameFlow = useCallback(async () => {
     const lastCmd = getLastCommand();
     setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
@@ -490,7 +535,6 @@ async function doOpenButtonCmd (
   //   // Show existing game, updating games MRU and current game.
   //   addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
   // } else {
-  //   // TODO test failures and cleanups or no cleanup needed
   //   await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
   //                          {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames,
   //                           getDefaultGame, setDefaultGame });
@@ -612,7 +656,6 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
 //       setLastCommand({ type: CommandTypes.SavePromptHack, cookie: { dirtyGame: g } })
 //     else {
 //       if (g.saveCookie !== null) {
-//         // todo no op
 //         fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
 //       } else {
 //         const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
@@ -1057,7 +1100,6 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
 
 }
 
-
 /// isEditingTarget return true if the element that sourced the event has user editable content,
 /// as text boxes, <p>'s where iscontenteditable=true is set, <div>'s, etc.
 ///
@@ -1077,11 +1119,10 @@ function isEditingTarget (t: EventTarget | null): boolean {
 }
 
 
-  /// todo -- consider checkDirtySave, confirm not losing comment changes
   async function gotoNextGameCmd(deps : CmdDependencies, last: LastCommand): Promise<void> {
     const games = deps.getGames();
     if (games.length < 2) {
-      alert("Only one game open currently.  Can't switch games.")
+      deps.gameRef.current.message?.message("Only one game open currently.  Can't switch games.");
       deps.setLastCommand( { type: CommandTypes.NoMatter });
       return;
     }

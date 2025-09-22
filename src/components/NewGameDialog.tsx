@@ -52,10 +52,11 @@ export type NewGameDefaults = { handicap: number; komi: string };
 
 export type NewGameResult = { white: string; black: string; handicap: number; komi: string;};
 
-export default function NewGameDialog({ open, onClose, onCreate, defaults,}: 
+export default function NewGameDialog({ open, onClose, onCreate, defaults, message, }: 
                                       { open: boolean; onClose: () => void;
                                         onCreate: (result: NewGameResult) => void;
-                                        defaults: NewGameDefaults;}) {
+                                        defaults: NewGameDefaults; 
+                                        message: (text: string) => Promise<void>; }) {
   // Keep text while editing; parse/validate on Create.
   const [handicapText, setHandicapText] = useState<string>(String(defaults.handicap ?? 0));
   const [komi, setKomi]                 = useState<string>(defaults.komi ?? "6.5");
@@ -81,7 +82,8 @@ export default function NewGameDialog({ open, onClose, onCreate, defaults,}:
     e?.preventDefault();
     const h = parseInt(handicapText.trim() === "" ? "0" : handicapText, 10);
     if (!Number.isFinite(h) || h < 0 || h > 9) {
-      window.alert("Handicap must be an integer from 0–9 (use 0 for no handicap).");
+      //window.alert("Handicap must be an integer from 0–9 (use 0 for no handicap).");
+      message("Handicap must be an integer from 0–9 (use 0 for no handicap)."); 
       return;
     }
     const k = (komi.trim() === "" ? "6.5" : komi.trim());

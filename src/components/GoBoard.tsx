@@ -123,6 +123,8 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
   ///
   const handleClick = useCallback(
     async (e: React.MouseEvent<SVGSVGElement>) => {
+      debugAssert(appGlobals !== null && appGlobals !== undefined, 
+                  "AppGlobals missing: how could someone click before we're ready?!.");
       // Don't change behavior on repeated clicks
       appGlobals.setLastCommand( {type: CommandTypes.NoMatter }); 
       const svg = e.currentTarget;
@@ -151,12 +153,19 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
       else if (shift) { curGame.toggleAdornment(AdornmentKinds.Square, row, col); return; }
       else if (alt) { curGame.toggleAdornment(AdornmentKinds.Letter, row, col); return; }
       /// Normal click...
-      if (curBoard.moveAt(row, col) !== null) {
-        alert("You can't play on an occupied point.");
+      const curMove = curGame.currentMove;
+      if (curMove !== null && curMove.row === row && curMove.column === col) {
+        if (curMove.next === null)
+          curGame.cutMove();
+        else
+          void curGame.message!.message!("Tapping last move to undo only works if there is no " +
+                                         "sub tree hanging from it.\nPlease use delete/Cut Move.");
+
+      } else if (curBoard.moveAt(row, col) !== null) {
+        void curGame.message!.message!("You can't play on an occupied point.");
         return;
-      }
-      // Make move in the game model via GameContext/appGlobals, bump version to re-render.
-      if (appGlobals !== null) {//appGlobals?.game
+      } else {
+        // Make move in the game model via GameContext/appGlobals, bump version to re-render.
         const m = await curGame.makeMove(row, col);
         if (m !== null) {
           // Game.makeMove updates the model & provider bumps version -> memo below will re-run
@@ -164,8 +173,6 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
           appGlobals.bumpTreeLayoutVersion();
           appGlobals.bumpTreeHighlightVersion();
         }
-      } else {
-        console.error("AppGlobals missing: how could someone click before we're ready?!.");
       }
     },
     // gpt5 thinks this is right:

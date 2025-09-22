@@ -46,6 +46,12 @@ export default function App() {
   const [showGameInfoDlg, setShowGameInfoDlg] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
   const [msgReq, setMsgReq] = useState<MessageRequest | null>(null);
+  // This message function is what GameProvider makes available as openMessageDialog.  Calling this
+  // immediately runs the lambda argument to the Promise constructor, which in turn hands to the
+  // lambda a "resolve" (can also pass a "reject", which we don't use).  Storing the msgReq and
+  // msgOpen cause a state change and re-render which shows the dialog.  The resolve is the Promise's
+  // continuation for a success case.  Calling the resolve later passes our true/false result to the
+  // caller of message/openMessageDialog.  The dialog knows in its onclose() to reset the state vars.
   function message (text: string, opts?: ConfirmOptions): Promise<boolean> {
     return new Promise<boolean>((resolve) => { setMsgReq({ text, opts, resolve });
                                                setMsgOpen(true); });
@@ -56,7 +62,8 @@ export default function App() {
                         openGameInfoDialog={() => setShowGameInfoDlg(true)} 
                         openMessageDialog={message} >
             <AppContent commentRef={commentRef} />
-            <NewGameOverlay open={showNewGameDlg} onClose={() => setShowNewGameDlg(false)} />
+            <NewGameOverlay open={showNewGameDlg} onClose={() => setShowNewGameDlg(false)}
+                            message={(t) => message(t).then(() => {})} />
             <HelpOverlay open={showHelpDlg} onClose={() => setShowHelpDlg(false)}/>
             <GameInfoOverlay open={showGameInfoDlg} onClose={() => setShowGameInfoDlg(false)} />
             <MessageDialog open={msgOpen} message={msgReq} 
@@ -230,7 +237,9 @@ function AppContent({
 //// Dialog Overlays to 
 
 /// Renders the New Game dialog inside the game provider's context
-function NewGameOverlay ({ open, onClose, }: { open: boolean; onClose: () => void;}) {
+function NewGameOverlay ({ open, onClose, message, }: 
+                         { open: boolean; onClose: () => void;
+                           message: (text: string) => Promise<void>; }) {
   const appGlobals = useContext(GameContext);
   if (!appGlobals) return null;
   return (
@@ -249,6 +258,7 @@ function NewGameOverlay ({ open, onClose, }: { open: boolean; onClose: () => voi
         handicap: appGlobals.getGame().handicap ?? 0,
         komi: appGlobals.getGame().komi ?? "6.5",
       }}
+      message={message}
     />
   );
 }

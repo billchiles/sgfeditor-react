@@ -1017,7 +1017,7 @@ buildSGFStringFlipped (): string {
       this.onChange!();
       this.onTreeHighlightChange!()
     } else {
-      alert("Already on highest branch.");
+      this.message!.message("Already on highest branch.");
     }
     return;
   } // moveBranchUp()
@@ -1047,7 +1047,7 @@ buildSGFStringFlipped (): string {
       this.onChange!();
       this.onTreeHighlightChange!();
     } else {
-      alert("Already on highest branch.");
+      this.message!.message("Already on highest branch.");
     }
     return;
   } // moveBranchDown()
