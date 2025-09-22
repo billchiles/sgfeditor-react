@@ -2112,13 +2112,10 @@ export function createGame (size : number, handicap : number, komi : string,
                             gamemgt: {curGame: Game, setGame: (g: Game) => void, 
                                       getGames: () => Game[], setGames: (gs: Game[]) => void,
                                       getDefaultGame: () => Game | null, 
-                                      setDefaultGame: (g: Game | null) => void}):
-        Game {
+                                      setDefaultGame: (g: Game | null) => void}): Game {
     var g = new Game(size, handicap, komi, handicapStones, all_white);
     addOrGotoGame({g}, gamemgt.curGame, gamemgt.getGames(), gamemgt.setGame, gamemgt.setGames,
                   gamemgt.getDefaultGame, gamemgt.setDefaultGame);
-    // setGames([g, ...getGames()]);
-    // setGame(g); // musr call this second because it delete a not dirty default game
     return g;
 }
 

@@ -215,12 +215,12 @@ class OpfsStorage implements AppStorageBridge {
     this.rootPromise = (navigator as any).storage.getDirectory();
   }
 
-  private async getFolder(): Promise<FileSystemDirectoryHandle> {
+  private async getFolder (): Promise<FileSystemDirectoryHandle> {
     const root = await this.rootPromise;
     return await root.getDirectoryHandle(this.folder, { create: true });
   }
 
-  async writeText(name: string, text: string): Promise<void> {
+  async writeText (name: string, text: string): Promise<void> {
     const dir = await this.getFolder();
     const fh = await dir.getFileHandle(name, { create: true });
     const w = await fh.createWritable();
@@ -228,7 +228,7 @@ class OpfsStorage implements AppStorageBridge {
     await w.close();
   }
 
-  async readText(name: string): Promise<string | null> {
+  async readText (name: string): Promise<string | null> {
     try {
       const dir = await this.getFolder();
       const fh = await dir.getFileHandle(name, { create: false });
@@ -239,7 +239,7 @@ class OpfsStorage implements AppStorageBridge {
     }
   }
 
-  async delete(name: string): Promise<boolean> {
+  async delete (name: string): Promise<boolean> {
     try {
       const dir = await this.getFolder();
       await dir.removeEntry(name);
@@ -249,7 +249,7 @@ class OpfsStorage implements AppStorageBridge {
     }
   }
 
-  async exists(name: string): Promise<boolean> {
+  async exists (name: string): Promise<boolean> {
     try {
       const dir = await this.getFolder();
       await dir.getFileHandle(name, { create: false });
@@ -259,29 +259,41 @@ class OpfsStorage implements AppStorageBridge {
     }
   }
 
-  async list(): Promise<string[]> {
-    const dir = await this.getFolder();
-    const out: string[] = [];
-    // @ts-ignore: async iterator is supported in modern TS lib
-    for await (const [key, entry] of (dir as any).entries()) {
-      if (entry && entry.kind === "file") out.push(key);
-    }
-    return out;
-  }
-
-  async writeJSON<T>(name: string, value: T): Promise<void> {
-    await this.writeText(name, JSON.stringify(value));
-  }
-
-  async readJSON<T>(name: string): Promise<T | null> {
-    const s = await this.readText(name);
-    if (s == null) return null;
+  async timestamp (name: string): Promise<number | null> {
     try {
-      return JSON.parse(s) as T;
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle(this.folder, { create: true })
+      const handle = await dir.getFileHandle(name);
+      const file = await handle.getFile();
+      return typeof file.lastModified === "number" ? file.lastModified : null;
     } catch {
       return null;
     }
   }
+
+  // async list(): Promise<string[]> {
+  //   const dir = await this.getFolder();
+  //   const out: string[] = [];
+  //   // @ts-ignore: async iterator is supported in modern TS lib
+  //   for await (const [key, entry] of (dir as any).entries()) {
+  //     if (entry && entry.kind === "file") out.push(key);
+  //   }
+  //   return out;
+  // }
+
+  // async writeJSON<T>(name: string, value: T): Promise<void> {
+  //   await this.writeText(name, JSON.stringify(value));
+  // }
+
+  // async readJSON<T>(name: string): Promise<T | null> {
+  //   const s = await this.readText(name);
+  //   if (s == null) return null;
+  //   try {
+  //     return JSON.parse(s) as T;
+  //   } catch {
+  //     return null;
+  //   }
+  // }
 } // OpfsStorage class
 
 /// LocalStorageStorage is purely generalized defensive coding, should never need this.
@@ -292,21 +304,38 @@ class LocalStorageStorage implements AppStorageBridge {
 
   async writeText(name: string, text: string): Promise<void> {
     localStorage.setItem(this.key(name), text);
+    // Keep a tiny meta record for fallback stores (no native timestamp).
+    localStorage.setItem(`${this.prefix}${name}:meta`, Date.now.toString());
   }
 
   async readText(name: string): Promise<string | null> {
     return localStorage.getItem(this.key(name));
   }
 
-  async delete(name: string): Promise<boolean> {
+  async delete (name: string): Promise<boolean> {
     const k = this.key(name);
     const had = localStorage.getItem(k) !== null;
     localStorage.removeItem(k);
+    localStorage.removeItem(`${this.prefix}${name}:meta`);
     return had;
   }
 
-  async exists(name: string): Promise<boolean> {
+  async exists (name: string): Promise<boolean> {
     return localStorage.getItem(this.key(name)) !== null;
+  }
+
+  async timestamp (name: string): Promise<number | null> {
+    const v = localStorage.getItem(`${this.prefix}${name}`);
+    if (v === null) return null;
+    const metaRaw = localStorage.getItem(`${this.prefix}${name}:meta`);
+    if (metaRaw) {
+      try {
+        return parseInt(metaRaw, 10);
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   // async list(): Promise<string[]> {

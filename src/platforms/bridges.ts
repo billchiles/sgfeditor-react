@@ -40,6 +40,7 @@ export interface AppStorageBridge {
   readText(name: string): Promise<string | null>;
   delete(name: string): Promise<boolean>;
   exists(name: string): Promise<boolean>;
+  timestamp(name: string): Promise<number | null>;
   // list(): Promise<string[]>; // best-effort; may be empty in fallback
   // // helpers
   // writeJSON<T>(name: string, value: T): Promise<void>;
