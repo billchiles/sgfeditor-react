@@ -19,6 +19,7 @@ import type { MessageOrQuery } from "./Game";
 //import { StoneColors, Board, Move, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
 import { browserFileBridge, browserAppStorageBridge, browserKeybindings } from "../platforms/browser-bridges";
+import { fileBridgeElectron, keyBindingBridgeElectron } from '../platforms/electron-bridges';
 import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platforms/bridges";
 import {parseFile, SGFError, ParsedNode} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
@@ -196,6 +197,8 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // SETUP LOTS OF GLOBAL STATE
   //
   //const size = DEFAULT_BOARD_SIZE;
+  //
+  // GAMES
   // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
   // render, which would replace game and all the move state (new Game).  This holds it's value
   const [defaultGame, setDefaultGame] = useState<Game | null>(null);
@@ -206,11 +209,15 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // is not dirty, and if you setgames to a list that included the default game after calling setgame
   // you would just restore it
   const [games, setGames] = useState<Game[]>([]);
+  //
+  // COMMENTS AND MESSAGING from the model
   // Enable first game to access comments and messaging/confirming UI.
   // These execute every render but store teh same functions every time.
   gameRef.current.getComments = getComment;
   gameRef.current.setComments = setComment;
   gameRef.current.message = browserMessageOrQuery;
+  //
+  // VERSIONING RENDERING
   // game.onchange = bumpVersion wired up below in a useEffect, same with setting defaultGame and games
   // useState initial value used first render, same value every time unless call setter.
   const [version, setVersion] = useState(0); 
@@ -219,12 +226,15 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const bumpTreeLayoutVersion = useCallback(() => setTreeLayoutVersion(v => v + 1), []);
   const [treeHighlightVersion, setTreeHighlightVersion] = useState(0);
   const bumpTreeHighlightVersion    = useCallback(() => setTreeHighlightVersion(v => v + 1), []);
+  //
+  // TREEVIEW MAP
   // Holds a function that TreeView will provide to swap a new Move for a ParsedNode
   const treeRemapperRef = useRef<((oldKey: ParsedNode, newMove: Move) => void) | null>(null);
   const setTreeRemapper = useCallback((fn: ((oldKey: ParsedNode, newMove: Move) => void) | null) => {
     treeRemapperRef.current = fn;
   }, []);
-  // stable accessors for the current game, getGame never changes, setGame updates with version
+  //
+  // STABLE ACCESSORS for the current game, getGame never changes, setGame updates with version
   const getGame = useCallback(() => gameRef.current, []);
   // SETGAME -- Callers must call this after setGames if there is a command flow within one render
   //            cycle that calls both so that any computed games list doesn't put back defaultgame
@@ -245,18 +255,25 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   }, [bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion, getComment, setComment]);
   // useState initial value used first render, same every time unless call setter.
   const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);
-  const fileBridge: FileBridge = browserFileBridge;
-  const appStorageBridge: AppStorageBridge = browserAppStorageBridge;
-  const hotkeys: KeyBindingBridge = browserKeybindings;
+  //
+  // PLATFORM BRIDGES
   //const isElectron = !!(window as any)?.process?.versions?.electron;
+  const isElectron = typeof window !== 'undefined' && !!window.electron;
+  const fileBridge = isElectron ? fileBridgeElectron : browserFileBridge;
+  //const fileBridge: FileBridge = browserFileBridge;
+  const appStorageBridge: AppStorageBridge = browserAppStorageBridge;
+  //const hotkeys: KeyBindingBridge = browserKeybindings;
+  const hotkeys: KeyBindingBridge = isElectron ? keyBindingBridgeElectron : browserKeybindings;
   const commonKeyBindingsHijacked = hotkeys.commonKeyBindingsHijacked; //!isElectron; 
+  //
+  // LAST CMD AND browswerMessageORQuery dialog opener
   const lastCommandRef = React.useRef<LastCommand>({ type: CommandTypes.NoMatter });
   const getLastCommand = React.useCallback(() => lastCommandRef.current, []);
   const setLastCommand = React.useCallback((c: LastCommand) => { lastCommandRef.current = c; }, []);
-  // Keep the top-level opener function in sync with what App.tsx provided.  May not use this in the
-  // end, but for now can use game.message.message or openMessageDialog(msg).  Can't substitute
-  // game.message.confirm for openMessageDialog when need a continuation to run in the button click's
-  // user activation context.
+  // Keep the top-level opener function in sync with what App.tsx provided.  Makes dialog opener
+  // available to browserMessageOrQuery, which chooses bootstrap, old, native message/confirm, or it
+  // chooses openMessageDialog(msg).  Can't substitute game.message.confirm for openMessageDialog 
+  // when need a continuation to run in the button click's user activation context.
   useEffect(() => {
     setMessageDialogOpener(openMessageDialog ?? null);
     return () => setMessageDialogOpener(null);
