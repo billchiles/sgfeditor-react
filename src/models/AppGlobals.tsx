@@ -275,9 +275,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const startNewGameFlow = useCallback(async () => {
     const lastCmd = getLastCommand();
     setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
-    await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, openMessageDialog!,
-                         async () => { openNewGameDialog?.(); });
-  }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand]);
+    await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
+                         openMessageDialog!, async () => { openNewGameDialog?.(); });
+  }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand,appStorageBridge]);
   //
   // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
   // This way the model and UI are isolated, but the model can signal model changes for re-rendering
@@ -745,7 +745,7 @@ async function doOpenButtonCmd (
     focusOnRoot();
   }; // whole body as doOpenContinuation
   // 
-  await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, 
+  await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
                        showMessage!, doOpenContinuation);
   //
   // WORKING VERSION WITH LAST CMD HACK TO AVOID BROWSER REFUSING TO OPEN FILES, before all the
@@ -826,7 +826,7 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
 /// Open dialog (and sometimes your New Game modal timing) never shows.
 ///
 async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCommand,
-                               setLastCommand: (c: LastCommand) => void,
+                               setLastCommand: (c: LastCommand) => void, appStorage: AppStorageBridge,
                                message: ShowMessageDialogSig,
                                continuaton: () => Promise<void>): Promise<void> {
   // Save the current comment back into the model
@@ -861,20 +861,14 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
           ranContinuation = true;
         },
       });
-  } else {
-    // Clean up autosave file to avoid dialog when re-opening about unsaved file edits.
-    // IF the user saved to cookie, then WriteGame cleaned up the auto save file.
-    // If user saved to a new file name, then there was no storage or specific autosave file.
-    // If the user didn't save, still clean up the autosave since they don't want it.
-    if (g.saveCookie) {
-      // If game had a saveCookie, we can compute an autosave name
-      // const autoName = g.getAutoSaveName(g.saveCookie);
-      // await g.deleteAutoSave(autoName);
-    } else {
-      // Unnamed scratch game: clean up the unnamed autosave
-      // await g.deleteUnnamedAutoSave();
-    }
-   }
+  } 
+  // Clean up autosave file to avoid dialog when re-opening the SGF file later.  Why?
+  // IF the user saved, then theyy don't need the auto save file.
+  // If the user didn't save, they don't care about the auto save file.
+  const autoSaveName = getAutoSaveName(g.filebase);
+  if (await appStorage.exists(autoSaveName))
+    await appStorage.delete(autoSaveName); 
+
   if (! ranContinuation) continuaton();
 } // checkDirtySave()
 //
