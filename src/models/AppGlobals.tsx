@@ -327,9 +327,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
       try {
         if (! await appStorageBridge.exists(UNNAMED_AUTOSAVE)) return;
         const autoSaveTime = await appStorageBridge.timestamp(UNNAMED_AUTOSAVE);
-        const autosaveAge = autoSaveTime != null ? (Date.now() - autoSaveTime) 
+        const autosaveAge = autoSaveTime !== null ? (Date.now() - autoSaveTime) 
                                                  : Number.POSITIVE_INFINITY;
-        if (autosaveAge > UNNAMED_AUTOSAVE_TIMEOUT * 60 * 60 * 1000) { // convert to milliseconds
+        if (autosaveAge > UNNAMED_AUTOSAVE_TIMEOUT_HOURS * 60 * 60 * 1000) { // convert to ms
           await appStorageBridge.delete(UNNAMED_AUTOSAVE); 
           return; 
         }
@@ -372,12 +372,27 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   //
   // AUTO SAVE
   useEffect(() => {
-    // Save every 45s if dirty
     const id = window.setInterval(
       // todo hmmmm, never walk games list for unsaved games, just do current
-      () => { void maybeAutoSave(gameRef.current, appStorageBridge); }, 45_000);
+      () => { void maybeAutoSave(gameRef.current, appStorageBridge); }, AUTOSAVE_INTERVAL);
     return () => { window.clearInterval(id)};
   }, [gameRef, appStorageBridge]); // mount/unmount only
+  // OPTIONAL: Inactivity autosave paired with above.
+  // THIS IS CRAP FROM GPT5, buggy out of the gate, have clean solution, but not here now.
+  // Saves a few seconds after the last model change; if user keeps editing, we defer via useEffect
+  // re-running on version tick and running its cleanup that cancels the previous timer.
+  // const lastSaveRef = React.useRef<number>(Date.now());
+  // useEffect(() => {
+  //   // If nothing changed, nothing to do; 'version' ticks only when model changes.
+  //   const now = Date.now();
+  //   // sinceLastSave includes above interval saves because If the 45s interval just saved, this will be near 0 and we won't double-save.
+  //   const sinceLastSave = now - lastSaveRef.current;
+  //   const tid = window.setTimeout(async () => {
+  //     await maybeAutoSave(gameRef.current, appStorageBridge);
+  //     lastSaveRef.current = Date.now();
+  //   }, AUTOSAVE_INACTIVITY_INTERVAL);
+  //   return () => window.clearTimeout(tid);
+  // }, [version, appStorageBridge]); // re-arm on each model change
   //
   // CMDDEPENDENCIES -- One object to pass to top-level commands that updates if dependencies change.
   // React takes functions anywhere it takes a value and invokes it to get the value if types match.
@@ -730,7 +745,7 @@ async function doOpenButtonCmd (
     // Check if file already open and in Games
     const games: Game[] = getGames();
     const openidx = games.findIndex(g => g.filename === fileName);
-    if (openidx != -1) {
+    if (openidx !== -1) {
       // Show existing game, updating games MRU and current game.
       addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
     } else {
@@ -774,7 +789,7 @@ async function doOpenButtonCmd (
   // // Check if file already open and in Games
   // const games: Game[] = getGames();
   // const openidx = games.findIndex(g => g.filename === fileName);
-  // if (openidx != -1) {
+  // if (openidx !== -1) {
   //   // Show existing game, updating games MRU and current game.
   //   addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
   // } else {
@@ -957,7 +972,7 @@ async function doOpenGetFileGame (
         // initial default game.  Did this before message call in C# since it cannot await in catch.
         // I think we want to use curgame here, not gameref, so we see the game that was current
         // when this function started executing.
-        undoLastGameCreation((cleanup.getGames().findIndex((g) => g === curgame)) != -1 ? 
+        undoLastGameCreation((cleanup.getGames().findIndex((g) => g === curgame)) !== -1 ? 
         // TODO not impl, need more helpers passed down, like setgames
                               curgame : null);
         }
@@ -1039,7 +1054,7 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
                                              setDefaultGame: (g: Game | null) => void}): 
       Promise<Game> {
   if (fileHandle !== null) {
-    debugAssert(data == "", "If fileHandle non-null, then data should not have contents yet???");
+    debugAssert(data === "", "If fileHandle non-null, then data should not have contents yet???");
     const tmp = await fileBridge.readText(fileHandle);
     if (tmp !== null)
       data = tmp;
@@ -1166,13 +1181,13 @@ function gameInfoCmd (curgame: Game, showGameInfo: () => void) {
   // in case we're on the empty board state and comment is modified.
   curgame.saveCurrentComment(); 
   // Lift parsed game properties to .miscGameInfo if it isn't already superceding game properties.
-  if (curgame.parsedGame != null) {
-    if (curgame.miscGameInfo == null) {
+  if (curgame.parsedGame !== null) {
+    if (curgame.miscGameInfo === null) {
       // If misc properties still in parsed structure, capture them all to pass them through
       // if user saves file.  When miscGameInfo non-null, it supercedes parsed structure.
       curgame.miscGameInfo = copyProperties(curgame.parsedGame.nodes!.properties);
     }
-  } else if (curgame.miscGameInfo == null)
+  } else if (curgame.miscGameInfo === null)
     curgame.miscGameInfo = {};
   // Launch dialog
   showGameInfo!();
@@ -1241,8 +1256,11 @@ const browserMessageOrQuery: MessageOrQuery = {
 //// Autosave
 ///
 
+const AUTOSAVE_INTERVAL = 45_000;
+const AUTOSAVE_INACTIVITY_INTERVAL = 5_000;
 const UNNAMED_AUTOSAVE = "unnamed-new-game.sgf";
-const UNNAMED_AUTOSAVE_TIMEOUT = 12;
+const UNNAMED_AUTOSAVE_TIMEOUT_HOURS = 12;
+const AUTOSAVE_APPSTORAGE_GC_DAYS = 7;  // 3?
 
 /// maybeAutoSave saves the current comment to the model, builds the SGF string, and writes it to
 /// the app storage.  This is lighterweight than the C# version where it shared normal writing code

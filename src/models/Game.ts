@@ -133,7 +133,7 @@ export class Game {
       if (handicap >= 8) { makeMove(4,10); makeMove(16,10); }
       if (handicap === 9) { makeMove(10,10); }
     } else {
-    debugAssert(handicapStones.length == handicap, 
+    debugAssert(handicapStones.length === handicap, 
                 "Handicap number is not equal to all black stones in parsed root node.");
     // TODO BUG -- Do not add moves to this.HandicapMoves, and do not add AB in GotoStart or
     // GotoSTartForGameSwap, which means these moves never get added back if hit Home key,
@@ -162,8 +162,8 @@ export class Game {
   //makeMove (row: number, column: number) : Move | null {
   async makeMove (row: number, col: number) : Promise<Move | null> {
     const curMove = this.currentMove;
-    const maybeBranching = (curMove != null && curMove.next != null) ||
-                           (curMove == null && this.firstMove != null);
+    const maybeBranching = (curMove !== null && curMove.next !== null) ||
+                           (curMove === null && this.firstMove !== null);
     // Construct the candidate move at the click location (pass if NoIndex), may replace this below
     const move = new Move(row, col, this.nextColor);
     if (!move.isPass && this.board.hasStone(row, col)) {
@@ -187,16 +187,16 @@ export class Game {
     // If we're branching, makeBranchingMove handles empty board branches, first move, next/prev, etc.
     if (maybeBranching) {
       const [retMove, hadParseErr] = this.makeBranchingMove(curMove, move);
-      if (retMove == null || hadParseErr) {
+      if (retMove === null || hadParseErr) {
         // NOTE, if we do not return here, ReplayMove below will report on the SGF issue, but
         // it puts up two dialogs which feels ugly (can get error msg by using arrows to next move).
         // Can fetch msg sometimes since we can flow through here now if only some moves in
         // branches had parsenode errors, but used to fully punt if any next move was bad.
-        const msg = retMove == null ? "" : (nextMoveGetMessage(retMove) ?? "");
+        const msg = retMove === null ? "" : (nextMoveGetMessage(retMove) ?? "");
         await this.message?.message(
           "You clicked where a next move exists in the game tree, but that move had bad properties " +
           "in the SGF file.\nYou cannot play further down that branch ... " + msg);
-        if (retMove == null) return null;
+        if (retMove === null) return null;
       }
       // If retMove is move, we added a new move, so mark dirty.
       if (retMove === move) {
@@ -255,7 +255,7 @@ export class Game {
   ///
   private makeBranchingMove (curMove: Move | null, move: Move): [Move | null, boolean] {
     let err = false;
-    if (curMove == null) {
+    if (curMove === null) {
       // branching at empty board
       const temp = this.makeBranchingMoveBranches(this.branches, this.firstMove, move);
       // Typescript ceremony over essence, can't just set move, can't let/var all three vars
@@ -295,11 +295,11 @@ export class Game {
   ///
   private makeBranchingMoveBranches(branches: Move[] | null, next: Move | null, newMove: Move):
       [Move | null, Move[] | null, boolean] {
-    if (branches == null) {
+    if (branches === null) {
       // We only get here when user is clicking and clicks the location of the next move (only next move)
       branches = next ? [next] : []; // Must pass non-null branches.
       const [move, err] = this.maybeUpdateBranches(branches, newMove);
-      if (move == null) {
+      if (move === null) {
         // Already move at location from file, but rendering it saw bad parsenode.
         // Since no good move to advance to, and just created branches, return null for branches.
         return [null, null, err];
@@ -539,7 +539,7 @@ gotoStart(): void {
   async replayMove (): Promise<Move | null> {
     const fixup = this.currentMove; // save for catch block
     // Advance this.currentMove
-    if (this.currentMove == null) {
+    if (this.currentMove === null) {
       this.currentMove = this.firstMove;
     } else {
       debugAssert(this.currentMove.next !== null, "Next button should be disabled if no next move.")
@@ -547,7 +547,7 @@ gotoStart(): void {
     }
     // Try to replay ...
     const [retMove, hadParseErr] = this.replayMoveUpdateModel(this.currentMove!); // ! def not null
-    if (retMove == null) {
+    if (retMove === null) {
       // Current move comes back if some branches had bad parsenodes, but some branches were good.
       // ! on this.message because must be defined if replaying, and ! on currentmove tested above
       await nextMoveDisplayError(this.message!.message, this.currentMove!); // ! cuz must be defined if replaying
@@ -595,7 +595,7 @@ gotoStart(): void {
       // const [ret, err] = this.replayMoveUpdateModel(next);
       // if (!ret) {
       //   if (err) this.message?.info?.("Encountered an SGF parse issue while advancing.");
-      if (this.replayMoveUpdateModel(next) == null) {
+      if (this.replayMoveUpdateModel(next) === null) {
         await nextMoveDisplayError(this.message!.message, next); // ! must be bound if running cmds.
         break;
       }
@@ -1008,7 +1008,7 @@ buildSGFStringFlipped (): string {
     }
     if (branches === null) return;
     const idx = branches.findIndex(m => m === next);
-    debugAssert(idx != -1, "WTF, next move must be in branches.");
+    debugAssert(idx !== -1, "WTF, next move must be in branches.");
     if (idx > 0) {
       if (curmove !== null)
         curmove.next = branches[idx - 1];
@@ -1038,7 +1038,7 @@ buildSGFStringFlipped (): string {
     }
     if (branches === null) return;
     const idx = branches.findIndex(m => m === next);
-    debugAssert(idx != -1, "WTF, next move must be in branches.");
+    debugAssert(idx !== -1, "WTF, next move must be in branches.");
     if (idx < branches.length - 1) {
       if (curmove !== null)
         curmove.next = branches[idx + 1];
@@ -1365,7 +1365,7 @@ buildSGFStringFlipped (): string {
           this.setCurrentBranch(0);
           next = curMove.next; // Update next, now that curMove is updated.
         }
-        if (this.replayMoveUpdateModel(next!) == null) {
+        if (this.replayMoveUpdateModel(next!) === null) {
           // had issue with rendering parsed node or conflicting location for pasted move
           this.currentMove = curMove;  // Restore state to clean up.
           return false;
@@ -1375,13 +1375,13 @@ buildSGFStringFlipped (): string {
       }
       // Select next moves branch correctly ...
       var branch = n[1];
-      if (branch == -1) break;
-      debugAssert(curMove.branches != null && branch > 0 && branch < curMove.branches.length,
+      if (branch === -1) break;
+      debugAssert(curMove.branches !== null && branch > 0 && branch < curMove.branches.length,
                   "Move path does not match game's tree.");
       this.currentMove = curMove; // Needs to be right for SetCurrentBranch.
       this.setCurrentBranch(branch);
       next = curMove.next; // Update next, now that curMove is updated.
-      if (this.replayMoveUpdateModel(next!) == null)
+      if (this.replayMoveUpdateModel(next!) === null)
         return false;
       curMove = next!; // until we get to the end, there is always a next
       next = curMove.next;
@@ -1463,7 +1463,7 @@ buildSGFStringFlipped (): string {
       if (branches.length === 1)
         this.branches = null; 
     }
-    if (this.parsedGame != null && this.parsedGame.nodes!.next != null && cut_move.parsedNode != null)
+    if (this.parsedGame !== null && this.parsedGame.nodes!.next !== null && cut_move.parsedNode !== null)
       // If we have a game with a parsed node, then we need to cut the first parsed node tree
       // too.  Need to check if cut_move.ParsedNode is null because it could have been added
       // after parsing file and have no ParsedNode.  It also could be an auto-save stashed a
@@ -1486,7 +1486,7 @@ buildSGFStringFlipped (): string {
       move.next = branches[0];
       if (branches.length = 1) move.branches = null;
     }
-    if (move.parsedNode != null && move.parsedNode.next != null && cut_move.parsedNode != null)
+    if (move.parsedNode !== null && move.parsedNode.next !== null && cut_move.parsedNode !== null)
       // If we have a Move with a parsed node, then we need to cut the parsed node tree
       // too.  If have Move for parsed node, and move does not have branches, then parsed
       // node does not either since we create Moves for parsed nodes ahead of fully rendering
@@ -1500,7 +1500,7 @@ buildSGFStringFlipped (): string {
   ///
   private cutNextParsedNode(pn: ParsedNode, cut_move: ParsedNode): void {
     const branches = pn.branches;
-    if (branches == null) {
+    if (branches === null) {
       pn.next = null;
     } else {
       const cut_index = branches.indexOf(cut_move);
@@ -1566,21 +1566,21 @@ buildSGFStringFlipped (): string {
   ///
   private async pasteMoveNextConflict (new_move: Move): Promise<boolean> {
     const curmove = this.currentMove;
-    const branches = curmove != null ? curmove.branches : this.branches;
-    // if (curmove != null)
+    const branches = curmove !== null ? curmove.branches : this.branches;
+    // if (curmove !== null)
     //   branches = curmove.branches;
     // else
     //   branches = this.branches;
     let error = false;
-    if (branches != null) {
+    if (branches !== null) {
       const already_move = branches.findIndex(
         (y) => new_move.row === y.row && new_move.column === y.column );
       error = already_move !== -1;
-    } else if (curmove != null) {
-      error = (curmove.next != null &&
+    } else if (curmove !== null) {
+      error = (curmove.next !== null &&
                curmove.next.row === new_move.row && curmove.next.column === new_move.column);
     } else
-      error = (this.firstMove != null &&
+      error = (this.firstMove !== null &&
                this.firstMove.row === new_move.row && this.firstMove.column === new_move.column);
     if (error) {
       await this.message?.message?.("You pasted a move that conflicts with a next move of the current move.");
@@ -1601,12 +1601,12 @@ buildSGFStringFlipped (): string {
       return;
     }
     const cur_move = this.currentMove;
-    if (cur_move != null)
+    if (cur_move !== null)
       pasteNextMove(cur_move, new_move);
     else {
-      if (this.firstMove != null) {
+      if (this.firstMove !== null) {
         // branching initial board state
-        if (this.branches == null)
+        if (this.branches === null)
           this.branches = [ this.firstMove, new_move ];
         else
           this.branches.push(new_move);
@@ -1620,7 +1620,7 @@ buildSGFStringFlipped (): string {
         this.firstMove = new_move;
         this.firstMove.number = 1;
       }
-      if (this.parsedGame != null && new_move.parsedNode != null)
+      if (this.parsedGame !== null && new_move.parsedNode !== null)
         pasteNextParsedNode(this.parsedGame.nodes!, new_move.parsedNode);
     }
     new_move.previous = cur_move;  // stores null appropriately when no current
@@ -1668,13 +1668,13 @@ buildSGFStringFlipped (): string {
     newmove.parsedNode = pnodes;
     const [resmove, err] = this.readyForRendering(newmove);
     // const resmove = stuff[0];
-    if (resmove == null || err) { // Issue with parsed node, cannot go forward.
+    if (resmove === null || err) { // Issue with parsed node, cannot go forward.
       // Current move comes back if some branches had bad parsenodes, but good moves existed. 
       const msg = nextMoveGetMessage(resmove as Move) ?? "";
       await this.message?.message?.(
         "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
         "in the SGF file.\nYou cannot play further down that branch... " + msg );
-      if (resmove == null) return null;
+      if (resmove === null) return null;
     }
     return newmove;
   }
@@ -1744,7 +1744,7 @@ function genParsedNodes(move: Move, flipped: boolean, size: number): ParsedNode 
     while (mmove !== null) {
       curNode.next = genParsedNode(mmove, flipped, size);
       curNode.next.previous = curNode;
-      if (mmove.branches == null) {
+      if (mmove.branches === null) {
           curNode = curNode.next;
           mmove = mmove.next;
       }
@@ -1755,7 +1755,7 @@ function genParsedNodes(move: Move, flipped: boolean, size: number): ParsedNode 
     }
   }
   // Only get here when move is null, or we're recursing on branches.
-  if (mmove != null) {
+  if (mmove !== null) {
     curNode.branches = [];
     for (const m of mmove.branches!) {
         const bn = genParsedNodes(m, flipped, size);
@@ -1949,7 +1949,7 @@ export async function createGameFromParsedGame
   } else {
     await curGame.message!.message(`"No SZ, size, property in .sgf.  Default is 19x19"`);
   }
-  if (size != Board.MaxSize) {
+  if (size !== Board.MaxSize) {
     throw new SGFError(`Only work with size 19 currently, got ${size}.`);
   }
   // Komi
@@ -2064,8 +2064,8 @@ function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
     const moves: Move[] = [];
     for (const n of pn.branches) {
       const mv = parsedNodeToMove(n, g.size);
-      if (mv == null) {
-        debugAssert(n.badNodeMessage != null, "parsedNodeToMove returned null without a message?!");
+      if (mv === null) {
+        debugAssert(n.badNodeMessage !== null, "parsedNodeToMove returned null without a message?!");
         // Mirror C#: surface the specific parse error.
         throw new SGFError(n.badNodeMessage!);
       }
@@ -2082,7 +2082,7 @@ function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
     else {
       m = parsedNodeToMove(pn.next, g.size);
       if (m === null) {
-        debugAssert(pn.next.badNodeMessage != null, 
+        debugAssert(pn.next.badNodeMessage !== null, 
                     "Failed to make Move from ParsedNode, but no error message provided.");
         throw new SGFError(pn.next.badNodeMessage);
       }
@@ -2135,7 +2135,7 @@ export function createGame (size : number, handicap : number, komi : string,
 function parsedNodeToMove (pn : ParsedNode, size : number) : Move | null {
   // Removed optimization to avoid computing msg again, due to experiment to taint nodes in sgfparser
   // so that clicking on treeview nodes can abort immediately (due to have a BadNodeMessage).
-  //if (n.BadNodeMessage != null) return null;
+  //if (n.BadNodeMessage !== null) return null;
   let color: StoneColor = StoneColors.NoColor;
   let row = Board.NoIndex; // Not all paths set the value, so need random initial value.
   let col = Board.NoIndex;
@@ -2339,8 +2339,8 @@ export function nextMoveGetMessage (move: Move): string | null {
   /// pointers and the branches list appropriately for the move.
   ///
   function pasteNextMove (move: Move, cutMove: Move): void {
-    if (move.next != null) {
-      if (move.branches == null) {
+    if (move.next !== null) {
+      if (move.branches === null) {
         // need branches
         move.branches = [ move.next, cutMove ];
       } else {
@@ -2352,7 +2352,7 @@ export function nextMoveGetMessage (move: Move): string | null {
     }
     cutMove.previous = move;
     move.next.number = move.number + 1; // moves further out are renumbered by pastMoveInsert
-    if (move.parsedNode != null && cutMove.parsedNode != null)
+    if (move.parsedNode !== null && cutMove.parsedNode !== null)
     pasteNextParsedNode(move.parsedNode, cutMove.parsedNode);
   }
 
@@ -2360,8 +2360,8 @@ export function nextMoveGetMessage (move: Move): string | null {
 ///
 function pasteNextParsedNode (pn: ParsedNode, cutmove: ParsedNode): void {
   const branches = pn.branches;
-  if (pn.next != null) {
-    if (branches == null) {
+  if (pn.next !== null) {
+    if (branches === null) {
       pn.branches = [ pn.next, cutmove ];
     } else {
       branches.push(cutmove);
@@ -2379,18 +2379,18 @@ function pasteNextParsedNode (pn: ParsedNode, cutmove: ParsedNode): void {
 ///
 function renumberMoves (move: Move): void {
  let count = move.number;
- if (move.branches == null) {
+ if (move.branches === null) {
    move = move.next!;
-   while (move != null) {
+   while (move !== null) {
      move.number = count + 1;
      count += 1;
-     if (move.branches == null)
+     if (move.branches === null)
        move = move.next!;
      else
        break;
    }
   // Only get here when move is None, or we're recursing on branches.
-  if (move != null)
+  if (move !== null)
     for (const m of move.branches!) {
       m.number = count;
       renumberMoves(m);

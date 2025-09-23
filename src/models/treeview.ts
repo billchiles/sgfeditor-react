@@ -85,7 +85,7 @@ export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: Pa
                                          branches: Move[] | null;}): (TreeViewNode | null)[][] {
   let start: IMoveNext | null = null;
   // Get start node
-  if (game.firstMove != null) {
+  if (game.firstMove !== null) {
     if (game.firstMove.rendered) {
       // Mock a move for empty board state.
       const m = new Move(-1, -1, StoneColors.NoColor);
@@ -94,14 +94,14 @@ export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: Pa
       m.rendered = false;
       start = m as IMoveNext;
     }
-    else if (game.parsedGame != null /* This test should be same as g.pg.nodes != null. */) {
+    else if (game.parsedGame !== null /* This test should be same as g.pg.nodes !== null. */) {
       // NB: ParsedGame.Nodes is the root ParsedNode
       start = (game.parsedGame.nodes as unknown) as IMoveNext;
     }
   }
   // Get layout
   const layoutData = new TreeViewLayoutData();
-  if (start != null)
+  if (start !== null)
     layoutGameTreeFromRoot(start, layoutData);
   else {
     // Or just have empty board ...
@@ -147,7 +147,7 @@ export function layoutGameTreeFromRoot(pn: IMoveNext, layoutData: TreeViewLayout
 
   // Return model, or get next model.
   let next_model: TreeViewNode;
-  if (getLayoutGameTreeNext(pn) == null) {
+  if (getLayoutGameTreeNext(pn) === null) {
     // If no next, then no branches to check below
     layoutData.treeGrid[model.row][tree_depth] = model;
     return model;
@@ -173,8 +173,8 @@ export function layoutGameTreeFromRoot(pn: IMoveNext, layoutData: TreeViewLayout
 function getLayoutGameTreeNext(pn: IMoveNext): IMoveNext | null {
   // Can't dynamically invoke Assert for some reason, and C# doesn't bind only matching
   // method at compile time.
-  // Debug.Assert(pn.GetType() != typeof(Game));
-  if (pn.IMNBranches != null)
+  // Debug.Assert(pn.GetType() !== typeof(Game));
+  if (pn.IMNBranches !== null)
     return pn.IMNBranches[0];
   else
     return pn.IMNNext;
@@ -198,7 +198,7 @@ export function layoutGameTree(
   branch_root_row: number
 ): TreeViewNode {
   // Check if done with rendered nodes and switch to parsed nodes.
-  if ((pn as any).rendered === false && (pn as any).parsedNode != null)
+  if ((pn as any).rendered === false && (pn as any).parsedNode !== null)
     pn = ((pn as any).parsedNode) as unknown as IMoveNext;
 
   // Create and init model, set
@@ -207,7 +207,7 @@ export function layoutGameTree(
   // Adjust last node and return, or get next model node.
   const next = getLayoutGameTreeNext(pn);
   let next_model: TreeViewNode;
-  if (next == null) {
+  if (next === null) {
     // If no next, then no branches to check below
     storeTreeViewNode(layoutData, tree_depth, model);
     return maybeAddBendNode(layoutData, model.row, tree_depth,
@@ -244,7 +244,7 @@ function layoutGameTreeBranches(
   model: TreeViewNode,
   next_model: TreeViewNode
 ): void {
-  if (pn.IMNBranches != null) {
+  if (pn.IMNBranches !== null) {
     model.branches = [next_model];
     // Skip branches[0] since caller already did branch zero as pn's next move, but note, when
     // pn is a Move (that is, not a ParsedNode), then branches[0] may not equal pn.Next.
@@ -309,7 +309,7 @@ function adjustTreeLayoutRow(
 
   //// If we're unwinding back toward this node's branch root, and we're within a direct
   //// diagonal line from the root, start decreasing the row by one.
-  if ((branch_depth < model.row - branch_root_row) && (layoutData.treeGrid[model.row - 1]?.[tree_depth] == null)) {
+  if ((branch_depth < model.row - branch_root_row) && (layoutData.treeGrid[model.row - 1]?.[tree_depth] === null)) {
     // row - 1 does not index out of bounds since model.row would have to be zero,
     // and zero minus anything will not be greater than branch depth (which would be zero)
     // if row - 1 were less than zero.
@@ -319,7 +319,7 @@ function adjustTreeLayoutRow(
     let j = tree_depth - 1;
     let z = branch_depth;
     for (let i = model.row - 2; i >= 0 && i > branch_root_row && j >= 0 && z > 0; i--) {
-      if (layoutData.treeGrid[i]?.[j] == null) {
+      if (layoutData.treeGrid[i]?.[j] === null) {
         j--; z--;
         continue;
       }
@@ -343,8 +343,8 @@ function maybeAddBendNode(
   branch_root_row: number,
   curNode: TreeViewNode
 ): TreeViewNode {
-  if ((branch_depth == 1) && (row - branch_root_row > 1) &&
-      (layoutData.treeGrid[row - 1]?.[tree_depth - 1] == null)) {
+  if ((branch_depth === 1) && (row - branch_root_row > 1) &&
+      (layoutData.treeGrid[row - 1]?.[tree_depth - 1] === null)) {
     const bend: TreeViewNode = {
       kind: TreeViewNodeKinds.LineBend,
       node: curNode.node,
@@ -365,7 +365,7 @@ function maybeAddBendNode(
 function storeTreeViewNode(layoutData: TreeViewLayoutData, tree_depth: number, model: TreeViewNode): void {
   if (model.row >= treeViewModelRows || tree_depth >= treeViewModelColumns)
     growTreeView(layoutData);
-  debugAssert(layoutData.treeGrid[model.row][tree_depth] == null,
+  debugAssert(layoutData.treeGrid[model.row][tree_depth] === null,
               "Eh?!  This tree view location should be empty.");
   layoutData.treeGrid[model.row][tree_depth] = model;
 }

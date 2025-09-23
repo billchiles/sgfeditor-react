@@ -42,7 +42,7 @@ export class Board {
   }
 
   removeStoneAt (row: number, col: number) {
-    if (this.moveAt(row, col) != null)
+    if (this.moveAt(row, col) !== null)
       this.removeStone(this.moveAt(row, col)!);  // need bang to say I know it isn't null.
   } 
 
@@ -52,7 +52,7 @@ export class Board {
 
   colorAt (row: number, col: number) : StoneColor {
     const m = this.moves[row - 1][col - 1];
-    if (m != null)
+    if (m !== null)
       return m.color;
     else
       return StoneColors.NoColor;
@@ -166,7 +166,7 @@ export class Move implements IMoveNext {
     this.column = column;
     this.color = color;
     this.number = 0;
-    this.isPass = this.row == Board.NoIndex && this.column == Board.NoIndex;
+    this.isPass = this.row === Board.NoIndex && this.column === Board.NoIndex;
     this.previous = null;
     this.next = null;
     this.branches = null;
@@ -195,7 +195,7 @@ export class Move implements IMoveNext {
     return this.next;
   }
   get IMNBranches (): IMoveNext[] | null {
-    return (this.branches == null) ? null : this.branches;
+    return (this.branches === null) ? null : this.branches;
   }
 } // Move class
 
@@ -274,7 +274,7 @@ export function parsedLabelModelCoordinates(data: string): [row: number, col: nu
 /// SGF format is col,row (count from left edge, count from top).
 ///
 export function parsedToModelCoordinates (coords: string) : [row: number, col: number] {
-    if (coords == "")
+    if (coords === "")
         // Pass move
         return [Board.NoIndex, Board.NoIndex];
     else {

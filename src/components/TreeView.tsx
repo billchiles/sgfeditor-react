@@ -431,7 +431,7 @@ function gotoGameTreeParsedNode(move: ParsedNode): boolean {
               {cell.kind === TreeViewNodeKinds.Move && (() => {
                 const n: any = cell.node;
                 let num = typeof n?.number === "number" ? n.number : null;
-                if (num == null) num = cell.column;
+                if (num === null) num = cell.column;
                 const numFill = cell.color === StoneColors.Black ? "#fff" : "#000";
                 const numStr = String(num);
                 const numFontSize = numStr.length >= 3 ? "10pt" : "12pt";
