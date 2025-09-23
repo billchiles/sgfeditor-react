@@ -1022,7 +1022,7 @@ async function getFileGameCheckingAutoSave
                           setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
                           setDefaultGame: gamemgt.setDefaultGame})
     }
-    appStorage.delete(autoSaveName); // used it or didn't but don't need it now
+    await appStorage.delete(autoSaveName); // used it or didn't but don't need it now
   } else {// no auto saved file to worry about ...
     parseAndCreateGame(fileHandle, fileName, fileBridge, data, gamemgt.gameRef, 
                        {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
@@ -1075,31 +1075,35 @@ function undoLastGameCreation (game: Game | null) {
 //// Save Commands
 ///
 
-async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastCommand }: CmdDependencies):
+async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastCommand, 
+                                 appStorageBridge }: CmdDependencies):
     Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
+  // Update model
   g.saveCurrentComment();
+  // Do the save
   const data = g.buildSGFString();
   const hint = g.filename ?? "game.sgf";
   const res = await fileBridge.save(g.saveCookie ?? null, hint, data);
-  focusOnRoot(); // call before returning to ensure back at top
+  // call before returning to ensure back at top
   if (!res) return; // user cancelled dialog when there was no saveCookie or filename.
   g.isDirty = false;
-  // TODO delete autosave file
   const { fileName, cookie } = res;
+  // If saved file, remove any auto save
+  const autoSaveName = getAutoSaveName(fileName);
+  if (await appStorageBridge.exists(autoSaveName))
+    await appStorageBridge.delete(autoSaveName); 
+  // Save file info, signal UI, and set focus ...
   if (fileName !== g.filename || cookie !== g.saveCookie) {
     g.saveGameFileInfo(cookie, fileName);
-    // g.filename = fileName;
-    // const parts = fileName.split(/[/\\]/); 
-    // g.filebase = parts[parts.length - 1];
-    // g.saveCookie = cookie;
-    bumpVersion(); // update status area
   }
+  bumpVersion(); // update status area for is dirty and possible filename
+  focusOnRoot(); 
 }
 
-async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand }: 
-    CmdDependencies): Promise<void> {
+async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand,
+                                appStorageBridge }: CmdDependencies): Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
   g.saveCurrentComment();
@@ -1109,13 +1113,16 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
   g.isDirty = false;
   // TODO delete autosave file
   const { fileName, cookie } = res;
+  // If saved file, remove any auto save
+  const autoSaveName = getAutoSaveName(fileName);
+  if (await appStorageBridge.exists(autoSaveName))
+    await appStorageBridge.delete(autoSaveName); 
+  // Save to model, signal UI, and focus
   if (fileName !== g.filename || cookie !== g.saveCookie) {
-    g.filename = fileName;
-    const parts = fileName.split(/[/\\]/); 
-    g.filebase = parts[parts.length - 1];
-    g.saveCookie = cookie;
-    bumpVersion();
+    g.saveGameFileInfo(cookie, fileName); 
   }
+  bumpVersion();
+  focusOnRoot(); 
 }
 
 ///
