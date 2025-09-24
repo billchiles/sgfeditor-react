@@ -1,70 +1,70 @@
 import type { FileBridge, KeyBindingBridge } from './bridges';
 
-// Simple basename helper (Windows/macOS/Linux-safe)
-// We keep it local to avoid importing Node path in the renderer bundle.
-function baseName(fullPath: string): string {
+/// Simple basename helper (Windows/macOS/Linux-safe)
+/// We keep it local to avoid importing Node path in the renderer bundle.
+function baseName (fullPath: string): string {
   const slash = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
   return slash >= 0 ? fullPath.slice(slash + 1) : fullPath;
 }
 
-/**
- * Electron implementation skeleton for FileBridge.
- * NOTE: This version intentionally returns minimal placeholders so the app compiles
- * and runs in Electron. We'll add real IPC (read/write) in a follow-up.
- */
+/// Electron implementation skeleton for FileBridge.
+/// NOTE: This version intentionally returns minimal placeholders so the app compiles
+/// and runs in Electron. We'll add real IPC (read/write) in a follow-up.
+///
 export const fileBridgeElectron: FileBridge = {
-  async open() {
-    const path = await window.electron?.openFileDialog();
+  async open () {
+    const path = await window.electron?.pickOpenFile();
     if (!path) return null;
-
-    // TODO: Replace with IPC readText(path) from main.
-    // OpenResult requires a `data: string`; return empty for now so callers can branch.
-    return { path, data: '', cookie: path };
+    const data = await window.electron!.readText(path);
+    return { path, data, cookie: path };
   },
 
-  async save(cookie: unknown | null, suggestedName: string, data: string) {
-    // TODO: Implement via dialog.showSaveDialog / writeFile in main and return filename+cookie.
-    // Returning null signals "not handled" so callers can fall back if needed.
-    return null;
+  async save (cookie: unknown | null, suggestedName: string, data: string) {
+    // If we already have a target (cookie is a path string), write in place
+    if (typeof cookie === "string" && cookie !== "") {
+      await window.electron!.writeText(cookie, data);
+      return { fileName: baseName(cookie), cookie };
+    }
+    // Otherwise, fall back to Save As
+    return this.saveAs(suggestedName, data);
   },
 
-  async saveAs(suggestedName: string, data: string) {
-    // TODO: Implement via dialog.showSaveDialog / writeFile in main and return filename+cookie.
-    return null;
-  },
-
-  async pickOpenFile() {
-    const path = await window.electron?.openFileDialog();
+  async saveAs (suggestedName: string, data: string) {
+    const path = await window.electron?.pickSaveFile(suggestedName);
     if (!path) return null;
-    return { cookie: path, fileName: baseName(path) };
+    await window.electron!.writeText(path, data);
+    return { fileName: baseName(path), cookie: path };
   },
 
-  async pickSaveFile(suggestedName?: string) {
-    // TODO: Implement via dialog.showSaveDialog in main and return chosen path as cookie.
-    return null;
+  async pickOpenFile () {
+    const path = await window.electron?.pickOpenFile();
+    return path ? { cookie: path, fileName: baseName(path) } : null;
   },
 
-  async readText(cookie: unknown) {
-    // TODO: Implement via IPC: main reads file (cookie/path) and returns contents.
-    return null;
+  async pickSaveFile (suggestedName) {
+    const path = await window.electron?.pickSaveFile(suggestedName);
+    return path ? { cookie: path, fileName: baseName(path) } : null;
   },
 
-  canPickFiles() {
-    // Electron supports native pickers.
+  async readText (cookie) {
+    return typeof cookie === "string" && cookie !== ""
+      ? window.electron!.readText(cookie)
+      : null;
+  },
+
+  canPickFiles () {
     return true;
   },
 
-  async getWriteDate(cookie: unknown) {
-    // TODO: Implement via IPC (stat.mtimeMs).
-    return null;
+  async getWriteDate (cookie: unknown) {
+    if (typeof cookie !== "string" || cookie !== "") return null;
+    return await window.electron!.timestamp(cookie);
   },
 };
 
-/**
- * Electron KeyBindingBridge:
- * - Electron doesn't hijack browser key combos, so mark as not hijacked.
- * - Provide DOM keydown on/off so your existing useEffect cleanup works.
- */
+/// Electron KeyBindingBridge:
+/// - Provide DOM keydown on/off so your existing useEffect cleanup works.
+///
 export const keyBindingBridgeElectron: KeyBindingBridge = {
   on(handler: (e: KeyboardEvent) => void) {
     document.addEventListener('keydown', handler, { passive: true });

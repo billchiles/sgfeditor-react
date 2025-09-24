@@ -10,9 +10,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "dev:electron": "concurrently -k -r \"vite\" \"tsc -p electron/tsconfig.main.json -w\" \"wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 ELECTRON_PRELOAD_PATH=preload.cjs electron .\"",
-    "build:electron": "tsc -p electron/tsconfig.main.json",
-    "start:electron": "cross-env ELECTRON_PRELOAD_PATH=preload.cjs electron ."
+    "dev:electron": "concurrently -k -r \"vite\" \"tsc -p electron/tsconfig.main.json -w\" \"tsc -p electron/tsconfig.preload.json -w\" \"wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 ELECTRON_PRELOAD_PATH=preload.js electron .\"",
+    "build:electron": "tsc -p electron/tsconfig.main.json && tsc -p electron/tsconfig.preload.json",
+    "start:electron": "cross-env ELECTRON_PRELOAD_PATH=preload.js electron ."
   },
   "dependencies": {
     "react": "^19.1.1",

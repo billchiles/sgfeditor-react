@@ -8,28 +8,28 @@ export type OpenResult = {
 } | null;
 
 export interface FileBridge {
-  open(): Promise<OpenResult>;
+  open (): Promise<OpenResult>;
   // Save to an existing target if cookie is recognized by the platform.
   // Without cookie, platform may always prompt user to save, possibly returning a pathname or name.
-  save(cookie: unknown | null, suggestedName: string, data: string): 
+  save (cookie: unknown | null, suggestedName: string, data: string): 
       Promise<{ fileName: string; cookie: unknown | null } | null>;
   // Always prompt the user and return any cookie, pathname, or name.
-  saveAs(suggestedName: string, data: string): 
+  saveAs (suggestedName: string, data: string): 
       Promise<{ fileName: string; cookie: unknown | null } | null>;
   // Shows a file-open picker and returns the file handle and a best-effort filename (no path in
   // in browsers). Returns null if the user cancels.
   // pickOpenFile(accept?: string[]): Promise<{ cookie: unknown; fileName: string } | null>;
-  pickOpenFile(): Promise<{ cookie: unknown; fileName: string } | null>;
+  pickOpenFile (): Promise<{ cookie: unknown; fileName: string } | null>;
   // Shows a save-as picker and returns the file handle and name, null if user cancels.
-  pickSaveFile(suggestedName?: string): Promise<{ cookie: unknown; fileName: string } | null>;
+  pickSaveFile (suggestedName?: string): Promise<{ cookie: unknown; fileName: string } | null>;
   // Read text from a previously returned cookie/handle. Returns null if unsupported.
   // Browser (File System Access API): cookie is a FileSystemFileHandle.
   // Fallback will return null.  Electron can implement.
-  readText(cookie: unknown): Promise<string | null>;
+  readText (cookie: unknown): Promise<string | null>;
   // Returns true if this platform supports handle-based open/save file pickers
-  canPickFiles(): boolean;
+  canPickFiles (): boolean;
   // Return basic file info (null if unsupported or on error). */
-  getWriteDate(cookie: unknown): Promise<number | null>;
+  getWriteDate (cookie: unknown): Promise<number | null>;
 }
 
 /// App-private storage (OPFS when available; falls back to localStorage).
