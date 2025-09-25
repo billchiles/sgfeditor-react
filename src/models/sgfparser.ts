@@ -37,7 +37,7 @@ export class ParsedGame {
       }
       cur = cur.next;
     }
-    if (cur) res += cur.nodeString(res !== "");
+    if (cur) res += cur.nodeString(res !== ""); // Test res, could be single node branch.
     return res;
   }
 } // ParsedGame class
@@ -75,6 +75,9 @@ export class ParsedNode implements IMoveNext {
   }
 
 
+  /// nodeString returns the string for one node, taking a flag for a preceding newline and the 
+  /// dictionary of properties for the node.  Game uses this for error reporting.
+  ///
   nodeString (newline: boolean): string {
     const props = this.properties;
     let s = newline ? "\n;" : ";";
@@ -90,6 +93,8 @@ export class ParsedNode implements IMoveNext {
     return s;
   }
 
+        //// _escaped_property_values returns a node's property value with escapes so that the .sgf
+        //// is valid.  So, ] and \ must be preceded by a backslash.
   private escapePropertyValues(_id: string, values: string[]): string {
     // SGF escaping: ']' and '\' are escaped with '\'
     // (Keep canonical; we do not reflow whitespace here.)

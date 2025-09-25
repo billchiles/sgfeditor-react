@@ -10,7 +10,7 @@
 /// NewGameOverlay bridges dialog results to the model and implements the dialog’s onCreate to make
 /// the new game and update current game and games MRU.
 ///
-import { useMemo, useRef, useContext, useCallback, useState, useEffect } from "react";
+import { useMemo, useRef, useContext, useCallback, useState } from "react";
 import GoBoard from "./components/GoBoard";
 import styles from "./App.module.css";
 import { GameProvider, GameContext, addOrGotoGame } from "./models/AppGlobals";
@@ -56,11 +56,6 @@ export default function App() {
     return new Promise<boolean>((resolve) => { setMsgReq({ text, opts, resolve });
                                                setMsgOpen(true); });
   }
-  useEffect(() => {
-    if (window.electron?.isElectron) {
-      window.electron.ping().then(console.log); // should log "pong" in Electron devtools
-    }
-  }, []);
   return (<GameProvider getComment={getComment} setComment={setComment}
                         openNewGameDialog={() => setShowNewGameDlg(true)} 
                         openHelpDialog={() => setShowHelpDlg(true)}

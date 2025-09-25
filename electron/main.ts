@@ -26,9 +26,7 @@ const __dirname = path.dirname(__filename);
 
 /// For debugging...
 const preloadRel = process.env.ELECTRON_PRELOAD_PATH || "preload.js";
-//const preloadRel = process.env.ELECTRON_PRELOAD_PATH || "preload.cjs"; // debugging
 const preloadAbs = path.join(__dirname, preloadRel);
-console.log("[main] preload path:", preloadAbs, "exists:", fs.existsSync(preloadAbs));
 
 const devUrl = process.env.ELECTRON_START_URL || process.env.VITE_DEV_SERVER_URL;
 
@@ -95,8 +93,6 @@ ipcMain.handle("file:writeText", async (_e, p: string, data: string) => {
 ///
 ipcMain.handle("file:timestamp", async (_e, p: string) => (await fsp.stat(p)).mtimeMs);
 
-console.log("[main] IPC file handlers registered");
-
 ///
 //// Create the App's main window.
 ///
@@ -137,14 +133,16 @@ function createWindow () {
     });
   });
 
-
-
-
   win.setMenuBarVisibility(false); // keeps users from using alt key to show menus.
+
   if (devUrl) {
     win.loadURL(devUrl);
     win.webContents.openDevTools({ mode: "detach" });
   } else {
-    win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+    //win.loadFile(path.join(__dirname, "..", "dist", "index.html")); error file not found
+    const indexHtml = path.resolve(__dirname, "..", "..", "dist", "index.html");
+    console.log("[main] loading:", indexHtml, "exists:", fs.existsSync(indexHtml));
+    win.loadFile(indexHtml);
   }
+
 } // createWindow()

@@ -262,10 +262,10 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const fileBridge = isElectron ? fileBridgeElectron : browserFileBridge;
   //const fileBridge: FileBridge = browserFileBridge;
   const appStorageBridge: AppStorageBridge = browserAppStorageBridge;
-  useEffect(() => {
-    console.log("[env]", isElectron ? "Electron" : "Web");
-    console.log("[autosave] using", "OPFS via browserAppStorageBridge");
-  }, [isElectron]);
+  // useEffect(() => {
+  //   console.log("[env]", isElectron ? "Electron" : "Web");
+  //   console.log("[autosave] using", "OPFS via browserAppStorageBridge");
+  // }, [isElectron]);
   //const hotkeys: KeyBindingBridge = browserKeybindings;
   const hotkeys: KeyBindingBridge = isElectron ? keyBindingBridgeElectron : browserKeybindings;
   const commonKeyBindingsHijacked = hotkeys.commonKeyBindingsHijacked; //!isElectron; 
@@ -350,7 +350,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     // IIFE—an Immediately Invoked Function Expression to enable await's but the entire thing runs
     // synchronously with the code around it.
     (async () => { 
-      console.log("in useeffect");
       try {
         if (! await appStorageBridge.exists(UNNAMED_AUTOSAVE)) return;
         const autoSaveTime = await appStorageBridge.timestamp(UNNAMED_AUTOSAVE);
@@ -360,7 +359,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
           await appStorageBridge.delete(UNNAMED_AUTOSAVE); 
           return; 
         }
-        console.log("gonna see auto save");
         const useAutoSave = await openMessageDialog?.("Found an unnamed auto saved game.",
                                                       { title: "Open unnamed autosave ?",
                                                         primary: "Open autosave",
@@ -405,7 +403,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const idleTidRef    = useRef<number | null>(null);
   // INTERVAL TIMER -- If user actively editing for "long time" then auto save
   useEffect(() => { 
-    console.log("[autosave] interval armed; storage = OPFS via browserAppStorageBridge");
     const id = window.setInterval(async () => {
       // todo hmmmm, never walk games list for unsaved games, just do current
       // cancel inactivity timer because we're saving now, it will start again on next model change
@@ -419,7 +416,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   }, [appStorageBridge]); // mount/unmount only
   // INACTIVE TIMER -- if user inactive for a few seconds, save their last edits.
   useEffect(() => {
-    console.log("[autosave] inactivity armed");
     if (idleTidRef.current != null) clearTimeout(idleTidRef.current);
     idleTidRef.current = window.setTimeout(async () => {
       // conservative check to avoid timer jitter, event loop lag, etc., and saving simultaneously
@@ -657,10 +653,23 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return; // let the content-editable elt handle cursor movement
   }
   if (lower === "arrowleft" && curgame.canUnwindMove()) {
-    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
-    e.preventDefault();
-    curgame.unwindMove(); // model fires onChange → provider bumps version
-    return;
+    if (control) {
+      // setup for loop so do not stop on current move if it has branches
+      const game = deps.gameRef.current;
+      let move = game.unwindMove();
+      let curmove = game.currentMove;
+      // find previous move with branches
+      while (curmove !== null && curmove.branches === null) {
+        move = game.unwindMove();
+        curmove = move.previous;
+      }
+      //focusOnRoot(); see if I need this as ubiquitously as in dontnet.
+    } else {
+      deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
+      e.preventDefault();
+      curgame.unwindMove(); // model fires onChange → provider bumps version
+      return;
+    }
   }
   if (lower === "arrowright" && curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
@@ -1184,7 +1193,7 @@ async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastComman
   }
   bumpVersion(); // update status area for is dirty and possible filename
   focusOnRoot(); 
-}
+} // doWriteGameCmd()
 
 async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand,
                                 appStorageBridge }: CmdDependencies): Promise<void> {
@@ -1207,7 +1216,7 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
   }
   bumpVersion();
   focusOnRoot(); 
-}
+} // saveAsCommand()
 
 ///
 //// Games and Setup Helpers
@@ -1379,7 +1388,6 @@ async function maybeAutoSave(g: Game, appStorageBridge: AppStorageBridge): Promi
   const name = getAutoSaveName(g.filebase);
   // don't set isDirty to false because didn't dave user's file
   await appStorageBridge.writeText(name, data); // OPFS or fallback (localStorage)
-  console.log(`autosaved ${name}`);
 }
 
 /// getAutoSaveName:

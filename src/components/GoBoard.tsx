@@ -276,7 +276,6 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
     // marker sizes scale with stone radius; keeps ring visible at small sizes
     const markRadius = Math.max(geom.radius * 0.6, 3);
     const markStroke = Math.max(geom.radius * 0.2, 1);
-    // console.log("\n\nSTARTING ...\n\n");
     for (let y = 0; y < boardSize; y++) {
       for (let x = 0; x < boardSize; x++) {
         // Model is 1-based for vernacular of Go boards.
@@ -284,7 +283,6 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
         const col = x + 1;
         const m = curBoard.moveAt(row, col);
         if (m !== null) {
-          // console.log("board now has:", m);
           // Board/Move model is rows go down, columns go across, but graphics is X goes across, Y goes down.
           const cx = boardToPx.xs[x]; 
           const cy = boardToPx.ys[y];
