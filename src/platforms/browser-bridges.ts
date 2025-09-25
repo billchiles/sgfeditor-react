@@ -271,15 +271,15 @@ class OpfsStorage implements AppStorageBridge {
     }
   }
 
-  // async list(): Promise<string[]> {
-  //   const dir = await this.getFolder();
-  //   const out: string[] = [];
-  //   // @ts-ignore: async iterator is supported in modern TS lib
-  //   for await (const [key, entry] of (dir as any).entries()) {
-  //     if (entry && entry.kind === "file") out.push(key);
-  //   }
-  //   return out;
-  // }
+  async list(): Promise<string[]> {
+    const dir = await this.getFolder();
+    const out: string[] = [];
+    // @ts-ignore: async iterator is supported in modern TS lib
+    for await (const [key, entry] of (dir as any).entries()) {
+      if (entry && entry.kind === "file") out.push(key);
+    }
+    return out;
+  }
 
   // async writeJSON<T>(name: string, value: T): Promise<void> {
   //   await this.writeText(name, JSON.stringify(value));
@@ -338,14 +338,14 @@ class LocalStorageStorage implements AppStorageBridge {
     return null;
   }
 
-  // async list(): Promise<string[]> {
-  //   const out: string[] = [];
-  //   for (let i = 0; i < localStorage.length; i++) {
-  //     const k = localStorage.key(i)!;
-  //     if (k.startsWith(this.prefix)) out.push(k.substring(this.prefix.length));
-  //   }
-  //   return out;
-  // }
+  async list(): Promise<string[]> {
+    const out: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!;
+      if (k.startsWith(this.prefix)) out.push(k.substring(this.prefix.length));
+    }
+    return out;
+  }
   
   // async writeJSON<T>(name: string, value: T): Promise<void> {
   //   await this.writeText(name, JSON.stringify(value));

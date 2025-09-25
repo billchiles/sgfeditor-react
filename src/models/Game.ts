@@ -2095,13 +2095,6 @@ function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
   return m;
 }
 
-/// createDefaultGame stashes the new game in Game Context globals defaultGame so that we can throw
-///  it away if the user does not use it and opens a file or creates a new game.
-///
-// export function createDefaultGame (setGame: (g: Game) => void, getGames: () => Game[], 
-//                                    setGames: (gs: Game[]) => void): Game {
-// return createGame(Board.MaxSize, 0, Game.DefaultKomi, null, null, setGame, getGames, setGames);
-// }
 
 /// createGame makes the game and makes it current game.  The constructor adds handicap stones to
 /// the board.

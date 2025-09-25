@@ -1,4 +1,5 @@
 /// Declarations so that renderer code has an API for window at runtime (API preload.ts exposes).
+/// Preload does the real work as this file disappears and mostly helps tooling, vscode, etc.
 /// Files ending in .d.ts only contain types, and the compiler produces no js for them.  No files
 /// import this file. TypeScript picks it up via tsconfig.json’s "include" (e.g., "src/**/*").
 ///
@@ -16,6 +17,7 @@ declare global { // doesn't pollute global scope due to export {}
       readText (path: string): Promise<string>;
       writeText (path: string, data: string): Promise<boolean>;
       timestamp (path: string): Promise<number>;
+      onFinalSaveRequest? (handler: () => Promise<void> | void): () => void;
     };
   }
 }

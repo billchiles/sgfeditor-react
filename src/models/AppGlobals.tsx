@@ -14,7 +14,7 @@
 /// commentBox has focus.
 
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { Game, createGameFromParsedGame, copyProperties } from "./Game";
+import { Game, createGameFromParsedGame, copyProperties, createGame } from "./Game";
 import type { MessageOrQuery } from "./Game";
 //import { StoneColors, Board, Move, parsedToModelCoordinates } from './Board';
 // vscode flags the next line as cannot resolve references, but it compiles and runs fine.
@@ -23,7 +23,7 @@ import { fileBridgeElectron, keyBindingBridgeElectron } from '../platforms/elect
 import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platforms/bridges";
 import {parseFile, SGFError, ParsedNode} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
-import type { Move } from "./Board";
+import { Board, type Move } from "./Board";
 import type { ConfirmOptions } from "../components/MessageDialog";
 
 ///
@@ -262,6 +262,10 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const fileBridge = isElectron ? fileBridgeElectron : browserFileBridge;
   //const fileBridge: FileBridge = browserFileBridge;
   const appStorageBridge: AppStorageBridge = browserAppStorageBridge;
+  useEffect(() => {
+    console.log("[env]", isElectron ? "Electron" : "Web");
+    console.log("[autosave] using", "OPFS via browserAppStorageBridge");
+  }, [isElectron]);
   //const hotkeys: KeyBindingBridge = browserKeybindings;
   const hotkeys: KeyBindingBridge = isElectron ? keyBindingBridgeElectron : browserKeybindings;
   const commonKeyBindingsHijacked = hotkeys.commonKeyBindingsHijacked; //!isElectron; 
@@ -331,6 +335,12 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   //
+  // GC accumulated auto save files
+  useEffect(() => {
+    void gcOldAutoSaves(appStorageBridge);
+    // no cleanup needed
+  }, [appStorageBridge]);
+  //
   // CHECK AUTO SAVE FOR DEFAULT BOARD
   // todo revisit this after adding file launch, don't bother with this if file launching, just delete auto save
   useEffect(() => {
@@ -388,28 +398,68 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   }, []);
   //
   // AUTO SAVE
-  useEffect(() => {
-    const id = window.setInterval(
+  // need useRef for stability of value across renders to avoid the interval timer trying to cancel
+  // an old inactivity timer ID it closed over any number of version ticks prior
+  const lastSaveAtRef = useRef<number>(Date.now());
+  // timer ID for the inactive timer that's reset on every model change
+  const idleTidRef    = useRef<number | null>(null);
+  // INTERVAL TIMER -- If user actively editing for "long time" then auto save
+  useEffect(() => { 
+    console.log("[autosave] interval armed; storage = OPFS via browserAppStorageBridge");
+    const id = window.setInterval(async () => {
       // todo hmmmm, never walk games list for unsaved games, just do current
-      () => { void maybeAutoSave(gameRef.current, appStorageBridge); }, AUTOSAVE_INTERVAL);
-    return () => { window.clearInterval(id)};
-  }, [gameRef, appStorageBridge]); // mount/unmount only
-  // OPTIONAL: Inactivity autosave paired with above.
-  // THIS IS CRAP FROM GPT5, buggy out of the gate, have clean solution, but not here now.
-  // Saves a few seconds after the last model change; if user keeps editing, we defer via useEffect
-  // re-running on version tick and running its cleanup that cancels the previous timer.
-  // const lastSaveRef = React.useRef<number>(Date.now());
-  // useEffect(() => {
-  //   // If nothing changed, nothing to do; 'version' ticks only when model changes.
-  //   const now = Date.now();
-  //   // sinceLastSave includes above interval saves because If the 45s interval just saved, this will be near 0 and we won't double-save.
-  //   const sinceLastSave = now - lastSaveRef.current;
-  //   const tid = window.setTimeout(async () => {
-  //     await maybeAutoSave(gameRef.current, appStorageBridge);
-  //     lastSaveRef.current = Date.now();
-  //   }, AUTOSAVE_INACTIVITY_INTERVAL);
-  //   return () => window.clearTimeout(tid);
-  // }, [version, appStorageBridge]); // re-arm on each model change
+      // cancel inactivity timer because we're saving now, it will start again on next model change
+      if (idleTidRef.current !== null) { 
+        window.clearTimeout(idleTidRef.current); 
+        idleTidRef.current = null; }
+      await maybeAutoSave(gameRef.current, appStorageBridge);
+      lastSaveAtRef.current = Date.now(); // tells next closure (inactivity autosave) saved before it fired
+    }, AUTOSAVE_INTERVAL);
+    return () => window.clearInterval(id);
+  }, [appStorageBridge]); // mount/unmount only
+  // INACTIVE TIMER -- if user inactive for a few seconds, save their last edits.
+  useEffect(() => {
+    console.log("[autosave] inactivity armed");
+    if (idleTidRef.current != null) clearTimeout(idleTidRef.current);
+    idleTidRef.current = window.setTimeout(async () => {
+      // conservative check to avoid timer jitter, event loop lag, etc., and saving simultaneously
+      if (Date.now() - (lastSaveAtRef.current ?? 0) < 1_000) return;
+      await maybeAutoSave(gameRef.current, appStorageBridge);
+      lastSaveAtRef.current = Date.now();
+      idleTidRef.current = null;
+    }, AUTOSAVE_INACTIVITY_INTERVAL);
+    return () => {
+      if (idleTidRef.current != null) {
+        clearTimeout(idleTidRef.current);
+        idleTidRef.current = null;
+      }
+    }
+  }, [version, appStorageBridge]); // reset on each model change (version)
+  // BROWSER SHUTDOWN -- save on possible browser shutdown
+  useEffect(() => {
+    const finalAutoSave = () => {
+      // void fire-and-forget, browsers may ignore long async work here.
+      void maybeAutoSave(gameRef.current, appStorageBridge);
+    };
+    window.addEventListener("pagehide", finalAutoSave);
+    // Docs say onVisibility is simply alt-tab, c-tab, etc.  App is still running.
+    // const onVisibility = () => {
+    //   if (document.visibilityState === "hidden") finalAutoSave();
+    // };
+    // window.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      //window.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", finalAutoSave);
+    };
+  }, [gameRef, appStorageBridge]);
+  // ELECTRON SHUTDOWN -- save on possible electron shutdown
+  useEffect(() => {
+    if (! window.electron?.onFinalSaveRequest) return;
+    // When main.ts asks, do an autosave and then signal done
+    const off = window.electron.onFinalSaveRequest(
+      async () => {await maybeAutoSave(gameRef.current, appStorageBridge);});
+    return off; // clean up if effect runs again
+  }, [gameRef, appStorageBridge]);
   //
   // CMDDEPENDENCIES -- One object to pass to top-level commands that updates if dependencies change.
   // React takes functions anywhere it takes a value and invokes it to get the value if types match.
@@ -577,7 +627,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     void deps.startNewGameFlow(); // void explicitly ignores result
     return;
   }
-  if (!e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "w") {
+  if (!e.ctrlKey && e.shiftKey && !e.altKey && lower === "w") {
     e.preventDefault();
     //e.stopPropagation(); Can't stop chrome from taking c-w, so using s-w
     gotoNextGameCmd(deps,deps.getLastCommand()); // sets last command type
@@ -589,6 +639,14 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
     deps.showHelp?.();
+    return;
+  }
+  // c-F4: Close Game
+  if (control && (e.code === "F4" || lower === "f4")) {
+    //deps.setLastCommand({ type: CommandTypes.NoMatter }); set in closeGameCmd
+    e.preventDefault();
+    e.stopPropagation();
+    await closeGameCmd(deps.gameRef.current, deps);
     return;
   }
   //
@@ -1210,6 +1268,36 @@ function gameInfoCmd (curgame: Game, showGameInfo: () => void) {
   showGameInfo!();
 }
 
+/// closeGameCmd handles swapping out current game if necessary, checking dirty save, 
+/// creating default game if need be, etc.
+/// Maybe be goofy design here.  In C# it handled arbitrary games, but 1) if we don't use that here
+/// can simply this, and 2) in the general case, probably not in a position to pass all deps.
+///
+async function closeGameCmd (game: Game, deps: CmdDependencies): Promise<void> {
+  const lastcmd = deps.getLastCommand(); // need to do this for checkDirtySave which may change
+  deps.setLastCommand({ type: CommandTypes.NoMatter }); // last command kind
+  await checkDirtySave(game, deps.fileBridge,lastcmd, deps.setLastCommand, 
+                       deps.appStorageBridge, deps.showMessage!, 
+                       () => Promise.resolve()); // don't need user activation context
+  // continue function here, no prompting user or awaiting, so don't need to pack into above lambda
+  const curgame = deps.gameRef.current;
+  const games = deps.getGames();
+  if (game === curgame) {
+    if (games.length > 1) { // Just rotate game out of current position
+      gotoNextGameCmd(deps, lastcmd);
+    } else { // No games left, need a default game
+      const newg = createGame(Board.MaxSize, 0, "6.5", null, null, 
+                              {curGame: curgame, setGame: deps.setGame, getGames: deps.getGames, 
+                               setGames: deps.setGames, getDefaultGame: deps.getDefaultGame, 
+                               setDefaultGame: deps.setDefaultGame});
+      // Mark this as a default, so if not used, can toss it.
+      deps.setDefaultGame(newg); // we're closing the only game, so the new game is a default game
+    }
+  }
+  // Either game is not current (no MRU fuss), or we just set up current game and games list.
+  const idx = games.indexOf(game);
+  deps.setGames(games.slice(0, idx).concat(games.slice(idx + 1)));
+}
 
 ///
 //// Messaging for Model
@@ -1304,6 +1392,43 @@ function getAutoSaveName(name: string | null): string {
   return m ? `${m[1]}-autosave${m[2]}` : `${name}-autosave.sgf`;
 }
 
+/// looksLikeAutoSave makes sure it is a file SGF Editor saved based on our naming convention and
+/// file extension.
+///
+function looksLikeAutoSave(name: string): boolean {
+  // match both unnamed and named autosave convention.  Regexp /.../, escape period to make it
+  // literal (no match single char), $ ties to end of string, i is case-insensitive.
+  return name === UNNAMED_AUTOSAVE || /-autosave\.sgf$/i.test(name);
+}
+
+/// gcOldAutosaves makes sure we're not monotonically accumulating autosave files.
+///
+async function gcOldAutoSaves (appStorage: AppStorageBridge): Promise<void> {
+  const cutoff = Date.now() - AUTOSAVE_APPSTORAGE_GC_DAYS * 24 * 60 * 60 * 1000; //milliseconds
+  let names: string[] = [];
+  try {
+    names = await appStorage.list();
+  } catch {
+    // If listing fails on some platform, just bail quietly.
+    return;
+  }
+  for (const name of names) {
+    if (! looksLikeAutoSave(name)) continue;
+    try {
+      const ts = await appStorage.timestamp(name);
+      if (ts !== null && ts < cutoff) {
+        await appStorage.delete(name);
+        // console.log(`[autosave.gc] deleted ${name}`);
+      }
+    } catch {
+      // best-effort cleanup; ignore individual errors
+    }
+  }
+} // gcOldAutoSaves()
+
+///
+//// Keeping UI focused for keybindings
+///
 
 
 //// focusOnRoot called from input handling on esc to make sure all keybindings work.
