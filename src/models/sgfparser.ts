@@ -66,8 +66,8 @@ export class ParsedNode implements IMoveNext {
   }
   ///
   get IMNColor (): StoneColor {
-      if (this.properties["B"]) return StoneColors.Black;
-      if (this.properties["W"]) return StoneColors.White;
+      if ("B" in this.properties) return StoneColors.Black;
+      if ("W" in this.properties) return StoneColors.White;
       // Note, setup nodes in the middle of game moves initially show up transparent in the game tree.
       // That signals an odd node. Converting to a Move object as we reify moves gives it color
       // when the tree redraws.
@@ -83,8 +83,8 @@ export class ParsedNode implements IMoveNext {
     let s = newline ? "\n;" : ";";
 
     // Print move property first for human  readability
-    if (props["B"]) s += "B" + this.escapePropertyValues("B", props["B"]);
-    if (props["W"]) s += "W" + this.escapePropertyValues("W", props["W"]);
+    if ("B" in props) s += "B" + this.escapePropertyValues("B", props["B"]);
+    if ("W" in props) s += "W" + this.escapePropertyValues("W", props["W"]);
 
     for (const k of Object.keys(props)) {
       if (k === "B" || k === "W") continue;
@@ -93,11 +93,10 @@ export class ParsedNode implements IMoveNext {
     return s;
   }
 
-        //// _escaped_property_values returns a node's property value with escapes so that the .sgf
-        //// is valid.  So, ] and \ must be preceded by a backslash.
-  private escapePropertyValues(_id: string, values: string[]): string {
-    // SGF escaping: ']' and '\' are escaped with '\'
-    // (Keep canonical; we do not reflow whitespace here.)
+  /// escapePropertyValues returns a node's property values with escapes so that the .sgf
+  /// is valid.  So, ] and \ must be preceded by a backslash.
+  ///
+  private escapePropertyValues (_id: string, values: string[]): string {
     let res = "";
     for (const v of values) {
       res += "[";
@@ -114,7 +113,7 @@ export class ParsedNode implements IMoveNext {
     }
     return res;
   }
-}
+} // ParsedNode class
 
 ///
 /// Parser
@@ -128,32 +127,42 @@ export function parseFile (text: string): ParsedGame {
   return g;
 }
 
-function parseNodes(lexer: Lexer): ParsedNode {
+/// parseNodes returns a linked list of ParseNodes. It scans for a semi-colon at the start of
+/// the first node. If it encounters an open paren, it recurses and creates branches that
+/// follow the current node, making the next pointer of the current node point to the first
+/// node in the first branch.
+///
+function parseNodes (lexer: Lexer): ParsedNode {
   lexer.scanFor(";", "Must be one node in each branch");
-  let cur = parseNode(lexer);
-  const first = cur;
+  let curnode = parseNode(lexer);
+  const first = curnode;
   let branchingYet = false;
-
   while (lexer.hasData()) {
+    // scan for semicolon or parens (ignoring whitespace), throw error if not found.
+    // Semi-colon starts another node
     const ch = lexer.scanFor(";()", undefined);
     if (ch === ";") {
       if (branchingYet) 
         throw new SGFError(`Found node after branching started -- file location ${lexer.location}.`);
-      cur.next = parseNode(lexer);
-      cur.next.previous = cur;
-      cur = cur.next;
+      curnode.next = parseNode(lexer);
+      curnode.next.previous = curnode;
+      curnode = curnode.next;
+    // open paren starts a branch
     } else if (ch === "(") {
-      // Degenerate files (e.g., OGS) where every move is a new branch are supported.
+      // This can parse degenerate files like OGS produces where every move is a new branch.
+      // ReadyForRendering() forms a proper Move object, but CutNextParseNode has to
+      // explicitly check for a branches list of length one.  GenParsedNodes forms proper ParseNodes.
       if (!branchingYet) {
-        cur.next = parseNodes(lexer);
-        cur.next.previous = cur;
-        cur.branches = [cur.next];
+        curnode.next = parseNodes(lexer);
+        curnode.next.previous = curnode;
+        curnode.branches = [curnode.next];
         branchingYet = true;
       } else {
         const n = parseNodes(lexer);
-        n.previous = cur;
-        (cur.branches ??= []).push(n);
+        n.previous = curnode;
+        curnode.branches!.push(n);
       }
+    // close paren stops list of nodes
     } else if (ch === ")") {
       return first;
     } else {
@@ -161,26 +170,29 @@ function parseNodes(lexer: Lexer): ParsedNode {
     }
   }
   throw new SGFError(`Unexpectedly hit EOF -- file location ${lexer.location}.`);
-}
+} // parseNodes()
 
-function parseNode(lexer: Lexer): ParsedNode {
+/// parseNode returns a ParseNode with its properties filled in.
+///
+function parseNode (lexer: Lexer): ParsedNode {
   const node = new ParsedNode();
   while (lexer.hasData()) {
     const id = lexer.getPropertyId();
-    if (!id) {
-      if (!(node.properties["B"] || node.properties["W"])) {
+    if (id === null) {
+      if (! ("B" in node.properties || "W" in node.properties)) {
+        // This is overwritten in game.cs ParsedNodeToMove.
         node.badNodeMessage = "no B or W; marking as setup/odd node";
       }
+      // Expected to return from here due to no properties or syntax at end of properties.
       return node;
     }
-    if (Object.prototype.hasOwnProperty.call(node.properties, id)) {
+    if (id in node.properties) {
       throw new SGFError(`Encountered ID, ${id}, twice for node -- file location ${lexer.location}.`);
     }
     lexer.scanFor("[", "Expected property value");
     const values: string[] = [];
     node.properties[id] = values;
-
-    // Collect multiple values for the same property: [v1][v2]...
+    // Loop values for one property
     while (lexer.hasData()) {
       values.push(lexer.getPropertyValue(id === "C" || id === "GC"));
       const [pos] = lexer.peekFor("[");
@@ -200,53 +212,63 @@ class Lexer {
   private len: number;
   private idx: number;
 
-  constructor(contents: string) {
-    this.data = contents ?? "";
-    this.len = this.data.length;
+  constructor (contents: string) {
+    this.data = contents;
+    this.len = contents.length;
     this.idx = 0;
   }
 
-  get location(): number { return this.idx; }
-  set location(v: number) { this.idx = v; }
+  get location (): number { return this.idx; }
+  set location (v: number) { this.idx = v; }
 
-  hasData(): boolean { return this.idx < this.len; }
+  static readonly WHITESPACE = " \t\n\r\f\v";
 
-  /** scanFor: find one of `chars` after whitespace; advance past it; return that char. */
-  scanFor(chars: string, errmsg?: string): string {
+  /// scanFor scans for any char in chars following whitespace.  If non-whitespace intervenes, this
+  /// is an error.  Scan_for leaves idx after char and returns found char.
+  ///
+  scanFor (chars: string, errmsg?: string): string {
     const [pos, ch] = this.peekFor(chars);
     if (pos === -1) {
       if (errmsg) errmsg = `${errmsg} -- file location ${this.idx}`;
       throw new SGFError(errmsg ?? `Expecting one of '${chars}' while scanning -- file location ${this.idx}`);
     }
-    this.idx = pos; // pos is AFTER the found char
+    this.idx = pos; 
     return ch;
   }
 
-  /** peekFor: look for one of `chars` after skipping whitespace; do not advance. */
-  peekFor(chars: string): [number, string] {
+  /// peekFor scans for any char in chars following whitespace.  If non-whitespace intervenes, this
+  /// is an error.  peekFor leaves idx unmodified.  It returns the index after the found char or -1.
+  ///
+  peekFor (chars: string): [number, string] {
     let i = this.idx;
-    while (i < this.len) {
+    while (this.hasData()) {
       const c = this.data[i];
       i += 1;
-      if (isWhitespace(c)) continue;
+      if (Lexer.WHITESPACE.includes(c)) continue;
       if (chars.includes(c)) return [i, c];
       return [-1, "\0"];
     }
     return [-1, "\0"];
   }
 
-  /** GetPropertyId: skip whitespace; read consecutive [A-Za-z] letters as the ID; else null. */
-  getPropertyId(): string | null {
-    let i = this.idx;
-    while (i < this.len && isWhitespace(this.data[i])) i++;
-    if (i >= this.len) return null;
+  hasData(): boolean { return this.idx < this.len; }
 
+  /// getPropertyId skips any whitespace and expects to find alphabetic chars that form a property 
+  /// name.  
+  ///
+  getPropertyId (): string | null {
+    let i = this.idx;
+    // skip whitespace
+    while (i < this.len && Lexer.WHITESPACE.includes(this.data[i])) i++;
+    if (i >= this.len) return null;
+    // is there an identifier ...
     let start = i;
     while (i < this.len) {
       const c = this.data[i];
       const code = c.charCodeAt(0);
+      // could make constants, but really ASCII A=65, Z=90, a=97, z=122 isn't goign to change :-)
       const isAlpha = (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
-      if (!isAlpha) break;
+      if (! isAlpha) break;
       i++;
     }
     if (i === start) return null;
@@ -255,17 +277,31 @@ class Lexer {
     return id;
   }
 
-  /** GetPropertyValue: consume chars after '[' up to next unescaped ']' with SGF text/simpletext rules. */
-  getPropertyValue(keepNewlines: boolean): string {
+  /// getPropertyValue takes a flag as to whether un-escaped newlines get mapped to space or
+  /// kept as-is.  It gobbles all the characters after a '[' (which has already been consumed)
+  /// up to the next un-escaped ']' and returns the characters as a string.  keepNewlines
+  /// distinguishes properties like C and GC that can have newlines in their values, but
+  /// otherwise, newlines are assumed to be purely line-length management in the .sgf file and
+  /// treated as spaces.
+  ///
+  /// SGF "text" properties can have newlines, newlines following \ are replaced with space, along
+  /// with the \, other escaped chars are kept verbatim except whitespace is converted to space.
+  ///
+  /// SGF "simpletext" properties are the same as "text" but have no newlines.
+  ///
+  getPropertyValue (keepNewlines: boolean): string {
     let res = "";
     while (this.hasData()) {
-      let c = this.data[this.idx++];
+      let c = this.data[this.idx];
+      this.idx++;
       if (c < " ") {
         // Map whitespace to spaces; treat newline sequences specially.
         const [newline] = this.checkPropertyNewline(c);
         if (newline) {
           if (keepNewlines) {
-            // Canonicalize to CRLF (matches your model’s canonicalization)
+            // Canonicalize newlines because 1) would write mixed newline sequences in different
+            // places in .sgf depending on comments vs. other syntax, and 2) React textbox converts
+            // all line endings (with no option to preserve them) \n.
             res += "\r\n";
           } else {
             res += " ";
@@ -275,10 +311,11 @@ class Lexer {
         }
       } else if (c === "\\") {
         // Backslash quotes next char and erases newline sequences
-        if (!this.hasData()) break;
-        const n = this.data[this.idx++];
-        const [nIsNewline] = this.checkPropertyNewline(n);
-        if (!nIsNewline) res += n;
+        //if (!this.hasData()) break;
+        c = this.data[this.idx];
+        this.idx++;
+        const [newline] = this.checkPropertyNewline(c);
+        if (!newline) res += c;
       } else if (c === "]") {
         return res;
       } else {
@@ -288,8 +325,11 @@ class Lexer {
     throw new SGFError("Unexpectedly hit EOF!");
   }
 
-  /** CheckPropertyNewline: if c is part of a newline sequence, consume optional second char and report. */
-  private checkPropertyNewline(c: string): [boolean, string] {
+  /// checkPropertyNewline checks if c is part of a newline sequence. If it is, then see
+  /// if there's a second newline sequence character and gobble it. Returns whether there
+  /// was a newline sequence and what the second char was if it was part of the sequence.
+  ///
+  private checkPropertyNewline (c: string): [boolean, string] {
     if (c === "\n" || c === "\r") {
       const c2 = this.data[this.idx];
       if (c2 === "\n" || c2 === "\r") {
@@ -301,12 +341,6 @@ class Lexer {
     return [false, "\0"];
   }
 }
-
-function isWhitespace(c: string): boolean {
-  // SGF treats any <space as whitespace; here we keep it simple.
-  return c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f" || c === "\v";
-}
-
 
 /// SGFError to give cleaner reading code, but basically typescript doesn't have many pre-defined
 /// Error subtypes and none for IOException.

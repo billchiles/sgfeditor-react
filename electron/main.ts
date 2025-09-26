@@ -137,6 +137,8 @@ function createWindow () {
 
   if (devUrl) {
     win.loadURL(devUrl);
+    // The next line can be commented out, but debug window is sort of nice while developing.
+    // c-s-i may launch it on demand if comment out line.
     win.webContents.openDevTools({ mode: "detach" });
   } else {
     //win.loadFile(path.join(__dirname, "..", "dist", "index.html")); error file not found
