@@ -813,7 +813,7 @@ buildSGFStringFlipped (): string {
     pgame.nodes = root;
     // Handle branches
     if (this.branches === null) {
-      if (this.firstMove) {
+      if (this.firstMove !== null) {
         root.next = genParsedNodes(this.firstMove, flipped, this.size);
         root.next.previous = root;
       }
@@ -1731,7 +1731,7 @@ export function copyProperties(src: Record<string, string[]>): Record<string, st
 function genParsedNodes(move: Move, flipped: boolean, size: number): ParsedNode {
   // If move exists and not rendered, delegate to parsed nodes hanging from it.
   if (!move.rendered) {
-    return (flipped === true) ?
+    return flipped ?
       cloneAndFlipNodes(move.parsedNode!, size) :
       (move.parsedNode as ParsedNode);
   }
@@ -1778,7 +1778,7 @@ function genParsedNodes(move: Move, flipped: boolean, size: number): ParsedNode 
 /// supports editing.  For example, if the end user modified adornments.
 ///
 function genParsedNode (move: Move, flipped: boolean, size: number): ParsedNode {
-  if (move.rendered === false) {
+  if (! move.rendered) {
     return flipped ? 
            // If move exists and not rendered, then must be ParsedNode.
            cloneAndFlipNodes(move.parsedNode as ParsedNode, size) :
@@ -1835,8 +1835,9 @@ function genParsedNode (move: Move, flipped: boolean, size: number): ParsedNode 
 function cloneAndFlipNodes (nodes: ParsedNode, size: number): ParsedNode {
   const first = cloneAndFlipNode(nodes, size);
   let curNode = first;
-  if (nodes.branches === null) {
-    let nnodes: ParsedNode | null = nodes.next;
+  let nnodes: ParsedNode | null = nodes; // typescript requires new variable typed for null
+  if (nnodes.branches === null) { 
+    nnodes = nnodes.next; 
     while (nnodes !== null) {
       curNode.next = cloneAndFlipNode(nnodes, size);
       curNode.next.previous = curNode;
@@ -1845,15 +1846,14 @@ function cloneAndFlipNodes (nodes: ParsedNode, size: number): ParsedNode {
         nnodes = nnodes.next;
       } else {
         curNode = curNode.next;
-        nodes = nnodes;
         break;
       }
     }
   } 
   // Only get here when nodes is null from while loop, or we're recursing on branches.
-  if (nodes !== null) {
+  if (nnodes !== null) {
     curNode.branches = [];
-    for (const m of nodes.branches!) {
+    for (const m of nnodes.branches!) {
       const tmp = cloneAndFlipNodes(m, size);
       curNode.branches.push(tmp);
       tmp.previous = curNode;
@@ -1863,14 +1863,13 @@ function cloneAndFlipNodes (nodes: ParsedNode, size: number): ParsedNode {
   return first;
 } // cloneAndFlipNodes()
 
-/// cloneAndFlipNode is similar to _gen_parsed_node.  This returns a
-/// ParsedNode that is a clone of node, but any indexes are diagonally mirror
-/// transposed, see write_flipped_game.
+/// cloneAndFlipNode is similar to genParsedNode.  This returns a ParsedNode that is a clone of 
+/// node, but any indexes are diagonally mirror transposed, see buildSGFStringFlipped.
 ///
 function cloneAndFlipNode (node: ParsedNode, size: number): ParsedNode {
-  const new_node = new ParsedNode();
-  new_node.properties = copyProperties(node.properties);
-  const props = new_node.properties;
+  const newNode = new ParsedNode();
+  newNode.properties = copyProperties(node.properties);
+  const props = newNode.properties;
   // Color
   if ("B" in props) {
     props["B"] = flipCoordinates(props["B"], size);
@@ -1887,7 +1886,7 @@ function cloneAndFlipNode (node: ParsedNode, size: number): ParsedNode {
   if ("LB" in props) {
     props["LB"] = flipCoordinates(props["LB"], size, true);
   }
-  return new_node;
+  return newNode;
 }
 
 /// flipCoordinates takes a list of parsed coordinate strings and returns the
@@ -1895,12 +1894,12 @@ function cloneAndFlipNode (node: ParsedNode, size: number): ParsedNode {
 /// diagonally flipped (see writeFlippedGame).  This takes the game board size for computing the 
 /// diagonally flipped index.
 ///
-export function flipCoordinates(coords: string[], size: number, labels: boolean = false): string[] {
+export function flipCoordinates (coords: string[], size: number, labels: boolean = false): string[] {
   if (labels) {
     // coords elts are "<col><row>:<letter>"
     const coordPart = coords.map((c) => c.substring(0, c.length - 2));
-    const label = coords.map((c) => c.substring(2, 4));
     const flipped = flipCoordinates(coordPart, size);
+    const label = coords.map((c) => c.substring(2, 4));
     const res: string[] = [];
     for (let i = 0; i < flipped.length; i++) {
       res.push(flipped[i] + label[i]);

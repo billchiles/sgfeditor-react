@@ -552,28 +552,23 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
 async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   // console.log(`saw key:, ${ e.key}, code: e.code, ctrl: ${e.ctrlKey}, meta: ${e.metaKey}, 
   //                          shift: ${e.shiftKey}, target: ${e.target }}`);
-  // Handle keys that don't depend on any other UI having focus ...
   // NOTE: order matters unless testing the state of every modifier.  If not, then test for keys
-  // requiring more modifiers first.
-  //
+  // with more modifiers constraints first.
   // If a modal dialog is open, ignore global key bindings completely.
   if (document.body.dataset.modalOpen === "true") return;
   // Need game in various places
   const curgame = deps.gameRef.current;
-  // Collect some modifiers we repeatedly look at and whether preferred keybindings are hijacked.
+  // Collect some modifiers and letter we repeatedly look at
   const lower = e.key.toLowerCase();
-  const control = e.getModifierState("Control") || e.ctrlKey; //e.getModifierState("CapsLock") || 
+  const control = e.getModifierState("Control") || e.ctrlKey;  
   const shift = e.getModifierState("Shift") || e.shiftKey;
   const alt = e.getModifierState("Alt") || e.altKey;
+  // browser steals common keybindings, no way to hook them, so we test for alternate bindings
   const browser = deps.commonKeyBindingsHijacked;
-  // Use if-then-else flow to make it easier to not fire multiple keys, for example, I test for c-m-
-  // before c-s-m-, which would fire both branches unless I test for not several modifiers always.
-
+  // Handle keys that don't depend on any other UI having focus ...
   // ESC: alway move focus to root so all keybindings work.
   if (lower === "escape" || e.code === "Escape") {
     e.preventDefault();
-    // GPT5 gen, of course, don't blur comment 1) Blur the current editable element
-    //(document.activeElement as HTMLElement | null)?.blur();
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     // Move focus to a safe, focusable container so arrows work immediately
     focusOnRoot();
@@ -587,6 +582,23 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     (e as any).stopImmediatePropagation?.(); // stop any addins from granning keys
     void saveAsCommand(deps);
     return;
+  // Save File
+  } else if (control && ! shift && e.code === "KeyS") { //lower === "s"
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
+    e.preventDefault();
+    void doWriteGameCmd(deps);
+    return;
+  } else if (control && shift && alt && e.code === "KeyF") {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
+    e.preventDefault();
+    void doWriteGameCmd(deps, true); // true = flipped
+  // Open File
+  } else if (e.ctrlKey && !e.shiftKey && lower === "o") {
+    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
+    e.preventDefault();
+    e.stopPropagation();
+    void doOpenButtonCmd(deps); // do not await inside keydown
+    return;
   // Game Info
   } else if ( control && lower === "i") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
@@ -594,51 +606,30 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.stopPropagation();
     gameInfoCmd(curgame, deps.showGameInfo!);
     return;
-  }
-
-  const ctrl_s = control && !shift && e.code === "KeyS"; //lower === "s";&& !e.metaKey
-  const ctrl_o = e.ctrlKey && !e.shiftKey && lower === "o"; //&& !e.metaKey 
-  // Browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
-  const alt_n = !e.ctrlKey && !e.shiftKey && !e.metaKey && e.altKey && lower === "n";
-  const f1 = !control && !shift && !alt && (e.code === "F1" || lower === "f1");
-
-  if (ctrl_s) {
-    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
-    e.preventDefault();
-    void doWriteGameCmd(deps);
-    return;
-  }
-  if (ctrl_o) {
-    deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
-    e.preventDefault();
-    e.stopPropagation();
-    void doOpenButtonCmd(deps); // do not await inside keydown
-    return;
-  }
-  if (alt_n) {
+  // New Game -- browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
+  } else if (! e.ctrlKey && ! e.shiftKey && ! e.metaKey && e.altKey && lower === "n") {
     //deps.setLastCommand( {type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
     // startNewGameFlow sets last command type to NoMatter, but checkDirtySave() may change it
     void deps.startNewGameFlow(); // void explicitly ignores result
     return;
-  }
-  if (!e.ctrlKey && e.shiftKey && !e.altKey && lower === "w") {
+  // Rotate games MRU
+  } else if (! e.ctrlKey && e.shiftKey && ! e.altKey && lower === "w") {
     e.preventDefault();
     //e.stopPropagation(); Can't stop chrome from taking c-w, so using s-w
     gotoNextGameCmd(deps,deps.getLastCommand()); // sets last command type
     return;
-  }
   // F1: show Help dialog
-  if (f1) {
+  } else if (! control && ! shift && ! alt && (e.code === "F1" || lower === "f1")) {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
     deps.showHelp?.();
     return;
-  }
   // c-F4: Close Game
-  if (control && (e.code === "F4" || lower === "f4")) {
+  } else if ((control && (e.code === "F4" || lower === "f4")) ||
+             (! browser && control && alt && (e.code === "F4" || lower === "f4"))) {
     //deps.setLastCommand({ type: CommandTypes.NoMatter }); set in closeGameCmd
     e.preventDefault();
     e.stopPropagation();
@@ -755,8 +746,29 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
         await curgame.message?.message("No other game has a cut move at this time.");
     return;
   }
+  // copy pathname to clipboard
+  else if (! shift && ! alt && control && e.code === "KeyC") {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
+    e.preventDefault();
+    e.stopPropagation();
+    // filename is full path in Electron; filebase in browser
+    const text = curgame.filename ?? curgame.filebase ?? ""; 
+    if (text === "") {
+      await deps.showMessage?.("No file is associated with the current game.");
+      return;
+    }
+    // web clipboard API (works in Electron too)
+    try {
+      await navigator.clipboard.writeText(text);
+      // deps.showMessage?.(`Copied: ${text}`);
+    } catch {
+      // If the browser disallows it (e.g., not a secure context), let the user know.
+      deps.showMessage?.("Copy failed (clipboard permissions).");
+    }
+    return;
+  } // copy file name
 
-}
+} // handlekeypress()
 
 /// isEditingTarget return true if the element that sourced the event has user editable content,
 /// as text boxes, <p>'s where iscontenteditable=true is set, <div>'s, etc.
@@ -1169,27 +1181,28 @@ function undoLastGameCreation (game: Game | null) {
 ///
 
 async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastCommand, 
-                                 appStorageBridge }: CmdDependencies):
+                                 appStorageBridge }: CmdDependencies, flipped = false):
     Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
   // Update model
   g.saveCurrentComment();
   // Do the save
-  const data = g.buildSGFString();
-  const hint = g.filename ?? "game.sgf";
-  const res = await fileBridge.save(g.saveCookie ?? null, hint, data);
-  // call before returning to ensure back at top
+  const data = flipped ? g.buildSGFStringFlipped() : g.buildSGFString();
+  const hint = flipped ? "flipped-game-view.sgf" : (g.filename ?? "game.sgf");
+  const res = await fileBridge.save(flipped ? null : (g.saveCookie ?? null), hint, data);
   if (!res) return; // user cancelled dialog when there was no saveCookie or filename.
-  g.isDirty = false;
-  const { fileName, cookie } = res;
-  // If saved file, remove any auto save
-  const autoSaveName = getAutoSaveName(fileName);
-  if (await appStorageBridge.exists(autoSaveName))
-    await appStorageBridge.delete(autoSaveName); 
-  // Save file info, signal UI, and set focus ...
-  if (fileName !== g.filename || cookie !== g.saveCookie) {
-    g.saveGameFileInfo(cookie, fileName);
+  if (! flipped) {
+    g.isDirty = false;
+    const { fileName, cookie } = res;
+    // If saved file, remove any auto save
+    const autoSaveName = getAutoSaveName(fileName);
+    if (await appStorageBridge.exists(autoSaveName))
+      await appStorageBridge.delete(autoSaveName); 
+    // Save file info, signal UI, and set focus ...
+    if (fileName !== g.filename || cookie !== g.saveCookie) {
+      g.saveGameFileInfo(cookie, fileName);
+    }
   }
   bumpVersion(); // update status area for is dirty and possible filename
   focusOnRoot(); 

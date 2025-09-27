@@ -47,11 +47,12 @@ SAVING FILES, SAVE AS
 The save button (or ctrl-s) saves to the associated file name if there is one;
 otherwise it prompts for a filename.  If there is a filename, but the game state
 is not dirty, then it prompts to save to a different filename (and tracks to the
-new name).  To explicitly get save-as behavior, use ctrl-alt-s.  Ctrl-c copies filepath to clipboard.
+new name).  To explicitly get save-as behavior, use ctrl-alt-s (browser) or 
+ctrl-shift-s (electron).  Ctrl-c copies filepath to clipboard.
 
 SAVING REVERSE VIEW
-To save the game so that your opponent can review it from his point of view, use
-ctrl-alt-f.  (Would prefer ctrl-shift-s or alt-s, .NET won't deliver them as input.)
+To save the game so that your opponent can review it from their point of view, use
+ctrl-shift-alt-f in browser and electron.
 
 CUTTING MOVES/SUB-TREES AND PASTING
 Delete or c-x cuts the current move (and sub tree), making the previous move the
