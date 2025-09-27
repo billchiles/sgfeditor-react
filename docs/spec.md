@@ -95,6 +95,10 @@ React UI (App/AppContent/GoBoard)     Model (Game, Board, Move, ParsedNode)     
   * Store autosaves (e.g., `autosave/<hash>.sgf`) and user preferences.
 
 > Electron later: swap bridge implementations (same API), keep UI/model unchanged.
+* **KeyBindingBridge (global shortcuts)**
+
+  * Register/unregister handlers; expose `commonKeyBindingsHijacked` to hint browser vs Electron.
+  * In Electron (`false`), use native menu/accelerators; in browser (`true`), avoid hijacked combos.
 
 ---
 
@@ -354,7 +358,14 @@ Perfect—paste this at the very end of `spec.md`:
 * **Autosave**
 
   * Location: `appStorage/autosave/<gameId>.sgf` (OPFS when available; else `localStorage` with base64).
-  * Timing: on every successful command that mutates model **and** throttled (e.g., 1s debounce).
+  * Timing:
+    * Interval autosave every **45s** while editing.
+    * Inactivity autosave after **~5s** pause.
+    * Cleanup: after successful **Save/Save As**, delete autosave for that game.
+  * Autosave filename policy:
+    * Unnamed games: `unnamed-new-game-autosave.sgf`.
+    * Named games: insert `-autosave` before the `.sgf` extension (case-insensitive).
+  * Garbage collection: delete autosaves older than **7 days** (best-effort).
   * Cleanup: after successful **Save/Save As**, delete autosave for that game.
 * **Open flow**
 
@@ -365,10 +376,31 @@ Perfect—paste this at the very end of `spec.md`:
 
   * `fileBridge.save(handle?, () => serialize(game))`; if no handle, run `saveAs`.
   * On success: clear dirty, cleanup autosave.
+  * Save **Flipped**: build SGF with diagonally flipped coordinates (moves & adornments) and force a **Save As** path.
 
 ---
 
-# 20) SGF Read/Write Contract
+# 20) Dialog Details (Message, New Game, Game Info)
+
+## MessageDialog (confirm with optional in-click actions)
+* API: `confirmMessage(text, opts?: { title?, primary?, secondary?, onConfirm?, onCancel? }) → Promise<boolean>`
+* **Transient user activation**: If a native file picker must open as a consequence of the choice, run it **inside** the button’s onClick (`onConfirm`/`onCancel`) so the browser treats it as user-initiated. Avoid calling pickers after `await` returns.
+* Primary button autofocus; `Esc`/overlay resolve `false` and may call `onCancel`.
+
+## NewGameDialog
+* Wrapped in a `<form>` so **Enter == Create**; `Esc` cancels.
+* Validates handicap (integer 0–9). Focuses first field on open.
+
+## GameInfoDialog
+* Updates fields only on actual change; sets `isDirty` accordingly.
+* Normalizes UI `\n` to model `\r\n` for the root comment.
+* `miscGameInfo` stores standard SGF headers as single-string arrays; empty removes the key; unknown keys are preserved.
+
+## Shutdown hooks (persistence)
+* **Browser**: `pagehide` triggers a best-effort final autosave.
+* **Electron**: main process requests a final save; renderer performs it and signals completion.
+
+# 21) SGF Read/Write Contract
 
 * **Read**: Support at least `(;FF?,CA?,SZ,HA,KM,PB,PW,BR,WR,GN,C,LB,TR,SQ; B,W,…)` plus variations/branches.
 * **Write**:
@@ -381,7 +413,7 @@ Perfect—paste this at the very end of `spec.md`:
 
 ---
 
-# 21) Call Flows (reference)
+# 22) Call Flows (reference)
 
 * **New Game**: UI click/**Alt+N** → `checkDirtySave` → shell opens modal → `onCreate` → provider constructs `Game` (size/handicap/komi/names) → set as current → `onChange→bumpVersion`.
 * **Open**: UI click/**Alt+O** → `checkDirtySave` → `fileBridge.open` → parse → new `Game` → set current → autosave check → `onChange`.
@@ -397,16 +429,7 @@ Perfect—paste this at the very end of `spec.md`:
 
 ---
 
-# 23) Testing Strategy (quick start)
-
-* **Model**: capture/removal edge cases; branching select/up/down; handicap stone invariants.
-* **SGF**: golden round-trip tests; adornment edge cases; unknown-root-prop preservation.
-* **Bridges**: feature-detect shims; `hasFS` → picker vs `<input type=file>` fallback.
-* **UI**: smoke tests for modals (Enter/Esc), focus trap, and blocked-hotkey fallbacks.
-
----
-
-# 24) Performance Guardrails
+# 23) Performance Guardrails
 
 * Re-render budget: < 4 ms for a 300-stone board on a mid-tier laptop.
 * Memoize geometry; render stones layer keyed by `version` and board-size/viewport only.
@@ -414,7 +437,7 @@ Perfect—paste this at the very end of `spec.md`:
 
 ---
 
-# 25) Electron Compatibility Matrix (future)
+# 24) Electron Compatibility Matrix (future)
 
 * Same bridge interfaces; `KeyBindingBridge` sets `commonKeyBindingsHijacked = false`.
 * Menu accelerators route directly to provider commands.
