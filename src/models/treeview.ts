@@ -85,20 +85,20 @@ export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: Pa
                                          branches: Move[] | null;}): (TreeViewNode | null)[][] {
   let start: IMoveNext | null = null;
   // Get start node
-  if (game.firstMove !== null) {
-    if (game.firstMove.rendered) {
+  // if (game.firstMove !== null) {
+  //   if (game.firstMove.rendered) { // todo xxx
       // Mock a move for empty board state.
       const m = new Move(-1, -1, StoneColors.NoColor);
-      m.next = game.firstMove;
-      m.branches = game.branches;
+      m.next = game.firstMove ?? (game.parsedGame?.moves ?? null);
+      m.branches = game.branches ?? (game.parsedGame?.branches ?? null);
       m.rendered = false;
       start = m as IMoveNext;
-    }
-    else if (game.parsedGame !== null /* This test should be same as g.pg.nodes !== null. */) {
-      // NB: ParsedGame.Nodes is the root ParsedNode
-      start = (game.parsedGame.nodes as unknown) as IMoveNext;
-    }
-  }
+    // }
+    // else if (game.parsedGame !== null /* This test should be same as g.pg.nodes !== null. */) {
+    //   // ParsedGame.Nodes is the root ParsedNode
+    //   start = (game.parsedGame.nodes as unknown) as IMoveNext;
+    // }
+  // } // todo xxx
   // Get layout
   const layoutData = new TreeViewLayoutData();
   if (start !== null)
@@ -139,12 +139,8 @@ export function layoutGameTreeFromRoot(pn: IMoveNext, layoutData: TreeViewLayout
   let tree_depth = 0;
   let new_branch_depth = 0;
   let branch_root_row = 0;
-
   // Setup initial node model.
-  // Can't use 'var', must decl with 'TreeViewNode'.  C# doesn't realize all NewTreeModelStart
-  // definitions return a TreeViewNode.
   const model = newTreeModelStart(pn, layoutData);
-
   // Return model, or get next model.
   let next_model: TreeViewNode;
   if (getLayoutGameTreeNext(pn) === null) {
@@ -157,7 +153,6 @@ export function layoutGameTreeFromRoot(pn: IMoveNext, layoutData: TreeViewLayout
                                 tree_depth + 1, new_branch_depth, branch_root_row);
     model.next = next_model;
   }
-
   // Store start model and layout any branches for first move.
   // Don't need to call StoreTreeViewNode since definitely do not need to grow model matrix.
   layoutData.treeGrid[model.row][tree_depth] = model;
@@ -171,8 +166,6 @@ export function layoutGameTreeFromRoot(pn: IMoveNext, layoutData: TreeViewLayout
 // but ParsedNodes always chain Next to Branches[0] if there are branches. We always want the top branch.
 //
 function getLayoutGameTreeNext(pn: IMoveNext): IMoveNext | null {
-  // Can't dynamically invoke Assert for some reason, and C# doesn't bind only matching
-  // method at compile time.
   // Debug.Assert(pn.GetType() !== typeof(Game));
   if (pn.IMNBranches !== null)
     return pn.IMNBranches[0];
@@ -189,17 +182,12 @@ function getLayoutGameTreeNext(pn: IMoveNext): IMoveNext | null {
 // tree_depth is just that, and branch_depth is the heigh to the closest root node of a
 // branch, where its immediate siblings branch too.
 //
-export function layoutGameTree(
-  pn: IMoveNext,
-  layoutData: TreeViewLayoutData,
-  cum_max_row: number,
-  tree_depth: number,
-  branch_depth: number,
-  branch_root_row: number
-): TreeViewNode {
+export function layoutGameTree(pn: IMoveNext, layoutData: TreeViewLayoutData, cum_max_row: number,
+                               tree_depth: number, branch_depth: number, branch_root_row: number
+                              ): TreeViewNode {
   // Check if done with rendered nodes and switch to parsed nodes.
-  if ((pn as any).rendered === false && (pn as any).parsedNode !== null)
-    pn = ((pn as any).parsedNode) as unknown as IMoveNext;
+  // if ((pn as any).rendered === false && (pn as any).parsedNode !== null) // todo xxx
+  //   pn = ((pn as any).parsedNode) as unknown as IMoveNext; // typescript hack to silence compiler
 
   // Create and init model, set
   const model = setupTreeLayoutModel(pn, layoutData, cum_max_row, tree_depth);
@@ -236,14 +224,8 @@ export function layoutGameTree(
   return bend;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-function layoutGameTreeBranches(
-  pn: IMoveNext,
-  layoutData: TreeViewLayoutData,
-  tree_depth: number,
-  model: TreeViewNode,
-  next_model: TreeViewNode
-): void {
+function layoutGameTreeBranches(pn: IMoveNext, layoutData: TreeViewLayoutData, tree_depth: number,
+                                model: TreeViewNode, next_model: TreeViewNode): void {
   if (pn.IMNBranches !== null) {
     model.branches = [next_model];
     // Skip branches[0] since caller already did branch zero as pn's next move, but note, when
@@ -256,16 +238,11 @@ function layoutGameTreeBranches(
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
 // setup_layout_model initializes the current node model for the display, with row, column,
 // color, etc.  This returns the new model element.
 //
-function setupTreeLayoutModel(
-  pn: IMoveNext,
-  layoutData: TreeViewLayoutData,
-  cum_max_row: number,
-  tree_depth: number
-): TreeViewNode {
+function setupTreeLayoutModel (pn: IMoveNext, layoutData: TreeViewLayoutData, cum_max_row: number,
+                              tree_depth: number): TreeViewNode {
   const model: TreeViewNode = {
     kind: TreeViewNodeKinds.Move,
     node: pn,
@@ -361,7 +338,6 @@ function maybeAddBendNode(
   return curNode;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
 function storeTreeViewNode(layoutData: TreeViewLayoutData, tree_depth: number, model: TreeViewNode): void {
   if (model.row >= treeViewModelRows || tree_depth >= treeViewModelColumns)
     growTreeView(layoutData);
@@ -370,7 +346,6 @@ function storeTreeViewNode(layoutData: TreeViewLayoutData, tree_depth: number, m
   layoutData.treeGrid[model.row][tree_depth] = model;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
 function growTreeView(layoutData: TreeViewLayoutData): void {
   // Update globals for sizes
   treeViewModelColumns = treeViewModelColumns + Math.floor(treeViewModelColumns / 2);

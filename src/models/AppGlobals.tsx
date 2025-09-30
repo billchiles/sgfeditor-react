@@ -21,7 +21,7 @@ import type { MessageOrQuery } from "./Game";
 import { browserFileBridge, browserAppStorageBridge, browserKeybindings } from "../platforms/browser-bridges";
 import { fileBridgeElectron, keyBindingBridgeElectron } from '../platforms/electron-bridges';
 import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platforms/bridges";
-import {parseFile, SGFError, ParsedNode} from "./sgfparser";
+import {parseFile, SGFError, ParsedNode, parseFileToMoves} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
 import { Board, type Move } from "./Board";
 import type { ConfirmOptions } from "../components/MessageDialog";
@@ -247,7 +247,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     g.onTreeHighlightChange  = bumpTreeHighlightVersion;
     g.onParsedNodeReified = (oldKey, newMove) => {
       // calls into TreeView to: delete(oldKey); set(newMove, node); node.node = newMove;
-      treeRemapperRef.current?.(oldKey, newMove); 
+      treeRemapperRef.current?.(oldKey, newMove); // todo xxx should be no op now
     };
     g.getComments = getComment;
     g.setComments = setComment;    
@@ -665,7 +665,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   if (lower === "arrowright" && curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
-    const m = curgame.replayMove();
+    const m = await curgame.replayMove();
     if (m !== null) {
       deps.bumpVersion();
       deps.bumpTreeHighlightVersion();
@@ -1161,7 +1161,10 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
   } else if (data === "") {
     throw new Error(`Eh?! fileHandle is null, data empty, wassup?! ${(fileHandle as any).name}`);
   }
-  const pg = parseFile(data);
+  // let pg = parseFile(data);
+  // XXXXXXXXXXXXXXXXXXXXXXX get next line to work, port createGameFromParsedMoves, roudtrip read/write
+  const pg = parseFileToMoves(data);
+  // pg = wah; // return pg to const when done
   const g = await createGameFromParsedGame(pg, cleanup.curGame, cleanup.setGame, 
                                            cleanup.getGames, cleanup.setGames,
                                            cleanup.getDefaultGame, cleanup.setDefaultGame);
@@ -1188,7 +1191,7 @@ async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastComman
   // Update model
   g.saveCurrentComment();
   // Do the save
-  const data = flipped ? g.buildSGFStringFlipped() : g.buildSGFString();
+  const data = flipped ? g.buildSGFStringFlipped() : g.buildSGFStringV2(); // todo xxx
   const hint = flipped ? "flipped-game-view.sgf" : (g.filename ?? "game.sgf");
   const res = await fileBridge.save(flipped ? null : (g.saveCookie ?? null), hint, data);
   if (!res) return; // user cancelled dialog when there was no saveCookie or filename.

@@ -100,7 +100,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     if (!app?.setTreeRemapper) return;
     const remap = (oldKey: IMoveNext, newMove: IMoveNext) => {
       // oldkey is a ParsedNode
-      const node = treeViewMoveMap.get(oldKey);
+      const node = treeViewMoveMap.get(oldKey); // todo xxx should always be null now -> no op
       if (!node) return;
       treeViewMoveMap.delete(oldKey);
       treeViewMoveMap.set(newMove, node);
@@ -196,44 +196,44 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   }, [app, treeViewMoveMap]);
 
   function gotoGameTreeMove(move: Move): boolean {
-  const g = app.getGame();
-  //if (!g) return false;
-  let res = true;
-  const path = g.getPathToMove(move);
-  if (path !== g.TheEmptyMovePath) {
-    if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
-    // Do not update UI using move, use CurrentMove because we didn't make it to move's position.
-    const curmove = g.currentMove;
-    if (curmove !== null) //{
-      app.setComment?.(curmove.comments);
-    // } else {
-    //   app.setComment?.(g.comments);
-    // }
+    const g = app.getGame();
+    //if (!g) return false;
+    let res = true;
+    const path = g.getPathToMove(move);
+    if (path !== g.TheEmptyMovePath) {
+      if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
+      // Do not update UI using move, use CurrentMove because we didn't make it to move's position.
+      const curmove = g.currentMove;
+      if (curmove !== null) //{
+        app.setComment?.(curmove.comments);
+      // } else {
+      //   app.setComment?.(g.comments);
+      // }
+    }
+    return res;
   }
-  return res;
-}
 
-function gotoGameTreeParsedNode(move: ParsedNode): boolean {
-  // Hack attempt to abort tree clicks on bad parsenodes.  sgfparser.ts ParseNode funct didn't store
-  // msg, game.ts ParsedNodeToMove adds bad node msg, but this is a hack to see a sentinel taint
-  // (don't compare string's contents), then disallow clicking on bad parsenodes in the game tree.
-  if (move.badNodeMessage !== null)
-    return false;
-  const g = app.getGame();
-  //if (!g) return false;
-  let res = true;
-  const path = g.getPathToParsedNode(move);
-  if (path !== g.TheEmptyMovePath) {
-    if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
-    const curmove = g.currentMove;
-    if (curmove !== null) //{
-      app.setComment?.(curmove.comments);
-    // } else {
-    //   app.setComment?.(g.comments);
-    // }
+  function gotoGameTreeParsedNode(move: ParsedNode): boolean {
+    // Hack attempt to abort tree clicks on bad parsenodes.  sgfparser.ts ParseNode funct didn't store
+    // msg, game.ts ParsedNodeToMove adds bad node msg, but this is a hack to see a sentinel taint
+    // (don't compare string's contents), then disallow clicking on bad parsenodes in the game tree.
+    if (move.badNodeMessage !== null) // todo xxx update to move.parsedbadNodeMessage
+      return false;
+    const g = app.getGame();
+    //if (!g) return false;
+    let res = true;
+    const path = g.getPathToParsedNode(move);
+    if (path !== g.TheEmptyMovePath) {
+      if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
+      const curmove = g.currentMove;
+      if (curmove !== null) //{
+        app.setComment?.(curmove.comments);
+      // } else {
+      //   app.setComment?.(g.comments);
+      // }
+    }
+    return res;
   }
-  return res;
-}
 
   // Locate the current node’s rect in client coords and adjust scroll if out of view
   // Scroll-to-current behavior
@@ -431,7 +431,8 @@ function gotoGameTreeParsedNode(move: ParsedNode): boolean {
               {cell.kind === TreeViewNodeKinds.Move && (() => {
                 const n: any = cell.node;
                 let num = typeof n?.number === "number" ? n.number : null;
-                if (num === null) num = cell.column;
+                // unrendered moves have a number that is zero, all actual moves have number > 0
+                if (num === null || num === 0) num = cell.column;
                 const numFill = cell.color === StoneColors.Black ? "#fff" : "#000";
                 const numStr = String(num);
                 const numFontSize = numStr.length >= 3 ? "10pt" : "12pt";

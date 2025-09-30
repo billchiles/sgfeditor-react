@@ -5,6 +5,7 @@ import { Board, Move, StoneColors, oppositeColor, parsedToModelCoordinates,
          getParsedCoordinates, flipParsedCoordinates } from './Board';
 import { type StoneColor, type Adornment, type AdornmentKind, AdornmentKinds} from './Board';
 import { ParsedGame, ParsedNode } from './sgfparser';
+import { PrintNode } from './sgfparser';
 import { SGFError } from './sgfparser';
 
 export const DEFAULT_BOARD_SIZE = 19;
@@ -647,7 +648,7 @@ gotoStart(): void {
       }
       hadParseErr = err;
       // Don't need view model object in code here, but need to ensure there is one mapped by move.
-      this.treeViewNodeForMove(move);
+      // this.treeViewNodeForMove(move); // todo xxx should be no op now, no parsednodes every mapped
     }
     this.moveCount += 1;
     // Apply captures
@@ -673,47 +674,49 @@ gotoStart(): void {
     debugAssert(pn !== null, "Only call readyForRendering on moves made from parsed nodes.");
     let mnext: Move | null = null;
     let hadErr = false;
-    let oneGood = false;
-    if (pn.branches !== null && pn.branches.length > 0) { // gpt5 added length test but unnecessary
-      const branchMoves: Move[] = [];
-      for (const n of pn.branches) {
-        const m = parsedNodeToMove(n, this.board.size); 
-        if (m === null) { // No longer return if m is null.  Some branches are viewable.  
-          hadErr = true; // Let callers know there was an issue, but other branches may be valid.
-          continue;
-        }
-        // Have to add ! everywhere, typescript can't tell null doesn't flow down here.
-        oneGood = true;
-        m!.number = this.moveCount + 2;
-        m!.previous = move;
-        // Check if parsed node was a setup node in the middle of game nodes. Need to set color
-        // because ParsedNodeToMove has no access to Game.nextColor.
-        if (m!.comments.includes(SetupNodeCommentStart)) {
-          m!.color = oppositeColor(move.color);
-        }
-        branchMoves.push(m!);
-      }
-      if (!oneGood) return [null, true];
-      if (branchMoves.length > 1)
-         move.branches = branchMoves;
-      mnext = branchMoves[0];
-    } else if (pn.next !== null) {
-      mnext = parsedNodeToMove(pn.next, this.board.size);
-      if (mnext === null) {
-        return [null, true];
-      }
-      // Have to add ! everywhere, typescript can't tell null doesn't flow down here.
-      oneGood = true;
-      mnext!.number = this.moveCount + 2;
-      mnext!.previous = move;
-      if (mnext!.comments.includes(SetupNodeCommentStart)) {
-        mnext!.color = oppositeColor(move.color);
-      }
-    } else {
-      oneGood = true; // no branches, no next move to render, good to go
-    }
-    move.next = mnext;
+    let oneGood = false; // todo xxx when no longer have ParsedNodes, just check for badNodeMessage, get adornments, etc.
+    // if (pn.branches !== null && pn.branches.length > 0) { // gpt5 added length test but unnecessary
+    //   const branchMoves: Move[] = [];
+    //   for (const n of pn.branches) {
+        // const m = parsedNodeToMove(n, this.board.size); 
+    //     if (m === null) { // No longer return if m is null.  Some branches are viewable.  
+    //       hadErr = true; // Let callers know there was an issue, but other branches may be valid.
+    //       continue;
+    //     }
+    //     // Have to add ! everywhere, typescript can't tell null doesn't flow down here.
+    //     oneGood = true;
+    //     m!.number = this.moveCount + 2;
+    //     m!.previous = move;
+    //     // Check if parsed node was a setup node in the middle of game nodes. Need to set color
+    //     // because ParsedNodeToMove has no access to Game.nextColor.
+    //     if (m!.comments.includes(SetupNodeCommentStart)) {
+    //       m!.color = oppositeColor(move.color);
+    //     }
+    //     branchMoves.push(m!);
+    //   }
+    //   if (!oneGood) return [null, true];
+    //   if (branchMoves.length > 1)
+    //      move.branches = branchMoves;
+    //   mnext = branchMoves[0];
+    // } else if (pn.next !== null) {
+    //   mnext = parsedNodeToMove(pn.next, this.board.size);
+    //   if (mnext === null) {
+    //     return [null, true];
+    //   }
+    //   // Have to add ! everywhere, typescript can't tell null doesn't flow down here.
+    //   oneGood = true;
+    //   mnext!.number = this.moveCount + 2;
+    //   mnext!.previous = move;
+    //   if (mnext!.comments.includes(SetupNodeCommentStart)) {
+    //     mnext!.color = oppositeColor(move.color);
+    //   }
+    // } else {
+    //   oneGood = true; // no branches, no next move to render, good to go
+    // }
+    oneGood = true;
+    // move.next = mnext;
     this.replayUnrenderedAdornments(move);
+    move.number = this.moveCount + 1;
     move.rendered = true;
     return [oneGood ? move : null, hadErr];
   } // readyForRendering()
@@ -721,11 +724,11 @@ gotoStart(): void {
   /// treeViewNodeForMove signals the UI rendering that any tracking it has of this ParsedNode
   /// needs updating to the new Move object.
   ///
-  treeViewNodeForMove (move: Move): void {
-    const pn = move.parsedNode;
-    if (pn !== null) {
-      this.onParsedNodeReified?.(pn, move);
-    }
+  treeViewNodeForMove (move: Move): void { // todo xxx should be no op now
+    // const pn = move.parsedNode;
+    // if (pn !== null) {
+    //   this.onParsedNodeReified?.(pn, move);
+    // }
   }
 
 /// _replay_unrendered_adornments is just a helper for _replay_move_update_model.  This does not 
@@ -769,33 +772,150 @@ replayUnrenderedAdornments (move: Move): void {
     this.filebase = parts[parts.length - 1];
   }
 
-/// buildSGFString returns SGF representation of the current game.  Call from the command layer to write a file.
-/// This was WriteGame in C#, just tagging this to find later.
-/// 
-/// TODO: Callers need to handle if the write fails, which can happen if the user deletes the
-/// file after opening the file or since the last save.  Callers need to save sf, path, and base filename
-/// in the this Game in case this is from a SaveAs call.  Caller needs to check for an autosave
-/// file based on sf's name and deletes it if found since user explicitly saved.
-///
-buildSGFString (): string {
-    const pg = this.updateParsedGameFromGame();
+  /// buildSGFString returns SGF representation of the current game.  Call from the command layer to write a file.
+  /// This was WriteGame in C#, just tagging this to find later.
+  /// 
+  /// TODO: Callers need to handle if the write fails, which can happen if the user deletes the
+  /// file after opening the file or since the last save.  Callers need to save sf, path, and base filename
+  /// in the this Game in case this is from a SaveAs call.  Caller needs to check for an autosave
+  /// file based on sf's name and deletes it if found since user explicitly saved.
+  ///
+  buildSGFString (): string {
+      const pg = this.updateParsedGameFromGame();
+      return pg.toString();
+    }
+
+  /// buildSGFStringFlipped represents all the game moves as a diagonal mirror image.
+  /// You can share a game you recorded with your opponents, and they can see
+  /// it from their points of view.  (Properties to modify: AB, AW, B, W, LB,
+  /// SQ, TR, MA.)  This does NOT update the view or the game to track the
+  /// flipped file.  This does NOT set this.isDirty to false since the tracked
+  /// file may be out of date with the state of the game.
+  ///
+  buildSGFStringFlipped (): string {
+      // Keep the unflipped parsed tree intact while generating flipped output
+      const saved = this.parsedGame;
+      const pg = this.updateParsedGameFromGame(true);
+      this.parsedGame = saved;
+      return pg.toString();
+    }
+
+  buildSGFStringV2 (): string {
+    const pg = this.genPrintGameFromGame(false);
     return pg.toString();
   }
 
-/// buildSGFStringFlipped represents all the game moves as a diagonal mirror image.
-/// You can share a game you recorded with your opponents, and they can see
-/// it from their points of view.  (Properties to modify: AB, AW, B, W, LB,
-/// SQ, TR, MA.)  This does NOT update the view or the game to track the
-/// flipped file.  This does NOT set this.isDirty to false since the tracked
-/// file may be out of date with the state of the game.
-///
-buildSGFStringFlipped (): string {
-    // Keep the unflipped parsed tree intact while generating flipped output
-    const saved = this.parsedGame;
-    const pg = this.updateParsedGameFromGame(true);
-    this.parsedGame = saved;
+  buildSGFStringFlippedV2 (): string {
+    const pg = this.genPrintGameFromGame(true);
     return pg.toString();
   }
+
+  /// genPrintGameFromGame will replace genParsedGameFromGame
+  ///
+  private genPrintGameFromGame (flipped: boolean): ParsedGame {
+    const pgame = new ParsedGame();
+    const root = this.genPrintGameRootNode(flipped);
+    pgame.printNodes = root;
+    // Handle bracnches
+    if (this.branches === null) {
+      if (this.firstMove !== null) {
+        root.next = genPrintNodes(this.firstMove, flipped, this.size);
+      }
+    } else {
+      const branches: PrintNode[] = [];
+      for (const m of this.branches) {
+        const nodes = genPrintNodes(m, flipped, this.size);
+        branches.push(nodes);
+      }
+      root.branches = branches;
+      root.next = branches[0];
+    }
+    return pgame;
+  } // genPrintGameFromGame()
+
+  /// genPrintGameRootNode replaces genParsedGameRoot
+  ///
+  private genPrintGameRootNode (flipped: boolean): PrintNode {
+    let props: Record<string, string[]>;
+    // Reuse existing root properties to preserve unknown tags from parsed files
+    if (this.parsedGame !== null) { // todo xxx don't need to check this eventually
+      if (this.miscGameInfo !== null)
+        props = copyProperties(this.miscGameInfo);
+      else
+        props = copyProperties(this.parsedGame.nodes!.properties);
+    } else
+      props = {}; // should never set here, just for typescript compipler definite assignment
+    const res = new PrintNode(props);
+    // App name and game size.
+    props["AP"] = ["SGFEditor v2"];
+    props["SZ"] = [String(this.size)];
+    // Game.comments go in GC, not C, and we already merged any errant C text.
+    delete props["C"];
+    if (this.comments !== "") {
+      props["GC"] = [this.comments];
+    } else {
+      delete props["GC"];
+    }
+    // Komi
+    props["KM"] = [this.komi];
+    // Handicap, AB, AW
+    this.genPrintGameInitialStones(props, flipped);
+    // Player names
+    props["PB"] = [this.playerBlack !== "" ? this.playerBlack : "Black"];
+    props["PW"] = [this.playerWhite !== "" ? this.playerWhite : "White"];
+    // Root adornments (TR/SQ/LB) for the starting board.
+    delete props["TR"];
+    delete props["SQ"];
+    delete props["LB"];
+    for (const a of this.startAdornments) {
+      const coords = getParsedCoordinates(a, flipped, this.size);
+      if (a.kind === AdornmentKinds.Triangle) {
+        if ("TR" in props) props["TR"].push(coords);
+        else props["TR"] = [coords];
+      } else if (a.kind === AdornmentKinds.Square) {
+        if ("SQ" in props) props["SQ"].push(coords);
+        else props["SQ"] = [coords];
+      } else if (a.kind === AdornmentKinds.Letter) {
+        const data = `${coords}:${a.letter}`;
+        if ("LB" in props) props["LB"].push(data);
+        else props["LB"] = [data];
+      }
+    }
+    // Collected all properties, so finish up ...
+    return res;
+  }
+
+  // genPrintGameInitialStones replaces genParsedGameRootInitialStones.
+  private genPrintGameInitialStones (props: Record<string, string[]>, flipped: boolean): void {
+    // HA
+    if (this.handicap !== 0) {
+      props["HA"] = [String(this.handicap)];
+    } else {
+      delete props["HA"];
+    }
+    // AB 
+    if ("AB" in props) {
+      // Prefer to keep what we parsed
+      if (flipped) props["AB"] = props["AB"].map((v) => flipParsedCoordinates(v, this.size));
+    } else if (this.handicapMoves !== null) {
+      props["AB"] = this.handicapMoves
+        .map((m) => getParsedCoordinates(m, flipped, this.size));
+    } else {
+      delete props["AB"];
+    }
+    // AW — prefer to keep what we parsed
+    if ("AW" in props) {
+      if (flipped) props["AW"] = props["AW"].map((v) => flipParsedCoordinates(v, this.size));
+    } else if (this.allWhiteMoves !== null) {
+      props["AW"] = this.allWhiteMoves
+        .map((m) => getParsedCoordinates(m, flipped, this.size));
+    } else {
+      delete props["AW"];
+    }
+  } // genPrintGameInitialStones()
+
+
+//// end gen print nodes and start legacy update parsed game
 
   /// updateParsedGameFromGame returns a ParsedGame representing game, re-using
   /// existing parsed node properties where appropriate to avoid losing any we
@@ -807,7 +927,7 @@ buildSGFStringFlipped (): string {
   /// UI moment could clobber the root parsednodes; nodes not re-rendered still
   /// have accurate parsed node properties hanging from them that were read from the file.
   ///
-  updateParsedGameFromGame(flipped: boolean = false): ParsedGame {
+  updateParsedGameFromGame (flipped: boolean = false): ParsedGame {
     const pgame = new ParsedGame();
     const root = this.genParsedGameRoot(flipped);
     pgame.nodes = root;
@@ -889,7 +1009,7 @@ buildSGFStringFlipped (): string {
       }
     }
     return n;
-  }
+  } // genParsedGameRoot ()
 
   /// GenParsedGameRootInitialStones sets handicap (HA), all black (AB), and all white (AW)
   /// properties.  You can have all black with a zero handicap, that is, if a program supported
@@ -1271,6 +1391,7 @@ buildSGFStringFlipped (): string {
   /// indicates the empty initial board state, or the empty path.
   ///
   public getPathToMove (move: Move): Array<[number, number]> {
+    if (! move.rendered) return this.getPathToMovev2(move); // todo xxx
     debugAssert(move !== null, "Must call with non-null move.");
     let parent = move.previous;
     const res: Array<[number, number]> = [[move.number, -1]];
@@ -1290,6 +1411,37 @@ buildSGFStringFlipped (): string {
     }
     return res.reverse();
   }
+
+  public getPathToMovev2 (move: Move): Array<[number, number]> {
+    debugAssert(move !== null, "Must call with non-null parsed node.");
+    let parent = move.previous;
+    if (parent === null)
+      return this.TheEmptyMovePath;
+    // No move nums in unrendered move nodes, so count down, then fix numbers at end.
+    let moveNum = 1000000;
+    const res: Array<[number, number]> = [[moveNum, -1]];
+    while (parent !== null) {
+      moveNum -= 1;
+      if (parent.branches !== null && parent.branches[0] !== move) {
+        const loc = parent.branches.indexOf(move);
+        debugAssert(loc !== -1, "Move must be in game.");
+        res.push([moveNum, loc]);
+      }
+      move = parent;
+      parent = move.previous;
+    }
+    moveNum -= 1;
+    // Add tuple for move zero if we need to select a branch from the empty board state.
+    if (this.branches !== null && this.branches[0] !== move) {
+      const loc = this.branches.indexOf(move);
+      debugAssert(loc !== -1, "Move must be in game.");
+      res.push([moveNum, loc]); // moveNum becomes a zero when we fix numbers below.
+    }
+    // Fix up numbers to match move numbers.
+    const final = res.map(pair => [pair[0] - moveNum, pair[1]] as [number, number]);
+    return final.reverse();
+  }
+
 
   public getPathToParsedNode (move: ParsedNode): Array<[number, number]> {
     debugAssert(move !== null, "Must call with non-null parsed node.");
@@ -1720,6 +1872,77 @@ export function copyProperties(src: Record<string, string[]>): Record<string, st
   return res;
 }
 
+  // genPrintNodes replaces genParsedNodes
+  function genPrintNodes (move: Move, flipped: boolean, size: number): PrintNode {
+    let curnode = genPrintNode(move, flipped, size);
+    const res = curnode;
+  let mmove : Move | null = move;
+  if (mmove.branches === null) {
+    mmove = mmove.next;
+    while (mmove !== null) {
+      curnode.next = genPrintNode(mmove, flipped, size);
+      if (mmove.branches === null) {
+          curnode = curnode.next;
+          mmove = mmove.next;
+      }
+      else {
+          curnode = curnode.next;
+          break;
+      }
+    }
+  }
+  // Only get here when move is null, or we're recursing on branches.
+  if (mmove !== null) {
+    curnode.branches = [];
+    for (const m of mmove.branches!) {
+        const bn = genPrintNodes(m, flipped, size);
+        curnode.branches.push(bn);
+    }
+    curnode.next = curnode.branches[0];
+  }
+    return res;
+  } // genPrintNodes()
+
+  // One node’s properties. Mirrors genParsedNode (but returns PrintNode).
+  function genPrintNode(move: Move, flipped: boolean, size: number): PrintNode {
+    // Start with parsedProperties when unrendered to preserve round-trip fidelity,
+    // otherwise synthesize from live Move state (comments/adornments always from live).
+    const props: Record<string, string[]> = (move.rendered) //|| move.parsedProperties !== null) only not rendered if parsed, then always props exist
+      ? {}
+      : copyProperties(move.parsedProperties!);
+
+    // Color
+    const coord = getParsedCoordinates(move, flipped, size);
+      if (move.color === StoneColors.Black) props["B"] = [coord];
+      else props["W"] = [coord];
+    // Comments 
+    if (move.comments !== "") props["C"] = [move.comments];
+    else delete props["C"];
+    // Adornments
+    delete props["TR"];
+    delete props["SQ"];
+    delete props["LB"];
+    for (const a of move.adornments) {
+      const coords = getParsedCoordinates(a, flipped, size);
+      if (a.kind === AdornmentKinds.Triangle) {
+         if ("TR" in props) props["TR"].push(coords);
+         else props["TR"] = [coords];
+      }
+      else if (a.kind === AdornmentKinds.Square) {
+        if ("SQ" in props) props["SQ"].push(coords);
+        else props["SQ"] = [coords];
+      }
+      else if (a.kind === AdornmentKinds.Letter) {
+        const data = `${coords}:${a.letter}`;
+        if ("LB" in props) props["LB"].push(data);
+        else props["LB"] = [data];
+      }
+    } // foreach
+    return new PrintNode(props);
+  }
+
+  //// end print nodes, start legacy
+
 /// genParsedNodes returns a ParsedNode with all the moves following move represented in the
 /// linked list. If move has never been rendered, then the rest of the list is the parsed nodes
 /// hanging from it since the user could not have modified the game at this point. This recurses
@@ -1924,8 +2147,11 @@ export async function createGameFromParsedGame
      setGames: (gs: Game[]) => void, getDefaultGame: () => Game | null, 
      setDefaultGame: (g: Game | null) => void):
     Promise<Game> {
-  // consoleWritePG(pgame.nodes!); // integrity check code for parsed file structure.
-  const props = pgame.nodes!.properties;
+    // integrity check code for parsed file structure.
+    // if (pgame.properties === null) consoleWritePG(pgame.nodes);
+    // else consoleWritePGMoves(pgame.moves);
+  // todo xxx
+  const props = pgame.nodes !== null ? pgame.nodes!.properties : pgame.properties; // todo xxx
   // Handicap and empty board handicap / all black stones.
   let handicap = 0;
   let allBlack: Move[] | null = null;
@@ -1976,11 +2202,10 @@ export async function createGameFromParsedGame
     g.startAdornments.push({ kind: AdornmentKinds.Letter, row: r, column: c, letter: ch });
   }  
   // Setup remaining model for first moves, comment, etc.
-  g.parsedGame = pgame;
-  setupFirstParsedMove(g, pgame.nodes!);
-  //copyGameCallbacks(curgame, g); // Don't need this setGame callback copies from last closed over game
+  g.parsedGame = pgame; 
+  if (pgame.nodes !== null) setupFirstParsedMove(g, pgame.nodes!); // todo xxx
+  else setupFirstParsedMovexxx(g, pgame.moves!)
   g.setComments!(g.comments);
-  //setGame(g); C# code set here, but it is already set in createGame.
   return g;
 }
 
@@ -2005,7 +2230,29 @@ export async function createGameFromParsedGame
 //     consoleWritePG(nodes.next, indent);
 //   }
 // }
-
+//
+// Version used when testing parse to Moves, erasing ParsedNodes
+// function consoleWritePGMoves (nodes: Move | null, indent: string = "") {
+//   if (nodes === null) return;
+//   const writeNode = (n: Move) => {
+//     console.log(indent + `Move ${nodes.row},${nodes.column}`);
+//     // if ("B" in n.parsedProperties!) {
+//     //   console.log(indent + `Move ${parsedToModelCoordinates(n.parsedProperties["B"][0])}`);
+//     // }
+//     // else if ("W" in n.parsedProperties!) {
+//     //   console.log(indent + `Move ${parsedToModelCoordinates(n.parsedProperties["W"][0])}`);
+//     // }
+//     // else console.log("empty board");
+//   }
+//   if (nodes.branches !== null) {
+//     writeNode(nodes);
+//     nodes.branches.forEach((pn, idx) => {console.log(indent + `Branch ${idx}`);
+//                                          consoleWritePGMoves(pn, indent + "   ");})
+//   } else {
+//     writeNode(nodes);
+//     consoleWritePGMoves(nodes.next, indent);
+//   }
+// }
 
 
 /// createParsedGameHandicap helps create a Game from a ParsedGame by processing the handicap (HA)
@@ -2033,6 +2280,7 @@ function createGameFromParsedAB(pgame: ParsedGame, props: Record<string, string[
   return props["AB"].map((coords) => {
     const [row, col] = parsedToModelCoordinates(coords); 
     const m = new Move(row, col, StoneColors.Black);
+    // todo xxx
     m.parsedNode = pgame.nodes;
     m.rendered = false;
     return m;
@@ -2043,7 +2291,7 @@ function createGameFromParsedAW(pgame: ParsedGame, props: Record<string, string[
   return props["AW"].map((coords) => {
     const [row, col] = parsedToModelCoordinates(coords);
     const m = new Move(row, col, StoneColors.White);
-    m.parsedNode = pgame.nodes;
+    m.parsedNode = pgame.nodes; // todo xxx
     m.rendered = false;
     return m;
   });
@@ -2065,7 +2313,7 @@ function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
       const mv = parsedNodeToMove(n, g.size);
       if (mv === null) {
         debugAssert(n.badNodeMessage !== null, "parsedNodeToMove returned null without a message?!");
-        // Mirror C#: surface the specific parse error.
+        // todo xxx what to check when no parsednodes exist
         throw new SGFError(n.badNodeMessage!);
       }
       // Note, do not incr g.move_count since first move has not been rendered,
@@ -2094,6 +2342,50 @@ function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
   return m;
 }
 
+/// move is first move, not fake first parsednode describing game
+function setupFirstParsedMovexxx (g : Game, move : Move) : Move | null {
+  if ("B" in g.parsedGame!.properties || "W" in g.parsedGame!.properties)
+    throw new SGFError ("Unexpected move in root parsed node.");
+  if ("PL" in g.parsedGame!.properties)
+    throw new SGFError("Do not support player-to-play for changing start color.");
+  // var m : Move | null;
+  if (g.parsedGame!.branches !== null) {
+    // Game starts with branches; build Move objects for each branch head.
+    // const moves: Move[] = [];
+    for (const mv of g.parsedGame!.branches) { // todo xxx do I handle badNodeMessage here?  how coordinate with parser???
+      // const mv = parsedNodeToMove(n, g.size);
+      // if (mv === null) {
+      //   debugAssert(mv.badNodeMessage !== null, "parsedNodeToMove returned null without a message?!");
+      //   // Mirror C#: surface the specific parse error.
+      //   throw new SGFError(n.badNodeMessage!);
+      // }
+      // Note, do not incr g.move_count since first move has not been rendered,
+      // so if user clicks, that should be number 1 too.
+      parsedPropertiesToMove(mv, g.size);
+      mv.number = g.moveCount + 1;
+      // Don't set previous point because these are first moves, so prev is null.
+      // moves.push(mv);
+    }
+    g.branches = g.parsedGame!.branches;
+    debugAssert(g.branches[0] === move, "Wait What?!?!"); // todo xxx
+    // m = moves[0];
+  } else {
+    // if (move.next === null) m = null;
+    // else {
+      // m = parsedNodeToMove(move.next, g.size); // todo xxx maybe still calling parsedPropertiesToMove ???
+      // if (m === null) {
+      //   debugAssert(move.next.badNodeMessage !== null, 
+      //               "Failed to make Move from ParsedNode, but no error message provided.");
+      //   throw new SGFError(move.next.badNodeMessage);
+      // }
+      // Note, do not incr g.move_count since first move has not been rendered,
+      // so if user clicks, that should be number 1 too.
+      move.number = g.moveCount + 1;
+    // }
+  }
+  g.firstMove = move;
+  return move;
+}
 
 /// createGame makes the game and makes it current game.  The constructor adds handicap stones to
 /// the board.
@@ -2124,7 +2416,7 @@ export function createGame (size : number, handicap : number, komi : string,
 /// we can represent for the user. Now this code works around some bad node situations,
 /// returning the pass node as a hack.
 ///
-function parsedNodeToMove (pn : ParsedNode, size : number) : Move | null {
+export function parsedNodeToMove (pn : ParsedNode, size : number) : Move | null {
   // Removed optimization to avoid computing msg again, due to experiment to taint nodes in sgfparser
   // so that clicking on treeview nodes can abort immediately (due to have a BadNodeMessage).
   //if (n.BadNodeMessage !== null) return null;
@@ -2160,6 +2452,45 @@ function parsedNodeToMove (pn : ParsedNode, size : number) : Move | null {
       m.comments = pn.properties["C"][0];
   return m;
 }
+
+export function parsedPropertiesToMove (move: Move, size : number) : Move | null {
+  // Removed optimization to avoid computing msg again, due to experiment to taint nodes in sgfparser
+  // so that clicking on treeview nodes can abort immediately (due to have a BadNodeMessage).
+  //if (n.BadNodeMessage !== null) return null;
+  // let color: StoneColor = StoneColors.NoColor;
+  // let row = Board.NoIndex; // Not all paths set the value, so need random initial value.
+  // let col = Board.NoIndex;
+  // let pass_move: Move | null = null; // null signals we did not substitute a pass move.
+  if ("B" in move.parsedProperties!) {
+    move.color = StoneColors.Black;
+    [move.row, move.column] = parsedToModelCoordinates(move.parsedProperties!["B"][0]);
+  } else if ("W" in move.parsedProperties!) {
+    move.color = StoneColors.White;
+    [move.row, move.column] = parsedToModelCoordinates(move.parsedProperties!["W"][0]);
+  } else if (("AW" in move.parsedProperties!) || ("AB" in move.parsedProperties!) || 
+             ("AE" in move.parsedProperties!)) {
+    // Don't handle setup nodes in the middle of game nodes.  This is a light hack to use
+    // a Pass node with a big comment and adornments to show what the setup node described.
+    setupNodeToPassNodexxx(move, size);
+    // Set this to null to stop UI from popping dialogs that you cannot advance to
+    // this node.  We modify this when trying to ready moves for rendering, which we do
+    // when the user advances through the tree.  If the user clicks on a tree view node based
+    // on the parsed node only, 1) they will still get the error dialog 2) the node doesn't
+    // show the green highlight that there is a comment.
+    move.parsedBadNodeMessage = null;
+  } else {
+    move.parsedBadNodeMessage = "Next nodes must be moves, don't handle arbitrary nodes yet -- " +
+                                genPrintNode(move, false, size).nodeString(false); // todo xxx less cons-y? propstonodestring? 
+    return null;
+  }
+  // m.parsedNode = pn;
+  // m.rendered = false;
+  if ("C" in move.parsedProperties!)
+      move.comments = move.parsedProperties!["C"][0];
+  return move;
+}
+
+
 
 const SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
                               "Don't handle arbitrary nodes in the middle of a game.\n" +
@@ -2219,6 +2550,56 @@ export function setupNodeToPassNode(pn: ParsedNode, size: number): Move {
   // Caller will set passMove.parsedNode and passMove.rendered
   return passMove;
 }
+
+export function setupNodeToPassNodexxx (move: Move, size: number): Move {
+  // Capture any pre-existing comment to append at the end
+  let comment = move.parsedProperties!["C"]?.[0] ?? "";
+  if (comment !== "")
+    comment = "The following is the original comment from the SGF file ...\n" + comment;
+  let newComment = SetupNodeCommentStart;
+  const props: Record<string, string[]> = {}; // New props to replace parsed properties
+  // const passMove = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
+  // Sweep properties, rewriting to adornment forms and documenting
+  for (const [k, v] of Object.entries(move.parsedProperties!)) {
+    if (k === "AB") { // turn AB's to triangles
+      newComment = setupNodeDisplayCoords(props, newComment, "All Black stones", "TR", v, size);
+      if (move.parsedProperties!["TR"]) {
+        newComment = setupNodeDisplayCoords(props, newComment, "triangles", "TR", move.parsedProperties!["TR"],
+                                            size, true); // true = concat coord lists
+      }
+    } else if (k === "AW") { // turn AWs to squares
+      newComment = setupNodeDisplayCoords(props, newComment, "All White stones", "SQ", v, size);
+      if (move.parsedProperties!["SQ"]) {
+        newComment = setupNodeDisplayCoords(props, newComment, "squares", "SQ", move.parsedProperties!["SQ"],
+                                            size, true); // true = concat coord lists
+      }
+    } else if (k === "AE") { // turn AEs to labels using "X"
+      newComment = setupNodeDisplayCoords(props, newComment, "All Empty points (X)", "LB", v, size);
+      if (move.parsedProperties!["LB"]) {
+        newComment = setupNodeDisplayCoords(props, newComment, "letters", "LB", move.parsedProperties!["LB"],
+        size, true); // true = concat coord lists
+      }
+    } else if (k === "TR" || k === "SQ" || k === "LB" || k === "C") {
+      // Already swept into new properties and comment, so skip here.
+      continue;
+    } else {
+      // Preserve any other properties but note them in the comment
+      props[k] = v.slice();
+      newComment += "Setup node also had this unrecognized notation:\n" + "     " + k + "[" +
+                    v.join("][") + "]\n";
+    }
+  } // for loop
+  newComment = newComment + "\n\n" + comment;
+  props["C"] = [newComment];
+  // Replace the node’s properties (so later rendering paths see the adornments/comment)
+  move.parsedProperties! = props;
+  move.row = Board.NoIndex; move.column = Board.NoIndex;
+  move.color = StoneColors.NoColor;
+  // Caller will set passMove.parsedNode and passMove.rendered
+  return move;
+}
+
+
 
 /// SetupNodeDisplayCoords creates comment text describing the nodes conversion to a pass move
 /// with adornments, where we placed adornments, and what they mean.  This takes the new properties

@@ -8,28 +8,59 @@
 /// Gpt5 translation of my C# code.
 ///
 import { StoneColors } from "./Board";
-import type { StoneColor, IMoveNext } from "./Board";
+import type { StoneColor, IMoveNext, Move } from "./Board";
+import { parsedNodeToMove } from "./Game";
 
 
 export class ParsedGame {
   // Only public member.
   nodes: ParsedNode | null = null;
+  // NEW (parser-v2): root properties and first-move branches as Moves
+  properties: Record<string, string[]> = {}; // Always have parsed root properties
+  moves: Move | null = null; // first move if any, also branches[0]
+  branches: Move[] | null = null; // null if no branches
+  // only used when generated ParsedGame for printing
+  // first node holds game/empty board state, ignores properties and branches
+  printNodes: PrintNode | null = null; 
 
+  /// todo xxx erase legacy fallback for interim code
   toString(): string {
+    // if (this.nodes === null) return ""; // Min tree is "(;)", but that implies one empty node
+    // return "(" + this.nodesString(this.nodes) + ")";
+    // Prefer printNodes if present; otherwise, fall back to legacy ParsedNode tree.
+    if (this.printNodes !== null) return "(" + this.printNodesString(this.printNodes) + ")";
     if (this.nodes === null) return ""; // Min tree is "(;)", but that implies one empty node
     return "(" + this.nodesString(this.nodes) + ")";
+
   }
 
-  /// _nodes_string returns a string for a series of nodes, and the caller
+  /// printNodesString returns a string for a series of nodes, and the caller
   /// needs to supply the open and close parens that bracket the series.
   ///
-  private nodesString(nodes: ParsedNode): string {
+  private printNodesString (nodes: PrintNode): string {
+    let res = "";
+    let cur: PrintNode | null = nodes;
+    while (cur !== null && cur.next !== null) {
+      res += cur.nodeString(res !== "");
+      if (cur.branches !== null) {
+        for (const n of cur.branches) {
+          res = res + "\n" + "(" + this.printNodesString(n) + ")";
+        }
+        return res; 
+      }
+      cur = cur.next;
+    }
+    if (cur !== null) res += cur.nodeString(res !== "");
+    return res;
+  }
+  /// When done, we keep the previous function and rename it to this function's name
+  private nodesString (nodes: ParsedNode): string {
     let res = "";
     let cur: ParsedNode | null = nodes;
-    while (cur && cur.next) {
+    while (cur !== null && cur.next !== null) {
       // Get one node's string with a leading newline if it is not the first.
       res += cur.nodeString(res !== "");
-      if (cur.branches && cur.branches.length) {
+      if (cur.branches !== null) {
         for (const n of cur.branches) {
           res = res + "\n" + "(" + this.nodesString(n) + ")";
         }
@@ -37,10 +68,62 @@ export class ParsedGame {
       }
       cur = cur.next;
     }
-    if (cur) res += cur.nodeString(res !== ""); // Test res, could be single node branch.
+    if (cur !== null) res += cur.nodeString(res !== ""); // Test res, could be single node branch.
     return res;
   }
 } // ParsedGame class
+
+/// PrintNode exists purely as a functional copy of Game and Moves for serializing to print.
+/// We could erase this later and just descend the Game and Moves instead of calling genPrintNodes.
+///
+export class PrintNode {
+  properties: Record<string, string[]>;
+  next: PrintNode | null;
+  branches: PrintNode[] | null;
+  // don't need previous pointer for printing
+
+  constructor(props: Record<string, string[]>) {
+    this.properties = props;
+    this.next = null;
+    this.branches = null;
+  }
+
+  /// nodeString returns the string for one node, taking a flag for a preceding newline.  Game uses
+  /// this for error reporting. xxx -- make sure we can use this for errors when parsenodes are gone
+  ///
+  nodeString (newline: boolean): string {
+    const props = this.properties;
+    let s = newline ? "\n;" : ";";
+    // Print move property first for human  readability
+    if ("B" in props) s += "B" + this.escapePropertyValues(props["B"]);
+    if ("W" in props) s += "W" + this.escapePropertyValues(props["W"]);
+    // Get the rest ...
+    for (const k of Object.keys(props)) {
+      if (k === "B" || k === "W") continue;
+      s += k + this.escapePropertyValues(props[k]);
+    }
+    return s;
+  }
+
+  private escapePropertyValues (values: string[]): string {
+    let res = "";
+    for (const v of values) {
+      res += "[";
+      if (v.includes("]") || v.includes("\\")) {
+        let out = "";
+        for (const ch of v) {
+          if (ch === "]" || ch === "\\") out += "\\";
+          out += ch;
+        }
+        res += out + "]";
+      } else {
+        res += v + "]";
+      }
+    }
+    return res;
+  }
+} // PrintNode class
+
 
 export class ParsedNode implements IMoveNext {
   next: ParsedNode | null = null;
@@ -81,11 +164,10 @@ export class ParsedNode implements IMoveNext {
   nodeString (newline: boolean): string {
     const props = this.properties;
     let s = newline ? "\n;" : ";";
-
-    // Print move property first for human  readability
+    // Print move property first for human readability
     if ("B" in props) s += "B" + this.escapePropertyValues("B", props["B"]);
     if ("W" in props) s += "W" + this.escapePropertyValues("W", props["W"]);
-
+    // Get the rest ...
     for (const k of Object.keys(props)) {
       if (k === "B" || k === "W") continue;
       s += k + this.escapePropertyValues(k, props[k]);
@@ -126,6 +208,79 @@ export function parseFile (text: string): ParsedGame {
   g.nodes = parseNodes(l);
   return g;
 }
+
+/// parseFileToMoves parses SGF and returns a ParsedGame where:
+/// - properties: root node properties (SZ, KM, HA, AB/AW/AE, GN, DT, RU, etc.)
+/// - moves:      top-level Move branches (graph of Move.next / Move.branches)
+/// - nodes:      null (legacy ParsedNode tree omitted in this v2 output)
+///
+export function parseFileToMoves (text: string): ParsedGame {
+  const legacy = parseFile(text); // reuse existing lexer+parser
+  // Setup root board / ParsedGame
+  const result = new ParsedGame();
+  if (legacy.nodes === null) {
+    result.properties = {};
+    result.moves = null;
+    result.branches = null;
+    result.nodes = null;
+    return result;
+  }
+  const pnroot = legacy.nodes;
+  // Root properties (size default is 19 if missing)
+  result.properties = { ...pnroot.properties };
+  const szProp = result.properties["SZ"]?.[0];
+  const size = szProp ? parseInt(szProp, 10) || 19 : 19;
+  // Top-level branches from root: prefer root.branches; otherwise follow root.next
+  if (pnroot.branches) { 
+    result.branches = [];
+    for (const b of pnroot.branches) {
+      const m = pnsToMoves(b, size);
+      if (m) result.branches.push(m);
+    }
+    result.moves = result.branches[0];
+  } else if (pnroot.next) {
+    const m = pnsToMoves(pnroot.next, size);
+    result.moves = m;
+  }
+  result.nodes = null; // signal v2 output
+  return result;
+}
+
+function pnsToMoves (pn: ParsedNode, size: number): Move | null {
+  const head = parsedNodeToMove(pn, size);
+  if (head === null) return null; // don't worry badNodeMessages now xxx
+  // head.rendered = false;   // lazy reify moves
+  head.parsedProperties = pn.properties;
+  // loop until a branching point
+  let ppn: ParsedNode | null = pn; // typescript requires new var declared to be nullable
+  let move: Move = head;
+  // if ppn is not null above, and not null at loop start, and only assigned non-null ppn.next, it is never null
+  while (ppn.next !== null && ppn.branches === null) {
+    const nextPn: ParsedNode = ppn.next;
+    const m = parsedNodeToMove(nextPn, size);
+    if (m === null) break; // stop this line on invalid node, bad nodes exist, don't worry now xxx
+    move.next = m;
+    move.parsedProperties = pn.properties;
+    m.previous = move;
+    move = m;
+    ppn = nextPn;
+  }
+  // Branches at the tail (if any)
+  // ppn is never null here, not null at while break, not null on termination
+  if ( ppn.branches !== null ) {
+    const moves: Move[] = [];
+    for (const b of ppn.branches) {
+      const bm = pnsToMoves(b, size);
+      if (bm) {
+        bm.previous = move;
+        moves.push(bm);
+      }
+    }
+    if (moves.length !== 0) { move.branches = moves; move.next = moves[0]; }
+  }
+  return head;
+}
+
 
 /// parseNodes returns a linked list of ParseNodes. It scans for a semi-colon at the start of
 /// the first node. If it encounters an open paren, it recurses and creates branches that

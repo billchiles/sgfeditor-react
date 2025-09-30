@@ -159,6 +159,11 @@ export class Move implements IMoveNext {
   comments: string;
   parsedNode: ParsedNode | null;
   rendered: boolean;
+  // NEW: raw SGF properties for lazy reify 
+  parsedProperties: Record<string, string[]> | null;
+  // NEW: parse-time taint that something's wrong with error info
+  parsedBadNodeMessage: string | null;
+
 
   constructor(row: number, column: number, color: StoneColor) {
 
@@ -175,6 +180,8 @@ export class Move implements IMoveNext {
     this.comments = "";
     this.parsedNode = null;
     this.rendered = true; // Assume move rendered, parsed game code sets it to false.
+    this.parsedProperties = null;
+    this.parsedBadNodeMessage = null;
   }
 
   addBranch (m: Move) {
