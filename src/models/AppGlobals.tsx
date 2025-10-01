@@ -396,13 +396,14 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   }, []);
   //
   // AUTO SAVE
+  const autosavedbgstop = true; // todo xxx
   // need useRef for stability of value across renders to avoid the interval timer trying to cancel
   // an old inactivity timer ID it closed over any number of version ticks prior
   const lastSaveAtRef = useRef<number>(Date.now());
   // timer ID for the inactive timer that's reset on every model change
   const idleTidRef    = useRef<number | null>(null);
   // INTERVAL TIMER -- If user actively editing for "long time" then auto save
-  useEffect(() => { 
+  useEffect(() => { if (autosavedbgstop) return;
     const id = window.setInterval(async () => {
       // todo hmmmm, never walk games list for unsaved games, just do current
       // cancel inactivity timer because we're saving now, it will start again on next model change
@@ -415,7 +416,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     return () => window.clearInterval(id);
   }, [appStorageBridge]); // mount/unmount only
   // INACTIVE TIMER -- if user inactive for a few seconds, save their last edits.
-  useEffect(() => {
+  useEffect(() => { if (autosavedbgstop) return;
     if (idleTidRef.current != null) clearTimeout(idleTidRef.current);
     idleTidRef.current = window.setTimeout(async () => {
       // conservative check to avoid timer jitter, event loop lag, etc., and saving simultaneously
@@ -1161,8 +1162,7 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
   } else if (data === "") {
     throw new Error(`Eh?! fileHandle is null, data empty, wassup?! ${(fileHandle as any).name}`);
   }
-  // let pg = parseFile(data);
-  // XXXXXXXXXXXXXXXXXXXXXXX get next line to work, port createGameFromParsedMoves, roudtrip read/write
+  // let pg = parseFile(data); // todo xxx
   const pg = parseFileToMoves(data);
   // pg = wah; // return pg to const when done
   const g = await createGameFromParsedGame(pg, cleanup.curGame, cleanup.setGame, 

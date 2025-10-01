@@ -113,6 +113,7 @@ export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: Pa
 
 // ──────────────────────────────────────────────────────────────────────────────
 // NewTreeModelStart creates the special root cell at [0,0].
+// todo clean up tree view gen'ed code
 //
 function newTreeModelStart(pn: IMoveNext, layoutData: TreeViewLayoutData): TreeViewNode {
   const model: TreeViewNode = {
@@ -312,14 +313,9 @@ function adjustTreeLayoutRow(
 // MaybeAddBendNode: when a node has branches, create an explicit bend cell above its vertical
 // drop so the renderer can draw a clean vertical then horizontal fan.
 //
-function maybeAddBendNode(
-  layoutData: TreeViewLayoutData,
-  row: number,
-  tree_depth: number,
-  branch_depth: number,
-  branch_root_row: number,
-  curNode: TreeViewNode
-): TreeViewNode {
+function maybeAddBendNode(layoutData: TreeViewLayoutData, row: number, tree_depth: number,
+                          branch_depth: number, branch_root_row: number, curNode: TreeViewNode
+                         ): TreeViewNode {
   if ((branch_depth === 1) && (row - branch_root_row > 1) &&
       (layoutData.treeGrid[row - 1]?.[tree_depth - 1] === null)) {
     const bend: TreeViewNode = {
@@ -327,7 +323,7 @@ function maybeAddBendNode(
       node: curNode.node,
       row: row - 1,
       column: tree_depth - 1,
-      color: curNode.color,
+      color: StoneColors.NoColor,
       next: curNode,
       branches: null,
     };

@@ -85,7 +85,7 @@ export class Game {
     this.whitePrisoners = 0;
     this.comments = "";
     this.startAdornments = [];
-    this.miscGameInfo = null;
+    this.miscGameInfo = null; // Invariant: only set if showing info dialog, then supercedes parsed
   }
 
   static readonly DefaultKomi = "6.5";
@@ -144,7 +144,9 @@ export class Game {
     }
   }
 
-
+  ///
+  //// Making Moves
+  ///
 
 
   /// makeMove -- command entry point.
@@ -626,10 +628,10 @@ gotoStart(): void {
   ///
   private replayMoveUpdateModel (move: Move): [Move | null, boolean] {
     let cleanup = false;
-    if (!move.isPass) {
+    if (! move.isPass) {
       // Normally there won't be a stone in place because we verify as we go that board locations are
       // empty, but if we're replaying a branch that was pasted, it may have a move that conflicts.
-      if (!this.board.hasStone(move.row, move.column)) {
+      if (! this.board.hasStone(move.row, move.column)) {
         this.board.addStone(move);
         cleanup = true;
       } else {
@@ -667,56 +669,39 @@ gotoStart(): void {
   /// the display, but this also returns if there was an error with a parsenode.
   ///
   private readyForRendering (move: Move): [Move | null, boolean] {
-    if (!move.isPass) {
+    if (! move.isPass)
       this.checkForKill(move); // collects any move.deadStones
-    }
-    const pn = move.parsedNode;
-    debugAssert(pn !== null, "Only call readyForRendering on moves made from parsed nodes.");
-    let mnext: Move | null = null;
+    debugAssert(move.parsedProperties !== null, "Only call readyForRendering on moves made from parsed nodes.");
     let hadErr = false;
-    let oneGood = false; // todo xxx when no longer have ParsedNodes, just check for badNodeMessage, get adornments, etc.
-    // if (pn.branches !== null && pn.branches.length > 0) { // gpt5 added length test but unnecessary
-    //   const branchMoves: Move[] = [];
-    //   for (const n of pn.branches) {
-        // const m = parsedNodeToMove(n, this.board.size); 
-    //     if (m === null) { // No longer return if m is null.  Some branches are viewable.  
-    //       hadErr = true; // Let callers know there was an issue, but other branches may be valid.
-    //       continue;
-    //     }
-    //     // Have to add ! everywhere, typescript can't tell null doesn't flow down here.
-    //     oneGood = true;
-    //     m!.number = this.moveCount + 2;
-    //     m!.previous = move;
-    //     // Check if parsed node was a setup node in the middle of game nodes. Need to set color
-    //     // because ParsedNodeToMove has no access to Game.nextColor.
-    //     if (m!.comments.includes(SetupNodeCommentStart)) {
-    //       m!.color = oppositeColor(move.color);
-    //     }
-    //     branchMoves.push(m!);
-    //   }
-    //   if (!oneGood) return [null, true];
-    //   if (branchMoves.length > 1)
-    //      move.branches = branchMoves;
-    //   mnext = branchMoves[0];
-    // } else if (pn.next !== null) {
-    //   mnext = parsedNodeToMove(pn.next, this.board.size);
-    //   if (mnext === null) {
-    //     return [null, true];
-    //   }
-    //   // Have to add ! everywhere, typescript can't tell null doesn't flow down here.
-    //   oneGood = true;
-    //   mnext!.number = this.moveCount + 2;
-    //   mnext!.previous = move;
-    //   if (mnext!.comments.includes(SetupNodeCommentStart)) {
-    //     mnext!.color = oppositeColor(move.color);
-    //   }
-    // } else {
-    //   oneGood = true; // no branches, no next move to render, good to go
-    // }
-    oneGood = true;
-    // move.next = mnext;
+    let oneGood = false; 
+    if (move.branches !== null) {
+      for (const m of move.branches) {
+        const hadErr = parsedPropertiesToMove(m, this.board.size) === null;
+        // No longer return if had error.  Some branches are viewable, but signal to callers had err.
+        if (hadErr) continue;   
+        oneGood = true;
+        m.number = this.moveCount + 2;
+        // Check if parsed properties had setup node props in the middle of game nodes.
+        // Need to set color because parsedPropertiesToMove has no access to Game.nextColor.
+        if (m.comments.includes(SetupNodeCommentStart)) {
+          m.color = oppositeColor(move.color);
+        }
+      }
+      if (!oneGood) return [null, true];
+    } else if (move.next !== null) {
+      if (parsedPropertiesToMove(move.next, this.board.size) === null) {
+        return [null, true];
+      }
+      oneGood = true;
+      move.next.number = this.moveCount + 2;
+      if (move.next.comments.includes(SetupNodeCommentStart)) {
+        move.next.color = oppositeColor(move.color);
+      }
+    } else {
+      oneGood = true; // no branches, no next move to render, good to go
+    }
     this.replayUnrenderedAdornments(move);
-    move.number = this.moveCount + 1;
+    // move.number = this.moveCount + 1;
     move.rendered = true;
     return [oneGood ? move : null, hadErr];
   } // readyForRendering()
@@ -736,7 +721,7 @@ gotoStart(): void {
 /// or it doesn't matter if there are dup'ed letters.  Move must have a parsedNode with properties.
 ///
 replayUnrenderedAdornments (move: Move): void {
-    const props = move.parsedNode!.properties;
+    const props = move.parsedProperties!;
     if (props["TR"]) { // Triangles: TR[aa][bb]...
       for (const coord of props["TR"]) {
         const [row, col] = parsedToModelCoordinates(coord);
@@ -842,7 +827,7 @@ replayUnrenderedAdornments (move: Move): void {
       if (this.miscGameInfo !== null)
         props = copyProperties(this.miscGameInfo);
       else
-        props = copyProperties(this.parsedGame.nodes!.properties);
+        props = copyProperties(this.parsedGame.properties); // todo xxx update miscGameInfo for next time
     } else
       props = {}; // should never set here, just for typescript compipler definite assignment
     const res = new PrintNode(props);
@@ -1876,8 +1861,8 @@ export function copyProperties(src: Record<string, string[]>): Record<string, st
   function genPrintNodes (move: Move, flipped: boolean, size: number): PrintNode {
     let curnode = genPrintNode(move, flipped, size);
     const res = curnode;
-  let mmove : Move | null = move;
-  if (mmove.branches === null) {
+    let mmove : Move | null = move;
+    if (mmove.branches === null) {
     mmove = mmove.next;
     while (mmove !== null) {
       curnode.next = genPrintNode(mmove, flipped, size);
@@ -1905,43 +1890,46 @@ export function copyProperties(src: Record<string, string[]>): Record<string, st
 
   // One node’s properties. Mirrors genParsedNode (but returns PrintNode).
   function genPrintNode(move: Move, flipped: boolean, size: number): PrintNode {
-    // Start with parsedProperties when unrendered to preserve round-trip fidelity,
-    // otherwise synthesize from live Move state (comments/adornments always from live).
-    const props: Record<string, string[]> = (move.rendered) //|| move.parsedProperties !== null) only not rendered if parsed, then always props exist
-      ? {}
-      : copyProperties(move.parsedProperties!);
-
-    // Color
-    const coord = getParsedCoordinates(move, flipped, size);
-      if (move.color === StoneColors.Black) props["B"] = [coord];
-      else props["W"] = [coord];
-    // Comments 
-    if (move.comments !== "") props["C"] = [move.comments];
-    else delete props["C"];
-    // Adornments
-    delete props["TR"];
-    delete props["SQ"];
-    delete props["LB"];
-    for (const a of move.adornments) {
-      const coords = getParsedCoordinates(a, flipped, size);
-      if (a.kind === AdornmentKinds.Triangle) {
-         if ("TR" in props) props["TR"].push(coords);
-         else props["TR"] = [coords];
-      }
-      else if (a.kind === AdornmentKinds.Square) {
-        if ("SQ" in props) props["SQ"].push(coords);
-        else props["SQ"] = [coords];
-      }
-      else if (a.kind === AdornmentKinds.Letter) {
-        const data = `${coords}:${a.letter}`;
-        if ("LB" in props) props["LB"].push(data);
-        else props["LB"] = [data];
-      }
-    } // foreach
+    // Grab parsedProperties to preserve any properties we ignored from opening the file.
+    // const props: Record<string, string[]> = move.rendered // || move.parsedProperties !== null)
+    //   ? {}
+    //   : copyProperties(move.parsedProperties!);
+    const props: Record<string, string[]> = move.parsedProperties !== null
+                                              ? copyProperties(move.parsedProperties!) 
+                                              : {}
+    if (move.rendered) { // if rendered, prefer move's state (comments).  If not, used parsed data.
+      // Color
+      const coord = getParsedCoordinates(move, flipped, size);
+        if (move.color === StoneColors.Black) props["B"] = [coord];
+        else props["W"] = [coord];
+      // Comments 
+      if (move.comments !== "") props["C"] = [move.comments];
+      else delete props["C"];
+      // Adornments
+      delete props["TR"];
+      delete props["SQ"];
+      delete props["LB"];
+      for (const a of move.adornments) {
+        const coords = getParsedCoordinates(a, flipped, size);
+        if (a.kind === AdornmentKinds.Triangle) {
+           if ("TR" in props) props["TR"].push(coords);
+           else props["TR"] = [coords];
+        }
+        else if (a.kind === AdornmentKinds.Square) {
+          if ("SQ" in props) props["SQ"].push(coords);
+          else props["SQ"] = [coords];
+        }
+        else if (a.kind === AdornmentKinds.Letter) {
+          const data = `${coords}:${a.letter}`;
+          if ("LB" in props) props["LB"].push(data);
+          else props["LB"] = [data];
+        }
+      } // foreach
+    } // rendered?
     return new PrintNode(props);
-  }
+  } // genPrintNode()
 
-  //// end print nodes, start legacy
+  //// ***end print nodes, start legacy
 
 /// genParsedNodes returns a ParsedNode with all the moves following move represented in the
 /// linked list. If move has never been rendered, then the rest of the list is the parsed nodes
@@ -2135,7 +2123,7 @@ export function flipCoordinates (coords: string[], size: number, labels: boolean
 
 
 ///
-//// Misc Helper Functions for Game Consumers and Creators
+//// Game Creation and Consumption Helpers
 ///
 
 /// create_parsed_game takes a ParsedGame and the current game (for messaging and poaching UI
@@ -2380,6 +2368,7 @@ function setupFirstParsedMovexxx (g : Game, move : Move) : Move | null {
       // }
       // Note, do not incr g.move_count since first move has not been rendered,
       // so if user clicks, that should be number 1 too.
+      parsedPropertiesToMove(move, g.size);
       move.number = g.moveCount + 1;
     // }
   }
@@ -2457,16 +2446,16 @@ export function parsedPropertiesToMove (move: Move, size : number) : Move | null
   // Removed optimization to avoid computing msg again, due to experiment to taint nodes in sgfparser
   // so that clicking on treeview nodes can abort immediately (due to have a BadNodeMessage).
   //if (n.BadNodeMessage !== null) return null;
-  // let color: StoneColor = StoneColors.NoColor;
-  // let row = Board.NoIndex; // Not all paths set the value, so need random initial value.
-  // let col = Board.NoIndex;
-  // let pass_move: Move | null = null; // null signals we did not substitute a pass move.
   if ("B" in move.parsedProperties!) {
     move.color = StoneColors.Black;
     [move.row, move.column] = parsedToModelCoordinates(move.parsedProperties!["B"][0]);
+    if (move.row === Board.NoIndex && move.column === Board.NoIndex)
+      move.isPass = true;
   } else if ("W" in move.parsedProperties!) {
     move.color = StoneColors.White;
     [move.row, move.column] = parsedToModelCoordinates(move.parsedProperties!["W"][0]);
+    if (move.row === Board.NoIndex && move.column === Board.NoIndex)
+      move.isPass = true;
   } else if (("AW" in move.parsedProperties!) || ("AB" in move.parsedProperties!) || 
              ("AE" in move.parsedProperties!)) {
     // Don't handle setup nodes in the middle of game nodes.  This is a light hack to use
@@ -2480,7 +2469,7 @@ export function parsedPropertiesToMove (move: Move, size : number) : Move | null
     move.parsedBadNodeMessage = null;
   } else {
     move.parsedBadNodeMessage = "Next nodes must be moves, don't handle arbitrary nodes yet -- " +
-                                genPrintNode(move, false, size).nodeString(false); // todo xxx less cons-y? propstonodestring? 
+                                genPrintNode(move, false, size).nodeString(false);  
     return null;
   }
   // m.parsedNode = pn;

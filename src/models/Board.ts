@@ -196,11 +196,22 @@ export class Move implements IMoveNext {
   // IMoveNext:
   //
   get IMNColor (): StoneColor {
-    return this.color;
+    if (this.rendered)
+      return this.color;
+    else {
+      if ("B" in this.parsedProperties!)
+        return StoneColors.Black;
+      else if ("W" in this.parsedProperties!)
+        return StoneColors.White;
+      else
+        return StoneColors.NoColor;
+    }
   }
+  ///
   get IMNNext (): IMoveNext | null {
     return this.next;
   }
+  ///
   get IMNBranches (): IMoveNext[] | null {
     return (this.branches === null) ? null : this.branches;
   }
