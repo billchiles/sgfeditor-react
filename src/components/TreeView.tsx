@@ -18,7 +18,6 @@
 import React from "react";
 import { Move, StoneColors } from "../models/Board";
 import type { IMoveNext } from "../models/Board";
-import type { ParsedNode } from "../models/sgfparser";
 import type { TreeViewNode } from "../models/treeview";
 import { TreeViewNodeKinds, getTreeViewModelRowsSize, 
          getTreeViewModelColumnsSize } from "../models/treeview";
@@ -77,7 +76,7 @@ const TARGET_BOTTOM_MARGIN = 32; // for below case
 ///            your C# behavior (replace dictionary key without recomputing layout).
 /// 
 export default function TreeView ({ treeViewModel, current, className }: Props) {
-  // Build mapping from Move/ParseNodes to TreeViewNodes when treeViewModel changes
+  // Build mapping from Move to TreeViewNodes when treeViewModel changes
   const treeViewMoveMap = React.useMemo(() => {
     const treeViewMoveMap = new Map<IMoveNext | "start", TreeViewNode>();
     for (let row = 0; row < getTreeViewModelRowsSize(); row++) {
@@ -99,8 +98,8 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   React.useEffect(() => {
     if (!app?.setTreeRemapper) return;
     const remap = (oldKey: IMoveNext, newMove: IMoveNext) => {
-      // oldkey is a ParsedNode
-      const node = treeViewMoveMap.get(oldKey); // todo xxx should always be null now -> no op
+      // oldkey was a ParsedNode before erasing them as AST, so now never call remap via game
+      const node = treeViewMoveMap.get(oldKey); 
       if (!node) return;
       treeViewMoveMap.delete(oldKey);
       treeViewMoveMap.set(newMove, node);
@@ -113,20 +112,19 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     return () => app.setTreeRemapper?.(null);
   }, [app, treeViewMoveMap]);
   // UI-side “TreeNodeForMove”: Given a Move (or any IMoveNext), return its TreeViewNode.
-  // If the Move key isn’t in the map but its parsedNode is, remap on the fly and update
-  // node.node = move.
   const lookupMoveOrRemap = React.useCallback((key: IMoveNext): TreeViewNode | null => {
     let n = treeViewMoveMap.get(key) ?? null;
     if (n) return n;
-    const pn = !!key && typeof key === "object" && "parsedNode" in key! ? 
-               key.parsedNode as IMoveNext : null;
-    if (pn !== null && treeViewMoveMap.has(pn)) {
-      const node = treeViewMoveMap.get(pn)!;
-      treeViewMoveMap.delete(pn);
-      treeViewMoveMap.set(key, node);
-      (node as any).node = key;
-      return node;
-    }
+    debugAssert(true, "lookupMoveOrRemap should always find Move in the map")
+    // const pn = !!key && typeof key === "object" && "parsedNode" in key! ? 
+    //            key.parsedNode as IMoveNext : null;
+    // if (pn !== null && treeViewMoveMap.has(pn)) {
+    //   const node = treeViewMoveMap.get(pn)!;
+    //   treeViewMoveMap.delete(pn);
+    //   treeViewMoveMap.set(key, node);
+    //   (node as any).node = key;
+    //   return node;
+    // }
     return null;
   }, [treeViewMoveMap]);  
 
@@ -150,11 +148,11 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     const y = e.clientY - rect.top;
     const elt_x = Math.floor((x - PAD_LEFT) / CELL_W);   
     const elt_y = Math.floor((y - PAD_TOP) / CELL_H);   
-    let n: TreeViewNode | null = null;
+    let node: TreeViewNode | null = null;
     let found = false;
     for (const moveNode of Array.from(treeViewMoveMap.values())) {
-      n = moveNode;
-      if (n.row === elt_y && n.column === elt_x) {
+      node = moveNode;
+      if (node.row === elt_y && node.column === elt_x) {
         found = true;
         break;
       }
@@ -171,8 +169,8 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
       "You are replaying moves from a pasted branch that has conflicts with stones on the " +
       "board, or replaying moves with bad properties from an SGF file.  If you clicked in " +
       "the tree view, try clicking an earlier node and using arrows to advance to the move.";
-    if (n!.node instanceof Move) {
-      const move = n!.node as Move;
+    if (node!.node instanceof Move) {
+      const move = node!.node as Move;
       if (move.row !== -1 && move.column !== -1 && ! gotoGameTreeMove(move)) {
         // move is NOT dummy move for start node of game tree view, so advance to it.
         // Hit conflicting move location due to pasted node or rendering bad parsed node
@@ -181,11 +179,12 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
       }
     }
     else {
+      debugAssert(true, "Should never see non-move in TreeViewMoveMap!!");
       // Move is ParsedNode, not a move that's been rendered.
-      if (! gotoGameTreeParsedNode(n!.node  as ParsedNode)) {
-        // Hit conflicting move location due to pasted node or rendering bad parsed node
-        await g.message?.message(oopsmsg);
-      }
+      // if (! gotoGameTreeParsedNode(node!.node  as ParsedNode)) {
+      //   // Hit conflicting move location due to pasted node or rendering bad parsed node
+      //   await g.message?.message(oopsmsg);
+      // }
     }
     app.bumpVersion();
     app.bumpTreeLayoutVersion();
@@ -196,6 +195,12 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   }, [app, treeViewMoveMap]);
 
   function gotoGameTreeMove(move: Move): boolean {
+    // Hack attempt to abort tree clicks on bad parse nodes.  sgfparser.ts parseNodeToMove() didn't
+    // store msg, game.ts parsedPropertiesToMove adds bad node msg, but this is a hack to see a 
+    // sentinel taint (don't need to compare string's contents), then disallow clicking on bad
+    // moves for bad parse nodes in the game tree.
+    if (move.parsedBadNodeMessage !== null) 
+      return false;
     const g = app.getGame();
     //if (!g) return false;
     let res = true;
@@ -213,45 +218,38 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     return res;
   }
 
-  function gotoGameTreeParsedNode(move: ParsedNode): boolean {
-    // Hack attempt to abort tree clicks on bad parsenodes.  sgfparser.ts ParseNode funct didn't store
-    // msg, game.ts ParsedNodeToMove adds bad node msg, but this is a hack to see a sentinel taint
-    // (don't compare string's contents), then disallow clicking on bad parsenodes in the game tree.
-    if (move.badNodeMessage !== null) // todo xxx update to move.parsedbadNodeMessage
-      return false;
-    const g = app.getGame();
-    //if (!g) return false;
-    let res = true;
-    const path = g.getPathToParsedNode(move);
-    if (path !== g.TheEmptyMovePath) {
-      if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
-      const curmove = g.currentMove;
-      if (curmove !== null) //{
-        app.setComment?.(curmove.comments);
-      // } else {
-      //   app.setComment?.(g.comments);
-      // }
-    }
-    return res;
-  }
+  // function gotoGameTreeParsedNode(move: ParsedNode): boolean {
+  //   // Hack attempt to abort tree clicks on bad parsenodes.  sgfparser.ts ParseNode funct didn't store
+  //   // msg, game.ts ParsedNodeToMove adds bad node msg, but this is a hack to see a sentinel taint
+  //   // (don't compare string's contents), then disallow clicking on bad parsenodes in the game tree.
+  //   if (move.badNodeMessage !== null) 
+  //     return false;
+  //   const g = app.getGame();
+  //   //if (!g) return false;
+  //   let res = true;
+  //   const path = g.getPathToParsedNode(move);
+  //   if (path !== g.TheEmptyMovePath) {
+  //     if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
+  //     const curmove = g.currentMove;
+  //     if (curmove !== null) //{
+  //       app.setComment?.(curmove.comments);
+  //     // } else {
+  //     //   app.setComment?.(g.comments);
+  //     // }
+  //   }
+  //   return res;
+  // }
 
-  // Locate the current node’s rect in client coords and adjust scroll if out of view
-  // Scroll-to-current behavior
-  //    - Runs after render.  Derives the cell’s rectangle in the scroll container’s
-  //      coordinate space and, if partially out of view, scrolls:
-  //        • Horizontal: bias left
-  //        • Vertical:   coming from below -> near bottom, from above -> near top
+  // Locate the current node’s rect in client coords and adjust scroll if out of view.  Runs after
+  // render.  Derives the cell’s rectangle in the scroll container’s coordinate space and, if
+  // partially out of view, scrolls -- Horizontal: bias left, Vertical: coming from below -> near
+  // bottom, from above -> near top.
   React.useEffect(() => {
     let cell: TreeViewNode | null = null;
     if (current === null) 
       cell = treeViewMoveMap.has("start") ? treeViewMoveMap.get("start")! : null;
     else if (treeViewMoveMap.has(current))
       cell = treeViewMoveMap.get(current)!
-    else if (current.parsedNode !== null && treeViewMoveMap.has(current.parsedNode)) {
-      cell = treeViewMoveMap.get(current.parsedNode)!;
-      treeViewMoveMap.delete(current.parsedNode);
-      treeViewMoveMap.set(current, cell);
-    }
     debugAssert(cell !== null, "treeViewMoveMap miss for current move. " +
                 "This usually means topology changed but onTreeLayoutChange didn't fire.");
     const scroller = scrollRef.current;
@@ -342,9 +340,9 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
       nextCell = selected ? lookupMoveOrRemap(selected) : null;
     }
   } else {
-    const game = app.getGame?.() ?? app.game;
-    const rootBranches = game!.branches;
-    if (rootBranches && rootBranches.length > 0 && game!.firstMove) {
+    const game = app.getGame();
+    const rootBranches = game.branches;
+    if (rootBranches !== null && game.firstMove !== null) {
       nextCell = lookupMoveOrRemap(game.firstMove);
     }
   }  // Return the html

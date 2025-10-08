@@ -143,7 +143,7 @@ function createWindow () {
   } else {
     //win.loadFile(path.join(__dirname, "..", "dist", "index.html")); error file not found
     const indexHtml = path.resolve(__dirname, "..", "..", "dist", "index.html");
-    console.log("[main] loading:", indexHtml, "exists:", fs.existsSync(indexHtml));
+    // console.log("[main] loading:", indexHtml, "exists:", fs.existsSync(indexHtml));
     win.loadFile(indexHtml);
   }
 

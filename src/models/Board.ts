@@ -1,5 +1,4 @@
 import { debugAssert } from "../debug-assert";
-import type { ParsedNode } from "./sgfparser";
 
 
 export const StoneColors = {
@@ -146,42 +145,54 @@ export interface IMoveNext {
    }
 
 export class Move implements IMoveNext {
-  row: number;
-  column: number;
-  color: StoneColor;
+  row: number; // not set when Move.rendered is false, representing nodes parsed in a file
+  column: number; // not set when Move.rendered is false, representing nodes parsed in a file
+  color: StoneColor; // not set when Move.rendered is false, representing nodes parsed in a file
   number: number; // move count, from 1.  All alternate moves in variation tree have the same number.
-  isPass: boolean; // True when row, col are both Board.NoIndex
+  // HACK: set isPass on new Move() if indexes are NoIndex, but can set isPass directly to false
+  // while indexes remain NoIndex.  If move.rendered is false, this is the case.
+  _isPass: boolean; // True when row, col are both Board.NoIndex
   previous: Move | null;
   next: Move | null; // null when no next move (same if start node of empty board)
   deadStones : Move[]; // never null
   branches: Move[] | null; // Branches is null when there is zero or one next move.
   adornments: Adornment[];
   comments: string;
-  parsedNode: ParsedNode | null;
+  // parsedNode: ParsedNode | null;
   rendered: boolean;
-  // NEW: raw SGF properties for lazy reify 
+  // raw SGF properties from a file, lifted to move when they are readied for rendering
   parsedProperties: Record<string, string[]> | null;
-  // NEW: parse-time taint that something's wrong with error info
+  // parse-time taint that something's wrong with the SGF info for this node, or we don't handle it
   parsedBadNodeMessage: string | null;
 
 
   constructor(row: number, column: number, color: StoneColor) {
-
     this.row = row;
     this.column = column;
     this.color = color;
     this.number = 0;
-    this.isPass = this.row === Board.NoIndex && this.column === Board.NoIndex;
+    this._isPass = this.row === Board.NoIndex && this.column === Board.NoIndex;
     this.previous = null;
     this.next = null;
     this.branches = null;
     this.adornments = [];
     this.deadStones = [];
     this.comments = "";
-    this.parsedNode = null;
+    //this.parsedNode = null;
     this.rendered = true; // Assume move rendered, parsed game code sets it to false.
     this.parsedProperties = null;
     this.parsedBadNodeMessage = null;
+  }
+
+  get isPass(): boolean {
+    return this._isPass;
+  }
+  set isPass(v: boolean) {
+    this._isPass = v;
+    if (v) {
+      this.row = Board.NoIndex;
+      this.column = Board.NoIndex;
+    }
   }
 
   addBranch (m: Move) {

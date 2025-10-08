@@ -21,7 +21,7 @@ import type { MessageOrQuery } from "./Game";
 import { browserFileBridge, browserAppStorageBridge, browserKeybindings } from "../platforms/browser-bridges";
 import { fileBridgeElectron, keyBindingBridgeElectron } from '../platforms/electron-bridges';
 import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platforms/bridges";
-import {parseFile, SGFError, ParsedNode, parseFileToMoves} from "./sgfparser";
+import { SGFError, ParsedNode, parseFileToMoves} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
 import { Board, type Move } from "./Board";
 import type { ConfirmOptions } from "../components/MessageDialog";
@@ -246,8 +246,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     g.onTreeLayoutChange = bumpTreeLayoutVersion;
     g.onTreeHighlightChange  = bumpTreeHighlightVersion;
     g.onParsedNodeReified = (oldKey, newMove) => {
-      // calls into TreeView to: delete(oldKey); set(newMove, node); node.node = newMove;
-      treeRemapperRef.current?.(oldKey, newMove); // todo xxx should be no op now
+      // calls into TreeView to delete(oldKey) and set(newMove, node).
+      // onParsedNodeReified -- no longer called after erasing ParsedNodes as AST from parser.
+      treeRemapperRef.current?.(oldKey, newMove); 
     };
     g.getComments = getComment;
     g.setComments = setComment;    
@@ -396,7 +397,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   }, []);
   //
   // AUTO SAVE
-  const autosavedbgstop = true; // todo xxx
+  const autosavedbgstop = false;
   // need useRef for stability of value across renders to avoid the interval timer trying to cancel
   // an old inactivity timer ID it closed over any number of version ticks prior
   const lastSaveAtRef = useRef<number>(Date.now());
@@ -502,6 +503,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // }, []);
   //
   // APPGLOBALS for UI code, mimic CmdDependencies for commands, passed down from GameProvider
+  // Why gameRef and getGame()?  app.game is a React snapshot that GameProvider resets every render.
+  // React re-renders when app.game changes.  getGame returns the live gameRef.current ref that is
+  // stable across renders, best used in command handlers, timers, async, etc.
   const api: AppGlobals = useMemo(
     () => ({game: gameRef.current, getGame, setGame, getGames: () => games.slice(), setGames,
             getDefaultGame: () => defaultGame, setDefaultGame,
@@ -574,7 +578,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     // Move focus to a safe, focusable container so arrows work immediately
     focusOnRoot();
     return;
-  // Save As
+  // Save As        / todo if save default game, set default to null, don't close it on new dlg
   } else if (browser && control && alt && e.code === "KeyS" || //lower === "s") ||
              ! browser && control && shift && e.code === "KeyS") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
@@ -630,7 +634,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return;
   // c-F4: Close Game
   } else if ((control && (e.code === "F4" || lower === "f4")) ||
-             (! browser && control && alt && (e.code === "F4" || lower === "f4"))) {
+             (browser && control && alt && (e.code === "F4" || lower === "f4"))) {
     //deps.setLastCommand({ type: CommandTypes.NoMatter }); set in closeGameCmd
     e.preventDefault();
     e.stopPropagation();
@@ -720,7 +724,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return;
   }
   // Paste Move
-  if (control && !shift && e.code === "KeyV") {
+  if (control && !shift && e.code === "KeyV") { // "v"
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
@@ -921,6 +925,7 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
   newGames = "idx" in arg ? moveGameToMRU(newGames, idx) : [arg.g, ...newGames];
   setGames(newGames); 
   setGame(newGames[0]);
+  newGames[0].setComments!(newGames[0].comments);
 }
 
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
@@ -1093,7 +1098,7 @@ async function getFileGameCheckingAutoSave
      gamemgt: {gameRef: React.MutableRefObject<Game>, setGame: (g: Game) => void,
                getGames: () => Game[], setGames: (gs: Game[]) => void,
                getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void}) {
-  // TODO Check auto save file exisitence and ask user which to use.
+  // Check auto save file exisitence and ask user which to use.
   const curgame = gamemgt.gameRef.current;
   const autoSaveName = getAutoSaveName(fileName);
   if (await appStorage.exists(autoSaveName)) {
@@ -1107,7 +1112,6 @@ async function getFileGameCheckingAutoSave
         // await curgame.message!.confirm!(
         //   `Found more recent auto saved file for ${(fileHandle as any).name}.  Confirm opening ` +
         //   `it, OK for auto saved version, Cancel/Escape to open older original file.`)) {
-      // todo need to change this to take autodata
       const autodata = await appStorage.readText(autoSaveName);
       if (autodata === null)
         throw new Error(
@@ -1162,16 +1166,14 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
   } else if (data === "") {
     throw new Error(`Eh?! fileHandle is null, data empty, wassup?! ${(fileHandle as any).name}`);
   }
-  // let pg = parseFile(data); // todo xxx
   const pg = parseFileToMoves(data);
-  // pg = wah; // return pg to const when done
   const g = await createGameFromParsedGame(pg, cleanup.curGame, cleanup.setGame, 
                                            cleanup.getGames, cleanup.setGames,
                                            cleanup.getDefaultGame, cleanup.setDefaultGame);
   // 
   gameRef.current.saveGameFileInfo(fileHandle, fileName); // same as g.saveGameFileInfo...
   return g; 
-}
+} // parseAndCreateGame()
 
 /// TODO not sure we need this at all, but
 function undoLastGameCreation (game: Game | null) {
@@ -1191,7 +1193,7 @@ async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastComman
   // Update model
   g.saveCurrentComment();
   // Do the save
-  const data = flipped ? g.buildSGFStringFlipped() : g.buildSGFStringV2(); // todo xxx
+  const data = flipped ? g.buildSGFStringFlipped() : g.buildSGFString();
   const hint = flipped ? "flipped-game-view.sgf" : (g.filename ?? "game.sgf");
   const res = await fileBridge.save(flipped ? null : (g.saveCookie ?? null), hint, data);
   if (!res) return; // user cancelled dialog when there was no saveCookie or filename.
@@ -1220,7 +1222,7 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
   if (!res) return; // cancelled
   g.isDirty = false;
-  // TODO delete autosave file
+  // delete autosave file
   const { fileName, cookie } = res;
   // If saved file, remove any auto save
   const autoSaveName = getAutoSaveName(fileName);
@@ -1285,7 +1287,7 @@ function gameInfoCmd (curgame: Game, showGameInfo: () => void) {
     if (curgame.miscGameInfo === null) {
       // If misc properties still in parsed structure, capture them all to pass them through
       // if user saves file.  When miscGameInfo non-null, it supercedes parsed structure.
-      curgame.miscGameInfo = copyProperties(curgame.parsedGame.nodes!.properties);
+      curgame.miscGameInfo = copyProperties(curgame.parsedGame.properties);
     }
   } else if (curgame.miscGameInfo === null)
     curgame.miscGameInfo = {};

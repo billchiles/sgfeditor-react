@@ -20,7 +20,7 @@ Out of scope (for now): engine analysis, online play, collaboration.
 ## 2) High-Level Architecture
 
 ```
-React UI (App/AppContent/GoBoard)     Model (Game, Board, Move, ParsedNode)     Bridges (I/O, storage, hotkeys)
+React UI (App/AppContent/GoBoard)     Model (Game, Board, Move)     Bridges (I/O, storage, hotkeys)
 └─ uses AppGlobals context ────────────┘                                         └─ browser & Electron implementations
 ```
 
@@ -48,8 +48,8 @@ React UI (App/AppContent/GoBoard)     Model (Game, Board, Move, ParsedNode)     
   * `getComments?(): string` and `setComments?(s: string)` (comment textarea bridge)
   * Main ops: `makeMove`, `unwindMove`, `replayMove`, `gotoStart`, `gotoLastMove`, **branching**, cut/paste subtree, etc.
 * **Board**: 2D stones array & helpers (`add/remove/hasStone`, liberties/capture helpers).
-* **Move**: linked nodes (1-based row/col); `Next`, optional `Branches`, `DeadStones`, `Comments`, `Rendered`, `ParsedNode`.
-* **SGF Parser** (`sgfparser.ts`): returns `ParsedGame / ParsedNode` trees; helpers translate parse nodes to `Move`s.
+* **Move**: linked nodes (1-based row/col); `Next`, optional `Branches`, `DeadStones`, `Comments`, `Rendered`.
+* **SGF Parser** (`sgfparser.ts`): returns `ParsedGame / Move` trees; helpers to lift parse properties to `Move`s.
 
 ### UI Components
 
@@ -101,15 +101,33 @@ React UI (App/AppContent/GoBoard)     Model (Game, Board, Move, ParsedNode)     
   * In Electron (`false`), use native menu/accelerators; in browser (`true`), avoid hijacked combos.
 
 ---
+### SGF I/O (v2)
+
+* **Read:** `parseFileToMoves(text)` returns `ParsedGame` with `properties` (root) + `moves/branches` as `Move`s; `nodes` is `null` (v2). 
+* **Write/Print:** Build `PrintNode`s from the current `Move` snapshot. For each node: start with a **copy of `move.parsedProperties`** (if any), then overlay current **B/W coordinate**, **C** (comment), and any adornments; recurse through `next`/`branches` to serialize. 
+
+* **Parser output invariant:** When a `Move` comes **directly from the parser**, it starts with
+  `row = Board.NoIndex`, `column = Board.NoIndex`, `color = NoColor`, **`isPass = false`**, `rendered = false`, and `parsedProperties` set to the raw SGF props. The parser **does not** decide pass/non-pass. (This matches `parseNodeToMove` setting `move.isPass = false`.) 
+* **Authoritative pass decision:** Later, **`parsedPropertiesToMove(move, size)`** computes coordinates from `B[...]` or `W[...]`. If those coordinates are empty (`""` → `NoIndex`), **it sets `move.isPass = true`**; otherwise the move becomes a normal point move with concrete `row/column` and color. 
+* **Constructor vs parser:** The `Move` **constructor** keeps its current behavior for user-created moves: if you construct with `row/column = NoIndex`, the constructor sets `isPass = true`. This does **not** apply to parser-created moves because the parser immediately overrides `isPass` to `false` until `parsedPropertiesToMove` runs.
+* **Rationale:** This avoids rendering an “empty-coords” parser node as a pass by accident (e.g., pasted subtrees), and ensures the board advances only after `parsedPropertiesToMove` interprets `B`/`W` properly.
+
+
+
+---
+### Parser v2: SGF → Moves 
+
+* The SGF reader now builds a `ParsedGame` whose `moves`/`branches` are **`Move` objects**. The *root* still holds parsed **properties** (game info) separately. `ParsedGame.nodes` is `null` to signal v2.  
+* Each `Move` carries **`parsedProperties: Record<string,string[]> | null`** so we can round-trip untouched keys/values when writing/printing, even if the model ignored them at runtime. When printing, we start from the live game, clone a snapshot (`PrintNode`s), and **merge rendered state + any preserved `parsedProperties`** into the output. 
+* A `Move.rendered` flag distinguishes moves never “reified” on a board from ones already prepared (captures computed, adornments resolved, etc.).  
+
+The tree-view still consumes an `IMoveNext` chain starting from a synthetic “start” node whose `next` points at the first real `Move`, with root-level branches mirrored in `.branches`. This remains unchanged; it just walks `Move`s now. 
+
+---
 
 ## 5) Game Tree & Branching
 
 * **Invariant:** No two sibling next-moves at the same location.
-* **Parsed nodes → Moves:**
-
-  * Use `ParsedNodeToMove` to create `Move` with `Rendered=false`.
-  * **On replay** (`replayMove`), if the move was never rendered, compute captures, adornments, and next/branches from parsed node and mark `Rendered=true`.
-
 * **Cut / Paste (overview):** Cut the **current** node (and its entire subtree); paste it as the next move after the current position, with safety checks and renumbering (see §5.4).
 
 ---
@@ -166,10 +184,13 @@ If checks pass:
 - **Interior node**: Detach from its `previous`, clear transient `deadStones`, and update the parent’s `next/branches` ollections. If this node had an associated `ParsedNode`, adjust the parsed tree to match (best-effort; auto-save will ormalize over time). :contentReference[oaicite:28]{index=28}
 
 ---
-### 5.5 Tree-View Rendering & Reification
+### 5.5 Lazy moves & replay 
 
-When a `ParsedNode` is **reified** into a `Move` during replay, the model calls `onParsedNodeReified(oldKey, newMove)`.  
-The UI registers a “remapper” to swap the identity used by the TreeView (delete `oldKey`, register `newMove`) so the layout stays stable and the node becomes interactive as a live `Move`. :contentReference[oaicite:15]{index=15}
+* **Lazy reify**: If a `Move` is loaded from SGF and `rendered === false`, the first time we step onto it the model computes captures (`deadStones`), sets up its `next/branches` shape if needed, and flips `rendered` to `true`. (This is what “reify” used to do for `ParsedNode`s.) 
+* **Preserving raw SGF**: When generating SGF (printing or save), we begin from the current `Move` graph and **copy `parsedProperties` forward** while injecting current state (move coordinates, comments, adornments). That’s how you keep unknown props intact but still reflect model edits. 
+* **Round-trip root**: The parser returns a `ParsedGame` whose `properties` are the root’s props, and whose `moves`/`branches` hang off a synthetic head `Move`; before handing to the model, we detach that synthetic head so first real moves have correct `previous = null`. 
+
+*Notes for tree view:* the grid layout builds from an `IMoveNext` starting node whose `next` is the first real move, and `branches` mirror siblings; same as before—just no `ParsedNode` objects involved now. 
 
 ---
 

@@ -57,7 +57,7 @@ export const fileBridgeElectron: FileBridge = {
   },
 
   async getWriteDate (cookie: unknown) {
-    if (typeof cookie !== "string" || cookie !== "") return null;
+    if (typeof cookie !== "string" || cookie === "") return null;
     return await window.electron!.timestamp(cookie);
   },
 };

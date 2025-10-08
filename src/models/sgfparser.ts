@@ -9,7 +9,6 @@
 ///
 import { StoneColors, Board, Move } from "./Board";
 import { type StoneColor, type IMoveNext } from "./Board";
-import { parsedNodeToMove } from "./Game";
 
 
 export class ParsedGame {
@@ -23,28 +22,28 @@ export class ParsedGame {
   // first node holds game/empty board state, ignores properties and branches
   printNodes: PrintNode | null = null; 
 
-  /// todo xxx erase legacy fallback for interim code
   toString(): string {
     // if (this.nodes === null) return ""; // Min tree is "(;)", but that implies one empty node
     // return "(" + this.nodesString(this.nodes) + ")";
-    // Prefer printNodes if present; otherwise, fall back to legacy ParsedNode tree.
-    if (this.printNodes !== null) return "(" + this.printNodesString(this.printNodes) + ")";
-    if (this.nodes === null) return ""; // Min tree is "(;)", but that implies one empty node
-    return "(" + this.nodesString(this.nodes) + ")";
+    // Min tree is "(;)", but that implies one empty node.
+    // if (this.printNodes !== null) 
+      return "(" + this.genPrintNodesString(this.printNodes) + ")";
+    // if (this.nodes === null) return ""; // Min tree is "(;)", but that implies one empty node
+    // return "(" + this.nodesString(this.nodes) + ")";
 
   }
 
-  /// printNodesString returns a string for a series of nodes, and the caller
+  /// printNodesString returns a string for a series of nodes, recursing on branches.  Ghe caller
   /// needs to supply the open and close parens that bracket the series.
   ///
-  private printNodesString (nodes: PrintNode): string {
+  private genPrintNodesString (nodes: PrintNode | null): string {
     let res = "";
     let cur: PrintNode | null = nodes;
     while (cur !== null && cur.next !== null) {
       res += cur.nodeString(res !== "");
       if (cur.branches !== null) {
         for (const n of cur.branches) {
-          res = res + "\n" + "(" + this.printNodesString(n) + ")";
+          res = res + "\n" + "(" + this.genPrintNodesString(n) + ")";
         }
         return res; 
       }
@@ -54,27 +53,29 @@ export class ParsedGame {
     return res;
   }
   /// When done, we keep the previous function and rename it to this function's name
-  private nodesString (nodes: ParsedNode): string {
-    let res = "";
-    let cur: ParsedNode | null = nodes;
-    while (cur !== null && cur.next !== null) {
-      // Get one node's string with a leading newline if it is not the first.
-      res += cur.nodeString(res !== "");
-      if (cur.branches !== null) {
-        for (const n of cur.branches) {
-          res = res + "\n" + "(" + this.nodesString(n) + ")";
-        }
-        return res;
-      }
-      cur = cur.next;
-    }
-    if (cur !== null) res += cur.nodeString(res !== ""); // Test res, could be single node branch.
-    return res;
-  }
+  // private nodesString (nodes: ParsedNode): string {
+  //   let res = "";
+  //   let cur: ParsedNode | null = nodes;
+  //   while (cur !== null && cur.next !== null) {
+  //     // Get one node's string with a leading newline if it is not the first.
+  //     res += cur.nodeString(res !== "");
+  //     if (cur.branches !== null) {
+  //       for (const n of cur.branches) {
+  //         res = res + "\n" + "(" + this.nodesString(n) + ")";
+  //       }
+  //       return res;
+  //     }
+  //     cur = cur.next;
+  //   }
+  //   if (cur !== null) res += cur.nodeString(res !== ""); // Test res, could be single node branch.
+  //   return res;
+  // }
 } // ParsedGame class
 
 /// PrintNode exists purely as a functional copy of Game and Moves for serializing to print.
-/// We could erase this later and just descend the Game and Moves instead of calling genPrintNodes.
+/// We could erase this later and just descend the Game and Moves instead of calling genPrintNodes,
+/// but taking an "atomic" snapshot without await's or auto-save's allowing for re-entrancy or
+/// mutation may be useful.
 ///
 export class PrintNode {
   properties: Record<string, string[]>;
@@ -89,20 +90,17 @@ export class PrintNode {
   }
 
   /// nodeString returns the string for one node, taking a flag for a preceding newline.  Game uses
-  /// this for error reporting. xxx -- make sure we can use this for errors when parsenodes are gone
+  /// this for error reporting. 
   ///
   nodeString (newline: boolean): string {
     const props = this.properties;
     let s = newline ? "\n;" : ";";
     // Print move property first for human  readability
-    console.log(`calling escape on props[b]: ${props["B"]}`)
     if ("B" in props) s += "B" + this.escapePropertyValues(props["B"]);
-    console.log(`calling escape on props[w]: ${props["W"]}`)
     if ("W" in props) s += "W" + this.escapePropertyValues(props["W"]);
     // Get the rest ...
     for (const k of Object.keys(props)) {
       if (k === "B" || k === "W") continue;
-      console.log(`calling escape on props[${k}]: ${props[k]}`)
       s += k + this.escapePropertyValues(props[k]);
     }
     return s;
@@ -112,7 +110,6 @@ export class PrintNode {
     let res = "";
     for (const v of values) {
       res += "[";
-      console.log(`   escaping value: ${v}`)
       if (v.includes("]") || v.includes("\\")) {
         let out = "";
         for (const ch of v) {
@@ -136,7 +133,7 @@ export class ParsedNode implements IMoveNext {
   properties: Record<string, string[]> = {};
 
   /// BadNodeMessage is non-null if processing or readying a node for rendering detects
-  /// an erroneous situation (SGF features not supported or something bogus).  Thsi then
+  /// an erroneous situation (SGF features not supported or something bogus).  This then
   /// contains the error msg that should be reported if not swalling the processing error.
   ///
   badNodeMessage: string | null = null;
@@ -205,13 +202,13 @@ export class ParsedNode implements IMoveNext {
 /// Parser
 ///
 
-export function parseFile (text: string): ParsedGame {
-  const l = new Lexer(text);
-  l.scanFor("(", "Can't find game start");
-  const g = new ParsedGame();
-  g.nodes = parseNodes(l);
-  return g;
-}
+// export function parseFile (text: string): ParsedGame {
+//   const l = new Lexer(text);
+//   l.scanFor("(", "Can't find game start");
+//   const g = new ParsedGame();
+//   g.nodes = parseNodes(l);
+//   return g;
+// }
 
 //// new parser
 
@@ -255,8 +252,8 @@ export function parseFileToMoves(text: string): ParsedGame {
   const lexer = new Lexer(text);
   lexer.scanFor("(", "Can't find game start");
   const pg = new ParsedGame();
-  // Parse the root node (properties only), then its children as Moves
-  const root = parseNodesToMoves(lexer);           // todo xxx erase 19 later
+  const root = parseNodesToMoves(lexer);
+  // root is bogus Move object for empty board / game properties, so set up ParsedGame
   pg.properties = root.parsedProperties!; //{ ...root.properties };
   if (root.branches !== null) {
     pg.branches = root.branches;
@@ -285,7 +282,7 @@ export function parseFileToMoves(text: string): ParsedGame {
 
 // function pnsToMoves (pn: ParsedNode, size: number): Move | null {
 //   const head = parsedNodeToMove(pn, size);
-//   if (head === null) return null; // don't worry badNodeMessages now xxx
+//   if (head === null) return null; 
 //   // head.rendered = false;   // lazy reify moves
 //   head.parsedProperties = pn.properties;
 //   // loop until a branching point
@@ -295,7 +292,7 @@ export function parseFileToMoves(text: string): ParsedGame {
 //   while (ppn.next !== null && ppn.branches === null) {
 //     const nextPn: ParsedNode = ppn.next;
 //     const m = parsedNodeToMove(nextPn, size);
-//     if (m === null) break; // stop this line on invalid node, bad nodes exist, don't worry now xxx
+//     if (m === null) break; 
 //     move.next = m;
 //     m.parsedProperties = nextPn.properties;
 //     m.previous = move;
@@ -318,8 +315,11 @@ export function parseFileToMoves(text: string): ParsedGame {
 //   return head;
 // }
 
-
-export function parseNodesToMoves (lexer: Lexer): Move {
+/// parseNodesToMoves takes a lexer and recursively parsess the file's contents, returning a Move
+/// that is a mock Move to represent the empty board / game state and that has any actual game moves
+/// hanging from its next pointer.
+///
+function parseNodesToMoves (lexer: Lexer): Move {
   lexer.scanFor(";", "Must be one node in each branch");
   let curMove = parseNodeToMove(lexer);
   const first = curMove;
@@ -337,7 +337,6 @@ export function parseNodesToMoves (lexer: Lexer): Move {
       curMove = next;
     } else if (ch === "(") {
       // This can parse degenerate files like OGS produces where every move is a new branch.
-      // todo xxx Need to rectify for move invariant of null branches
       if (! branchingYet) {
         const next = parseNodesToMoves(lexer);
         curMove.next = next;
@@ -351,7 +350,6 @@ export function parseNodesToMoves (lexer: Lexer): Move {
       }
     } else if (ch === ")") {
       if (curMove.branches !== null && curMove.branches.length === 1) {
-        // todo xxx if (!curMove.next) curMove.next = curMove.branches[0];
         curMove.branches = null;
       }
       return first;
@@ -362,12 +360,13 @@ export function parseNodesToMoves (lexer: Lexer): Move {
   throw new SGFError(`Unexpectedly hit EOF -- file location ${lexer.location}.`);
 }
 
-/// parseNodeToMove returns a Move whose parsedProperties mirror a single SGF node.
-/// It copies parseNode's logic but materializes a Move directly.
+/// parseNodeToMove parses a single node from the lexer, returning a Move with parsed properties and
+/// possibly a bad node message.
+///
 export function parseNodeToMove (lexer: Lexer): Move {
   // Later when rendered, we fix up the move from properties.
   const move = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor)
-  move.isPass = false; // no indexes sets pass to true
+  move.isPass = false; // no indexes in constructor sets pass to true, now false with no indexes.
   move.rendered = false;
   const props: Record<string, string[]> = {};
   while (lexer.hasData()) {
@@ -378,36 +377,25 @@ export function parseNodeToMove (lexer: Lexer): Move {
         move.parsedBadNodeMessage = "no B or W; marking as setup/odd node";
       }
       // Expected return from here due to no properties or syntax at end of properties (id == null)
-      // todo xxx LIFT THESE HERE OR IN parsedPropertiesToMove ???
-      // if keep here, fold into above test, maybe better to do it here
-      // if ("B" in props) {
-      //   move.color = StoneColors.Black;
-      //   [move.row, move.column] = parsedToModelCoordinates(props["B"][0]);
-      // } else if ("B" in props) {
-      //   move.color = StoneColors.White;
-      //   [move.row, move.column] = parsedToModelCoordinates(props["W"][0]);
-      // }
       move.parsedProperties = props;
-      // todo xxx if ("C" in move.parsedProperties!)
-      // move.comments = move.parsedProperties!["C"][0];
       return move;
     }
     if (id in props) {
       throw new SGFError(`Encountered ID, ${id}, twice for node -- file location ${lexer.location}.`);
     }
+    // Loop values for this property id ...
     lexer.scanFor("[", "Expected property value");
     const values: string[] = [];
     props[id] = values;
-    // Loop values for one property
     while (lexer.hasData()) {
       values.push(lexer.getPropertyValue(id === "C" || id === "GC"));
       const [pos] = lexer.peekFor("[");
       if (pos === -1) break;
       lexer.location = pos;
     }
-  }
+  } // while data
   throw new SGFError(`Unexpectedly hit EOF -- file location ${lexer.location}.`);
-}
+} //parseNodeToMove()
 
 // export function parseNodeToMove (lexer: Lexer, size: number): Move {
 //   const props: Record<string, string[]> = {};
