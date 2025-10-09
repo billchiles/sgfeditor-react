@@ -4,7 +4,7 @@ import { Board, Move, StoneColors, oppositeColor, parsedToModelCoordinates,
          parsedLabelModelCoordinates, modelCoordinateToDisplayLetter,
          getParsedCoordinates, flipParsedCoordinates } from './Board';
 import { type StoneColor, type Adornment, type AdornmentKind, AdornmentKinds} from './Board';
-import { ParsedGame, ParsedNode } from './sgfparser';
+import { ParsedGame } from './sgfparser';
 import { PrintNode } from './sgfparser';
 import { SGFError } from './sgfparser';
 
@@ -49,9 +49,9 @@ export class Game {
   onTreeLayoutChange?: () => void; // full re-render, layout/topolgy change
   onTreeHighlightChange?: () => void; // just highlights or scrolling changes possible
   message?: MessageOrQuery; // optional sink (alert/confirm etc.)
-  // When a move is reified from a ParsedNode during replay/rendering, need to tell the UI layer
-  // the mapping from moves to view models needs updating.
-  onParsedNodeReified?: (oldKey: ParsedNode, newMove: Move) => void;
+  // NO LONGER USED -- When a move is reified from a ParsedNode during replay/rendering, need to 
+  // tell the UI layer the mapping from moves to view models needs updating.
+  onParsedNodeReified?: (oldKey: /* ParsedNode */ any, newMove: Move) => void;
   getComments?: () => string; // optional: read current comment from UI
   setComments?: (text: string) => void;
 
@@ -641,7 +641,7 @@ gotoStart(): void {
     this.nextColor = oppositeColor(move.color);
     let hadParseErr = false;
     if (!move.rendered) {
-      // Move points to a ParsedNode and has never been displayed.
+      // Move just has parsedProperties and has never been displayed.
       const [retMove, err] = this.readyForRendering(move);
       if (retMove === null) { // Issue with parsed node, cannot go forward.
         // Current move comes back if some branches had bad parsenodes, but good moves existed. 
@@ -649,8 +649,6 @@ gotoStart(): void {
         return [null, err]; // There was an error, and we found an error msg.
       }
       hadParseErr = err;
-      // Don't need view model object in code here, but need to ensure there is one mapped by move.
-      // this.treeViewNodeForMove(move); Eliminated need for this when erased ParsedNodes as AST.
     }
     this.moveCount += 1;
     // Apply captures
@@ -678,7 +676,7 @@ gotoStart(): void {
     let oneGood = false; 
     if (move.branches !== null) {
       for (const m of move.branches) {
-        const hadErr = parsedPropertiesToMove(m, this.board.size) === null;
+        const hadErr = liftPropertiesToMove(m, this.board.size) === null;
         // No longer return if had error.  Some branches are viewable, but signal to callers had err.
         if (hadErr) continue;   
         oneGood = true;
@@ -691,7 +689,7 @@ gotoStart(): void {
       }
       if (!oneGood) return [null, true];
     } else if (move.next !== null) {
-      if (parsedPropertiesToMove(move.next, this.board.size) === null) {
+      if (liftPropertiesToMove(move.next, this.board.size) === null) {
         return [null, true];
       }
       oneGood = true;
@@ -708,19 +706,10 @@ gotoStart(): void {
     return [oneGood ? move : null, hadErr];
   } // readyForRendering()
 
-  /// treeViewNodeForMove signals the UI rendering that any tracking it has of this ParsedNode
-  /// needs updating to the new Move object.
-  ///
-  // treeViewNodeForMove (move: Move): void { 
-  //   const pn = move.parsedNode;
-  //   if (pn !== null) {
-  //     this.onParsedNodeReified?.(pn, move);
-  //   }
-  // }
 
-/// _replay_unrendered_adornments is just a helper for _replay_move_update_model.  This does not 
+/// replayUnrenderedAdornments is just a helper for _replay_move_update_model.  This does not 
 /// need to check add_adornment for a None result since we're trusting the file was written correctly,
-/// or it doesn't matter if there are dup'ed letters.  Move must have a parsedNode with properties.
+/// or it doesn't matter if there are dup'ed letters.  Move must have parsedProperties non-null.
 ///
 replayUnrenderedAdornments (move: Move): void {
     const props = move.parsedProperties!;
@@ -759,19 +748,6 @@ replayUnrenderedAdornments (move: Move): void {
     this.filebase = parts[parts.length - 1];
   }
 
-  // buildSGFString (): string {
-  //     const pg = this.updateParsedGameFromGame();
-  //     return pg.toString();
-  //   }
-
-  // buildSGFStringFlipped (): string {
-  //     // Keep the unflipped parsed tree intact while generating flipped output
-  //     const saved = this.parsedGame;
-  //     const pg = this.updateParsedGameFromGame(true);
-  //     this.parsedGame = saved;
-  //     return pg.toString();
-  //   }
-
   /// buildSGFString returns SGF representation of the current game.  Call from the command layer to write a file.
   /// 
   /// TODO: Callers need to handle if the write fails, which can happen if the user deletes the
@@ -796,7 +772,12 @@ replayUnrenderedAdornments (move: Move): void {
     return pg.toString();
   }
 
-  /// genPrintGameFromGame will replace genParsedGameFromGame
+  /// genPrintGameFromGame generates a new ParsedGame with a list of PrintNodes, which are minimal
+  /// representations of the game -- properties, next ptr, branches.  If flipped is true, then move
+  /// and adornment indexes are diagonally mirrored; see buildSGFStringFlipped.
+  /// NOTE NOTE NOTE -- this may be called from auto save timer, so any await or UI moment could
+  /// re-enter here; nodes not re-rendered still have accurate parsed node properties hanging from
+  /// them that were read from the file.
   ///
   private genPrintGameFromGame (flipped: boolean): ParsedGame {
     const pgame = new ParsedGame();
@@ -893,133 +874,6 @@ replayUnrenderedAdornments (move: Move): void {
 
 
 //// end gen print nodes and start legacy update parsed game
-
-  /// updateParsedGameFromGame returns a ParsedGame representing game, re-using
-  /// existing parsed node properties where appropriate to avoid losing any we
-  /// ignore from parsed files.  This stores the new ParsedGame into Game
-  /// because re-using ParsedNode objects changes some previous pointers.
-  /// We just keep the new one for consistency.  If flipped is true, then move
-  /// and adornment indexes are diagonally mirrored; see write_flipped_game.
-  /// NOTE NOTE NOTE -- this may be called from auto save timer, so any await or
-  /// UI moment could clobber the root parsednodes; nodes not re-rendered still
-  /// have accurate parsed node properties hanging from them that were read from the file.
-  ///
-  // updateParsedGameFromGame (flipped: boolean = false): ParsedGame {
-  //   const pgame = new ParsedGame();
-  //   const root = this.genParsedGameRoot(flipped);
-  //   pgame.nodes = root;
-  //   // Handle branches
-  //   if (this.branches === null) {
-  //     if (this.firstMove !== null) {
-  //       root.next = genParsedNodes(this.firstMove, flipped, this.size);
-  //       root.next.previous = root;
-  //     }
-  //   } else {
-  //     const branches: ParsedNode[] = [];
-  //     for (const m of this.branches) {
-  //       const nodes = genParsedNodes(m, flipped, this.size);
-  //       branches.push(nodes);
-  //       nodes.previous = root;
-  //     }
-  //     root.branches = branches;
-  //     root.next = branches[0];
-  //   }
-  //   // Need to store new game since creating the parsed game re-uses original nodes.
-  //   this.parsedGame = pgame;
-  //   return pgame;
-  // }
-
-  /// genParsedGameRoot returns a ParsedNode that is based on the Game object
-  /// and that represents the first node in a ParsedGame.  It grabs any existing
-  /// root node properties if there's an existing ParsedGame root node.  If
-  /// flipped is true, then moves and adornment indexes are diagonally mirrored;
-  /// see write_flipped_game.
-  ///
-  /// NOTE, this function needs to overwrite any node properties that the UI
-  /// supports editing.  For example, if the end user can change the players
-  /// names or rank, then this function needs to overwrite the node properties
-  /// value with the game object's value.  It also needs to write properties from
-  /// new games.
-  ///
-  // private genParsedGameRoot (flipped: boolean): ParsedNode {
-  //   const n = new ParsedNode();
-  //   // Reuse existing root properties to preserve unknown tags from parsed files
-  //   if (this.parsedGame !== null) {
-  //     if (this.miscGameInfo !== null)
-  //       n.properties = copyProperties(this.miscGameInfo);
-  //     else
-  //       n.properties = copyProperties(this.parsedGame.nodes!.properties);
-  //   }
-  //   // App name and game size.
-  //   n.properties["AP"] = [`SGFEditor`];
-  //   n.properties["SZ"] = [String(this.size)];
-  //   // Game.comments go in GC, not C, and we already merged any errant C text.
-  //   delete n.properties["C"];
-  //   if (this.comments !== "") {
-  //     n.properties["GC"] = [this.comments];
-  //   } else {
-  //     delete n.properties["GC"];
-  //   }
-  //   // Komi
-  //   n.properties["KM"] = [this.komi];
-  //   // Handicap, AB, AW
-  //   this.genParsedGameRootInitialStones(flipped, n);
-  //   // Player names
-  //   n.properties["PB"] = [this.playerBlack !== "" ? this.playerBlack : "Black"];
-  //   n.properties["PW"] = [this.playerWhite !== "" ? this.playerWhite : "White"];
-  //   // Root adornments (TR/SQ/LB) for the starting board.
-  //   delete n.properties["TR"];
-  //   delete n.properties["SQ"];
-  //   delete n.properties["LB"];
-  //   for (const a of this.startAdornments) {
-  //     const coords = getParsedCoordinates(a, flipped, this.size);
-  //     if (a.kind === AdornmentKinds.Triangle) {
-  //       if ("TR" in n.properties) n.properties["TR"].push(coords);
-  //       else n.properties["TR"] = [coords];
-  //     } else if (a.kind === AdornmentKinds.Square) {
-  //       if ("SQ" in n.properties) n.properties["SQ"].push(coords);
-  //       else n.properties["SQ"] = [coords];
-  //     } else if (a.kind === AdornmentKinds.Letter) {
-  //       const data = `${coords}:${a.letter}`;
-  //       if ("LB" in n.properties) n.properties["LB"].push(data);
-  //       else n.properties["LB"] = [data];
-  //     }
-  //   }
-  //   return n;
-  // } // genParsedGameRoot ()
-
-  /// GenParsedGameRootInitialStones sets handicap (HA), all black (AB), and all white (AW)
-  /// properties.  You can have all black with a zero handicap, that is, if a program supported
-  /// just laying down stones in an example pattern.
-  ///
-  // private genParsedGameRootInitialStones (flipped: boolean, n: ParsedNode): void {
-  //   // HA
-  //   if (this.handicap !== 0) {
-  //     n.properties["HA"] = [String(this.handicap)];
-  //   } else {
-  //     delete n.properties["HA"];
-  //   }
-  //   // AB 
-  //   if ("AB" in n.properties) {
-  //     // Prefer to keep what we parsed
-  //     if (flipped) n.properties["AB"] = n.properties["AB"].map((v) => flipParsedCoordinates(v, this.size));
-  //   } else if (this.handicapMoves && this.handicapMoves.length) {
-  //     n.properties["AB"] = this.handicapMoves
-  //       .map((m) => getParsedCoordinates(m, flipped, this.size));
-  //   } else {
-  //     delete n.properties["AB"];
-  //   }
-
-  //   // AW — keep parsed values if they exist; otherwise synthesize from allWhiteMoves (if any)
-  //   if (n.properties["AW"] && n.properties["AW"].length) {
-  //     if (flipped) n.properties["AW"] = n.properties["AW"].map((v) => flipParsedCoordinates(v, this.size));
-  //   } else if (this.allWhiteMoves && this.allWhiteMoves.length) {
-  //     n.properties["AW"] = this.allWhiteMoves
-  //       .map((m) => getParsedCoordinates(m, flipped, this.size));
-  //   } else {
-  //     delete n.properties["AW"];
-  //   }
-  // }
 
 
 
@@ -1422,37 +1276,6 @@ replayUnrenderedAdornments (move: Move): void {
     return final.reverse();
   }
 
-
-  // public getPathToParsedNode (move: ParsedNode): Array<[number, number]> {
-  //   debugAssert(move !== null, "Must call with non-null parsed node.");
-  //   let parent = move.previous;
-  //   if (parent === null)
-  //     return this.TheEmptyMovePath;
-  //   // No move nums in parsed nodes, so count down, then fix numbers at end.
-  //   let moveNum = 1000000;
-  //   const res: Array<[number, number]> = [[moveNum, -1]];
-  //   while (parent !== this.parsedGame!.nodes) {
-  //     moveNum -= 1;
-  //     if (parent.branches !== null && parent.branches[0] !== move) {
-  //       const loc = parent.branches.indexOf(move);
-  //       debugAssert(loc !== -1, "Move must be in game.");
-  //       res.push([moveNum, loc]);
-  //     }
-  //     move = parent;
-  //     parent = move.previous!;
-  //   }
-  //   moveNum -= 1;
-  //   // Add tuple for move zero if we need to select a branch from the empty board state.
-  //   if (this.parsedGame!.nodes.branches !== null) {
-  //     const loc = this.parsedGame!.nodes.branches.indexOf(move);
-  //     debugAssert(loc !== -1, "Move must be in game.");
-  //     res.push([moveNum, loc]); // moveNum becomes a zero when we fix numbers below.
-  //   }
-  //   // Fix up numbers to match move numbers.
-  //   const final = res.map(pair => [pair[0] - moveNum, pair[1]] as [number, number]);
-  //   return final.reverse();
-  // }
-
   /// AdvanceToMovePath takes a path, where each tuple is a move number and the
   /// branch index to take at that move.  The branch is -1 for the last move.
   /// This returns true if successful, null if the path was bogus, or we encounter
@@ -1612,45 +1435,7 @@ replayUnrenderedAdornments (move: Move): void {
     }
   }
 
-  /// CutNextParsedNode is the same as CutNextMove, except for ParsedNode.  This function assumes 
-  /// pn and cut-move are not null.
-  ///
-  // private cutNextParsedNode(pn: ParsedNode, cut_move: ParsedNode): void {
-  //   const branches = pn.branches;
-  //   if (branches === null) {
-  //     pn.next = null;
-  //   } else {
-  //     const cut_index = branches.indexOf(cut_move);
-  //     if (cut_index !== -1) {
-  //       // VERY subtle interaction ... because we have an auto save timer, and we write files by
-  //       // gen'ing fresh parsenodes and storing them in the root (simply solves hassles with editing the
-  //       // tree and various state pointers), at any await or UI moment, the root parsenodes could be
-  //       // written.  We don't update all the move's parsenode properites since if a move is unrendered
-  //       // its parsenode properties are still accurate, and otherwise we ignore them.  This means
-  //       // deleting the first node read from a file can have a parsenode object that is NOT in the
-  //       // branches collection.
-  //       // GENERAL CASE NOT ... any interior rendered move has parsenodes removed on deletions, and we never
-  //       // add new ones.  We may clean it up here even though we would never see that parsenode again.
-  //       // REPRO SCENARIO ... open a file, move out a couple of moves to render, go back to home, and
-  //       // add a couple of moves so there's two branches.  Then wait a min to ensure autosave kicked in
-  //       // and go delete the first node read from the file.
-  //       branches.splice(cut_index, 1);
-  //       // the parser creates branches based on file syntax and does not have the invariant Move objects
-  //       // have (branches is null unless > 1).  OGS creates files where every node is the start of a new
-  //       // branch, which renders fine since we fix branches lists when we reify a Move.
-  //       if (branches.length === 0) {
-  //         pn.branches = null;
-  //         pn.next = null;
-  //       } else {
-  //         pn.next = branches[0];
-  //         if (branches.length === 1) pn.branches = null;
-  //       }
-  //     }
-  //   }
-  // } // cutNextParsedNode()
-
-
-  /// paste_move -- Command Entry Point
+  /// pasteMove -- Command Entry Point
   /// makes this._cutMove be the next move of the current move displayed.  This does not 
   /// check consistency of all moves in sub tree since which would involve replaying them all.  
   /// It does check a few things with the first cut move.
@@ -1767,6 +1552,8 @@ replayUnrenderedAdornments (move: Move): void {
     await this.pasteMoveInsert(newMove); // Updates model, signals UI, and sets this.
   } // pasteMoveOtherGame()
 
+  /// prepareMoveOtherGamePaste makes sure we can paste the cut move and functionally copies the
+  /// moves hanging from the cut move so that there is no cross-game entanglement of objects.
   ///
   private async prepareMoveOtherGamePaste (other: Game): Promise<Move | null> {
     const test = new Move(other._cutMove!.row, other._cutMove!.column, this.nextColor);
@@ -1775,7 +1562,7 @@ replayUnrenderedAdornments (move: Move): void {
     // false = no flipped coordinates 
     const head = genParserOutputMoves(other._cutMove!, this.board.size);
     // head is pasted after a current move, so ready it for rendering as a next move
-    if (parsedPropertiesToMove(head, this.size) === null) {
+    if (liftPropertiesToMove(head, this.size) === null) { // must call this before readying
       await nextMoveDisplayError(other.message!.message, head);
       return null;
     }
@@ -1789,33 +1576,6 @@ replayUnrenderedAdornments (move: Move): void {
     }
     return head;
   }
-
-
-  /// prepareMoveOtherGamePaste takes another game that has a cut move and makes a move to represent
-  /// that move in the current game with no aliasing into the other game's state.  The cut moves 
-  /// location has been vetted for not colliding with an existing move, but this function also 
-  /// checks that the there is no next move that is at the same location to keep the game model 
-  /// invariant that no two branches have the same move location.
-  ///
-  // private async prepareMoveOtherGamePaste (other: Game): Promise<Move | null> {
-  //   const newmove = new Move(other._cutMove!.row, other._cutMove!.column, this.nextColor);
-  //   if (await this.pasteMoveNextConflict(newmove)) return null;
-  //   // Convert cut moves to parsenodes to extract the moves from the other game's model
-  //   const pnodes = genParsedNodes(other._cutMove!, false, this.board.size); // false = no flipped coordinates
-  //   newmove.parsedNode = pnodes;
-  //   const [resmove, err] = this.readyForRendering(newmove);
-  //   // const resmove = stuff[0];
-  //   if (resmove === null || err) { // Issue with parsed node, cannot go forward.
-  //     // Current move comes back if some branches had bad parsenodes, but good moves existed. 
-  //     const msg = resmove !== null ? nextMoveGetMessage(resmove as Move) : "";
-  //     await this.message?.message?.(
-  //       "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
-  //       "in the SGF file.\nYou cannot play further down that branch... " + msg );
-  //     if (resmove === null) return null;
-  //   }
-  //   return newmove;
-  // }
-
 
 } // Game class
 
@@ -1911,176 +1671,6 @@ function genPrintNode(move: Move, flipped: boolean, size: number): PrintNode {
   return new PrintNode(props);
 } // genPrintNode()
 
-  //// ***end print nodes, start legacy
-
-/// genParsedNodes returns a ParsedNode with all the moves following move represented in the
-/// linked list. If move has never been rendered, then the rest of the list is the parsed nodes
-/// hanging from it since the user could not have modified the game at this point. This recurses
-/// on children of move objects with branches. If flipped is true, then moves and adornment
-/// indexes are diagonally mirrored; see write_flipped_game. This takes the game board size for
-/// computing indexes because SGF files count rows from the top, but SGF programs display boards
-/// counting bottom up.
-///
-// function genParsedNodes(move: Move, flipped: boolean, size: number): ParsedNode {
-//   // If move exists and not rendered, delegate to parsed nodes hanging from it.
-//   if (!move.rendered) {
-//     return flipped ?
-//       cloneAndFlipNodes(move.parsedNode!, size) :
-//       (move.parsedNode as ParsedNode);
-//   }
-//   // First node from the current Move is the result.
-//   let curNode = genParsedNode(move, flipped, size);
-//   const res = curNode;
-//   let mmove : Move | null = move;
-//   if (mmove.branches === null) {
-//     mmove = mmove.next;
-//     while (mmove !== null) {
-//       curNode.next = genParsedNode(mmove, flipped, size);
-//       curNode.next.previous = curNode;
-//       if (mmove.branches === null) {
-//           curNode = curNode.next;
-//           mmove = mmove.next;
-//       }
-//       else {
-//           curNode = curNode.next;
-//           break;
-//       }
-//     }
-//   }
-//   // Only get here when move is null, or we're recursing on branches.
-//   if (mmove !== null) {
-//     curNode.branches = [];
-//     for (const m of mmove.branches!) {
-//         const bn = genParsedNodes(m, flipped, size);
-//         curNode.branches.push(bn);
-//         bn.previous = curNode;
-//     }
-//     curNode.next = curNode.branches[0];
-//   }
-//   return res;
-//} //genParsedNodes()
-
-/// genParsedNode returns a ParsedNode that is based on the Move object.  It
-/// grabs any existing parsed node properties from move to preserve any move
-/// properties that we ignore from a file we read.  If flipped is true, then moves 
-/// and adornment indexes are diagonally mirrored; see write_flipped_game.
-/// This takes the game board size for computing indexes because SGF files
-/// count rows from the top, but SGF programs display boards counting bottom up.
-///
-/// NOTE, this function needs to overwrite any node properties that the UI
-/// supports editing.  For example, if the end user modified adornments.
-///
-// function genParsedNode (move: Move, flipped: boolean, size: number): ParsedNode {
-//   if (! move.rendered) {
-//     return flipped ? 
-//            // If move exists and not rendered, then must be ParsedNode.
-//            cloneAndFlipNodes(move.parsedNode as ParsedNode, size) :
-//            // Note: result re-uses original parsed nodes, and callers change this node
-//            // to point to new parents.
-//            move.parsedNode as ParsedNode;
-//     }
-//   const node = new ParsedNode();
-//   node.properties =  move.parsedNode !== null ?
-//                      copyProperties((move.parsedNode).properties) :
-//                      node.properties;
-//   const props = node.properties;
-//   // Color
-//   if (move.color === StoneColors.Black) {
-//     props["B"] = [getParsedCoordinates(move, flipped, size)];
-//   } else if (move.color === StoneColors.White) {
-//     props["W"] = [getParsedCoordinates(move, flipped, size)];
-//   }
-//   // Comments
-//   if (move.comments !== "") {
-//     props["C"] = [move.comments];
-//   } else {
-//     delete props["C"];
-//   }
-//   // Adornments
-//   delete props["TR"];
-//   delete props["SQ"];
-//   delete props["LB"];
-//   for (const a of move.adornments) {
-//     const coords = getParsedCoordinates(a, flipped, size);
-//     if (a.kind === AdornmentKinds.Triangle) {
-//       if ("TR" in props) props["TR"].push(coords);
-//       else props["TR"] = [coords];
-//     }
-//     if (a.kind === AdornmentKinds.Square) {
-//       if ("SQ" in props) props["SQ"].push(coords);
-//       else props["SQ"] = [coords];
-//     }
-//     if (a.kind === AdornmentKinds.Letter) {
-//       const data = `${coords}:${a.letter}`;
-//       if ("LB" in props) props["LB"].push(data);
-//       else props["LB"] = [data];
-//     }
-//   } // foreach
-//   return node;
-// } // genParsedNode()
-
-/// cloneAndFlipNodes is similar to genParsedNodes.  This returns a
-/// ParsedNode with all the nodes following the argument represented in the
-/// resulting linked list, but their coordinates have been transposed to the
-/// diagonal mirror image, see write_flipped_game.  This recurses on nodes with
-/// branches.
-///
-// function cloneAndFlipNodes (nodes: ParsedNode, size: number): ParsedNode {
-//   const first = cloneAndFlipNode(nodes, size);
-//   let curNode = first;
-//   let nnodes: ParsedNode | null = nodes; // typescript requires new variable typed for null
-//   if (nnodes.branches === null) { 
-//     nnodes = nnodes.next; 
-//     while (nnodes !== null) {
-//       curNode.next = cloneAndFlipNode(nnodes, size);
-//       curNode.next.previous = curNode;
-//       if (nnodes.branches === null) {
-//         curNode = curNode.next;
-//         nnodes = nnodes.next;
-//       } else {
-//         curNode = curNode.next;
-//         break;
-//       }
-//     }
-//   } 
-//   // Only get here when nodes is null from while loop, or we're recursing on branches.
-//   if (nnodes !== null) {
-//     curNode.branches = [];
-//     for (const m of nnodes.branches!) {
-//       const tmp = cloneAndFlipNodes(m, size);
-//       curNode.branches.push(tmp);
-//       tmp.previous = curNode;
-//     }
-//     curNode.next = curNode.branches[0];
-//   }
-//   return first;
-// } // cloneAndFlipNodes()
-
-/// cloneAndFlipNode is similar to genParsedNode.  This returns a ParsedNode that is a clone of 
-/// node, but any indexes are diagonally mirror transposed, see buildSGFStringFlipped.
-///
-// function cloneAndFlipNode (node: ParsedNode, size: number): ParsedNode {
-//   const newNode = new ParsedNode();
-//   newNode.properties = copyProperties(node.properties);
-//   const props = newNode.properties;
-//   // Color
-//   if ("B" in props) {
-//     props["B"] = flipCoordinates(props["B"], size);
-//   } else if ("W" in props) {
-//     props["W"] = flipCoordinates(props["W"], size);
-//   }
-//   // Adornments
-//   if ("TR" in props) {
-//     props["TR"] = flipCoordinates(props["TR"], size);
-//   }
-//   if ("SQ" in props) {
-//     props["SQ"] = flipCoordinates(props["SQ"], size);
-//   }
-//   if ("LB" in props) {
-//     props["LB"] = flipCoordinates(props["LB"], size, true);
-//   }
-//   return newNode;
-// }
 
 /// flipCoordinates takes a list of parsed coordinate strings and returns the
 /// same kind of list (<letter><letter> or <letter><letter>:<letter>) with the coorindates 
@@ -2175,28 +1765,7 @@ export async function createGameFromParsedGame
   return g;
 } //createGameFromParsedGame()
 
-/// cosoleWritePG is debugging code to test parsing results.
-// function consoleWritePG (nodes: ParsedNode | null, indent: string = "") {
-//   if (nodes === null) return;
-//   const writeNode = (n: ParsedNode) => {
-//     if ("B" in n.properties) {
-//       console.log(indent + `Move ${parsedToModelCoordinates(n.properties["B"][0])}`);
-//     }
-//     else if ("W" in n.properties) {
-//       console.log(indent + `Move ${parsedToModelCoordinates(n.properties["W"][0])}`);
-//     }
-//     else console.log("empty board");
-//   }
-//   if (nodes.branches !== null) {
-//     writeNode(nodes);
-//     nodes.branches.forEach((pn, idx) => {console.log(indent + `Branch ${idx}`);
-//                                          consoleWritePG(pn, indent + "   ");})
-//   } else {
-//     writeNode(nodes);
-//     consoleWritePG(nodes.next, indent);
-//   }
-// }
-//
+
 // Version used when testing parse to Moves, erasing ParsedNodes
 // function consoleWritePGMoves (nodes: Move | null, indent: string = "") {
 //   if (nodes === null) return;
@@ -2246,7 +1815,6 @@ function createGameFromParsedAB(props: Record<string, string[]>): Move[] {
   return props["AB"].map((coords) => {
     const [row, col] = parsedToModelCoordinates(coords); 
     const m = new Move(row, col, StoneColors.Black);
-    // m.parsedNode = pgame.nodes;
     m.rendered = false;
     return m;
   });
@@ -2256,55 +1824,11 @@ function createGameFromParsedAW(props: Record<string, string[]>): Move[] {
   return props["AW"].map((coords) => {
     const [row, col] = parsedToModelCoordinates(coords);
     const m = new Move(row, col, StoneColors.White);
-    // m.parsedNode = pgame.nodes; 
     m.rendered = false;
     return m;
   });
 }
 
-
-// function setupFirstParsedMove (g : Game, pn : ParsedNode) : Move | null {
-//   if ("B" in pn.properties || "W" in pn.properties)
-//     throw new SGFError ("Unexpected move in root parsed node.");
-//   if ("PL" in pn.properties)
-//     throw new SGFError("Do not support player-to-play for changing start color.");
-//   // if ("TR" in pn.properties || "SQ" in pn.properties || "LB" in pn.properties)
-//   //   throw new SGFError("Don't handle adornments on initial board from parsed game yet.");
-//   var m : Move | null;
-//   if (pn.branches && pn.branches.length > 0) {
-//     // Game starts with branches; build Move objects for each branch head.
-//     const moves: Move[] = [];
-//     for (const n of pn.branches) {
-//       const mv = parsedNodeToMove(n, g.size);
-//       if (mv === null) {
-//         debugAssert(n.badNodeMessage !== null, "parsedNodeToMove returned null without a message?!");
-//         throw new SGFError(n.badNodeMessage!);
-//       }
-//       // Note, do not incr g.move_count since first move has not been rendered,
-//       // so if user clicks, that should be number 1 too.
-//       mv.number = g.moveCount + 1;
-//       // Don't set previous point because these are first moves, so prev is null.
-//       moves.push(mv);
-//     }
-//     g.branches = moves;
-//     m = moves[0];
-//   } else {
-//     if (pn.next === null) m = null;
-//     else {
-//       m = parsedNodeToMove(pn.next, g.size);
-//       if (m === null) {
-//         debugAssert(pn.next.badNodeMessage !== null, 
-//                     "Failed to make Move from ParsedNode, but no error message provided.");
-//         throw new SGFError(pn.next.badNodeMessage);
-//       }
-//       // Note, do not incr g.move_count since first move has not been rendered,
-//       // so if user clicks, that should be number 1 too.
-//       m.number = g.moveCount + 1;
-//     }
-//   }
-//   g.firstMove = m;
-//   return m;
-// }
 
 /// setupFirstParsedMove ensures the parsed game's first move (and all first moves of any branches)
 /// is ready to ready for readyForRendering to be called on it.  move is the first move of the game
@@ -2320,8 +1844,8 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
     // Game starts with branches; build Move objects for each branch head.
     // const moves: Move[] = [];
     for (const mv of g.parsedGame!.branches) { 
-      if (parsedPropertiesToMove(mv, g.size) === null) {
-        debugAssert(mv.parsedBadNodeMessage !== null, "parsedNodeToMove returned null without a message?!");
+      if (liftPropertiesToMove(mv, g.size) === null) {
+        debugAssert(mv.parsedBadNodeMessage !== null, "liftPropertiesToMove returned null without a message?!");
         throw new SGFError(mv.parsedBadNodeMessage);
       }
       // Note, do not incr g.move_count since first move has not been rendered,
@@ -2334,9 +1858,9 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
     debugAssert(g.branches[0] === move, "What?!  How did parsed moves not set next to branches[0]"); 
   } else {
     if (move !== null) {
-      if (parsedPropertiesToMove(move, g.size) === null) {
+      if (liftPropertiesToMove(move, g.size) === null) {
         debugAssert(move.parsedBadNodeMessage !== null, 
-                    "parsedNodeToMove returned null without a message?!");
+                    "liftPropertiesToMove returned null without a message?!");
         throw new SGFError(move.parsedBadNodeMessage);
       }
       // Note, do not incr g.move_count since first move has not been rendered,
@@ -2365,55 +1889,6 @@ export function createGame (size : number, handicap : number, komi : string,
 }
 
 
-/// parsedNodeToMove takes a ParsedNode and returns a Move model for it. For now, this is
-/// fairly constrained to expected next move colors and no random setup nodes that place several
-/// moves or just place adornments. This takes the game board size for computing indexes because
-/// SGF files count rows from the top, but SGF programs display boards counting bottom up. This
-/// returns null for failure cases, setting the parse node's error msg.
-///
-/// Trial hack that stuck: ParserAux.ParseNode marks nodes that had no B or W
-/// notation with a special BadNodeMessage, and this function stopped checking for
-/// BadNodeMessage being non-null. We used to immediately return null that there is no next move
-/// we can represent for the user. Now this code works around some bad node situations,
-/// returning the pass node as a hack.
-///
-// export function parsedNodeToMove (pn : ParsedNode, size : number) : Move | null {
-//   // Removed optimization to avoid computing msg again, due to experiment to taint nodes in sgfparser
-//   // so that clicking on treeview nodes can abort immediately (due to have a BadNodeMessage).
-//   //if (n.BadNodeMessage !== null) return null;
-//   let color: StoneColor = StoneColors.NoColor;
-//   let row = Board.NoIndex; // Not all paths set the value, so need random initial value.
-//   let col = Board.NoIndex;
-//   let pass_move: Move | null = null; // null signals we did not substitute a pass move.
-//   if ("B" in pn.properties) {
-//     color = StoneColors.Black;
-//     [row, col] = parsedToModelCoordinates(pn.properties["B"][0]);
-//   } else if ("W" in pn.properties) {
-//     color = StoneColors.White;
-//     [row, col] = parsedToModelCoordinates(pn.properties["W"][0]);
-//   } else if (("AW" in pn.properties) || ("AB" in pn.properties) || ("AE" in pn.properties)) {
-//     // Don't handle setup nodes in the middle of game nodes.  This is a light hack to use
-//     // a Pass node with a big comment and adornments to show what the setup node described.
-//     pass_move = setupNodeToPassNode(pn, size);
-//     // Set this to null to stop UI from popping dialogs that you cannot advance to
-//     // this node.  We modify this when trying to ready moves for rendering, which we do
-//     // when the user advances through the tree.  If the user clicks on a tree view node based
-//     // on the parsed node only, 1) they will still get the error dialog 2) the node doesn't
-//     // show the green highlight that there is a comment.
-//     pn.badNodeMessage = null;
-//   } else {
-//     pn.badNodeMessage = "Next nodes must be moves, don't handle arbitrary nodes yet -- " +
-//                         pn.nodeString(false);
-//     return null;
-//   }
-//   const m = pass_move ?? new Move(row, col, color);
-//   m.parsedNode = pn;
-//   m.rendered = false;
-//   if ("C" in pn.properties)
-//       m.comments = pn.properties["C"][0];
-//   return m;
-// }
-
 /// parsedPropertiesToMove takes an unrendered move with parsed properties and returns the Move or
 /// null if there were errors. This expecs next move colors and no random setup nodes (AB, AW, AE)
 /// that place several stones. This takes the game board size for computing indexes because
@@ -2426,7 +1901,7 @@ export function createGame (size : number, handicap : number, komi : string,
 /// around some bad node situations, converting move to a pass move as a hack to display to the user
 /// what we found in the parsed file.
 ///
-export function parsedPropertiesToMove (move: Move, size : number) : Move | null {
+export function liftPropertiesToMove (move: Move, size : number) : Move | null {
   // Removed optimization to avoid computing msg again, due to experiment to taint nodes in sgfparser
   // so that clicking on treeview nodes can abort immediately (due to have a BadNodeMessage).
   //if (n.BadNodeMessage !== null) return null;
@@ -2456,8 +1931,6 @@ export function parsedPropertiesToMove (move: Move, size : number) : Move | null
                                 genPrintNode(move, false, size).nodeString(false);  
     return null;
   }
-  // m.parsedNode = pn;
-  // m.rendered = false;
   if ("C" in move.parsedProperties!)
       move.comments = move.parsedProperties!["C"][0];
   return move;
@@ -2469,60 +1942,6 @@ const SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
                               "Don't handle arbitrary nodes in the middle of a game.\n" +
                               "Converting node to Pass move and adding adornments as follows:\n";
 
-/// SetupNodeToPassNode takes a Parsenode and board size and returns a Pass move as a hack to
-/// handle nodes in the middle of a game that are setup nodes (AB, AE, AW, etc.).  The view model
-/// and tree view model and advancing and rewinding move operatios don't handle arbitrary
-/// transitions and transformations to the board.  This hack just turns those nodes into a Pass
-/// move with various adornments and a comment explaining what the user sees.  Before, the program
-/// showed the node, popped a dialog that it was not viewable, and that was it.  This assumes
-/// caller sets the new move's parse node and not rendered state.
-///
-// export function setupNodeToPassNode (pn: ParsedNode, size: number): Move {
-//   // Capture any pre-existing comment to append at the end
-//   let comment = pn.properties["C"]?.[0] ?? "";
-//   if (comment !== "")
-//     comment = "The following is the original comment from the SGF file ...\n" + comment;
-//   let newComment = SetupNodeCommentStart;
-//   const props: Record<string, string[]> = {}; // New props to replace parsenode's
-//   // Caller sets pass_move.parsedNode and pass_move.rendered.
-//   const passMove = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
-//   // Sweep properties, rewriting to adornment forms and documenting
-//   for (const [k, v] of Object.entries(pn.properties)) {
-//     if (k === "AB") { // turn AB's to triangles
-//       newComment = setupNodeDisplayCoords(props, newComment, "All Black stones", "TR", v, size);
-//       if (pn.properties["TR"]) {
-//         newComment = setupNodeDisplayCoords(props, newComment, "triangles", "TR", pn.properties["TR"],
-//                                             size, true); // true = concat coord lists
-//       }
-//     } else if (k === "AW") { // turn AWs to squares
-//       newComment = setupNodeDisplayCoords(props, newComment, "All White stones", "SQ", v, size);
-//       if (pn.properties["SQ"]) {
-//         newComment = setupNodeDisplayCoords(props, newComment, "squares", "SQ", pn.properties["SQ"],
-//                                             size, true); // true = concat coord lists
-//       }
-//     } else if (k === "AE") { // turn AEs to labels using "X"
-//       newComment = setupNodeDisplayCoords(props, newComment, "All Empty points (X)", "LB", v, size);
-//       if (pn.properties["LB"]) {
-//         newComment = setupNodeDisplayCoords(props, newComment, "letters", "LB", pn.properties["LB"],
-//         size, true); // true = concat coord lists
-//       }
-//     } else if (k === "TR" || k === "SQ" || k === "LB" || k === "C") {
-//       // Already swept into new properties and comment, so skip here.
-//       continue;
-//     } else {
-//       // Preserve any other properties but note them in the comment
-//       props[k] = v.slice();
-//       newComment += "Setup node also had this unrecognized notation:\n" + "     " + k + "[" +
-//                     v.join("][") + "]\n";
-//     }
-//   } // for loop
-//   newComment = newComment + "\n\n" + comment;
-//   props["C"] = [newComment];
-//   // Replace the node’s properties (so later rendering paths see the adornments/comment)
-//   pn.properties = props;
-//   // Caller will set passMove.parsedNode and passMove.rendered
-//   return passMove;
-// }
 
 /// SetupNodeToPassNode takes a Move and board size and returns it as a Pass move as a hack to
 /// handle nodes in the middle of a game that are setup nodes (AB, AE, AW, etc.).  The view model
@@ -2530,8 +1949,7 @@ const SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
 /// transitions and transformations to the board.  readyForRendering and setupFirstParsdedMove both
 /// call this when they encounter setup nodes.  This hack just turns those nodes into a Pass
 /// move with various adornments and a comment explaining what the user sees.  Before, the sgfEditor
-/// showed the node, popped a dialog that it was not viewable, and that was it.  This assumes
-/// caller sets the new move's parse node and not rendered state.
+/// showed the node, popped a dialog that it was not viewable, and that was it.  
 ///
 export function setupNodeToPassNode (move: Move, size: number): Move {
   // Capture any pre-existing comment to append at the end
@@ -2577,7 +1995,6 @@ export function setupNodeToPassNode (move: Move, size: number): Move {
   move.parsedProperties = props;
   move.isPass = true;
   move.color = StoneColors.NoColor;
-  // Caller will set passMove.parsedNode and passMove.rendered
   return move;
 } // setupNodeToPassNode()
 
@@ -2707,22 +2124,6 @@ function pasteNextMove (move: Move, cutMove: Move): void {
   move.next.number = move.number + 1; // moves further out are renumbered by pastMoveInsert
 }
 
-/// pasteNextParsedNode is very much like _paste_next_move but for ParsedNodes.
-///
-// function pasteNextParsedNode (pn: ParsedNode, cutmove: ParsedNode): void {
-//   const branches = pn.branches;
-//   if (pn.next !== null) {
-//     if (branches === null) {
-//       pn.branches = [ pn.next, cutmove ];
-//     } else {
-//       branches.push(cutmove);
-//     }
-//     pn.next = cutmove;
-//   } else {
-//     pn.next = cutmove;
-//   }
-//   cutmove.previous = pn;
-// }
 
 /// renumberMoves takes a move with the correct number assignment and walks
 /// the sub tree of moves to reassign new numbers to the nodes.  This is used
@@ -2747,13 +2148,15 @@ function renumberMoves (move: Move): void {
       renumberMoves(m);
     }
   }
-
 } // renumberMoves()
 
+///
+//// Generating Print and Parser-mimicking Moves
+///
 
-
-  // Build a parser-style subtree from *any* source Move. If we encounter an *unrendered* node,
-// we deep-copy the rest of that subtree as-is (already parser-shaped).
+/// genParserOutputMoves renders src as parser-style Moves as a functional snapshot of game state 
+/// for copying moves across games.
+///
 function genParserOutputMoves (src: Move, size: number): Move {
   // This is the result
   const head = genParserOutputMove(src, size);
@@ -2786,6 +2189,9 @@ function genParserOutputMoves (src: Move, size: number): Move {
   return head;
 } // genParserOutputMoves()
 
+/// genParserOutputMove renders one move as a parser-output style move.  We need size for computing
+/// coordinates.  If move is rendered, prefer state from move; otherwise, use the parsed info as-is.
+///
 function genParserOutputMove (move: Move, size: number): Move {
   // Start from any existing parsed props (preserve unknown tags), else empty.
   const props: Record<string, string[]> = move.parsedProperties !== null 
@@ -2815,7 +2221,9 @@ function genParserOutputMove (move: Move, size: number): Move {
   return m;
 } // genParserOutputMove()
 
-//: rebuild from model (and wipe any stale entries we might have copied)
+/// genAdornmentProps updates props from adornments, clearing any previous state.  Building print
+/// nodes and parser-like Moves.
+///
 function genAdornmentProps (adornments: Adornment[], props: Record<string, string[]>, flipped: boolean, size: number) : Record<string, string[]> {
   delete props["TR"];
   delete props["SQ"];

@@ -21,7 +21,7 @@ import type { MessageOrQuery } from "./Game";
 import { browserFileBridge, browserAppStorageBridge, browserKeybindings } from "../platforms/browser-bridges";
 import { fileBridgeElectron, keyBindingBridgeElectron } from '../platforms/electron-bridges';
 import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platforms/bridges";
-import { SGFError, ParsedNode, parseFileToMoves} from "./sgfparser";
+import { SGFError, parseFileToMoves} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
 import { Board, type Move } from "./Board";
 import type { ConfirmOptions } from "../components/MessageDialog";
@@ -68,7 +68,7 @@ export type AppGlobals = {
   bumpTreeLayoutVersion: () => void;
   bumpTreeHighlightVersion: () => void;
   // UI layer (TreeView) can register a remapper to swap a ParsedNode for its new Move during replay
-  setTreeRemapper?: (fn: ((oldKey: ParsedNode, newMove: Move) => void) | null) => void;
+  setTreeRemapper?: (fn: ((oldKey: /* ParsedNode */ any, newMove: Move) => void) | null) => void;
 
 
   // UI commands exposed to components:
@@ -220,6 +220,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // VERSIONING RENDERING
   // game.onchange = bumpVersion wired up below in a useEffect, same with setting defaultGame and games
   // useState initial value used first render, same value every time unless call setter.
+  // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
+  // This way the model and UI are isolated, but the model can signal model changes for re-rendering
+  // by signalling the game changed.
   const [version, setVersion] = useState(0); 
   const bumpVersion = useCallback(() => setVersion(v => v + 1), []); // always same function, no deps
   const [treeLayoutVersion, setTreeLayoutVersion] = useState(0);
@@ -229,8 +232,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   //
   // TREEVIEW MAP
   // Holds a function that TreeView will provide to swap a new Move for a ParsedNode
-  const treeRemapperRef = useRef<((oldKey: ParsedNode, newMove: Move) => void) | null>(null);
-  const setTreeRemapper = useCallback((fn: ((oldKey: ParsedNode, newMove: Move) => void) | null) => {
+  // NO LONGER USED -- PARSEDNODES ARE GONE
+  const treeRemapperRef = useRef<((oldKey: /* ParsedNode */ any, newMove: Move) => void) | null>(null);
+  const setTreeRemapper = useCallback((fn: ((oldKey: /* ParsedNode */ any, newMove: Move) => void) | null) => {
     treeRemapperRef.current = fn;
   }, []);
   //
@@ -247,7 +251,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     g.onTreeHighlightChange  = bumpTreeHighlightVersion;
     g.onParsedNodeReified = (oldKey, newMove) => {
       // calls into TreeView to delete(oldKey) and set(newMove, node).
-      // onParsedNodeReified -- no longer called after erasing ParsedNodes as AST from parser.
+      // onParsedNodeReified -- NO LONGER CALLED after erasing ParsedNodes as AST from parser.
       treeRemapperRef.current?.(oldKey, newMove); 
     };
     g.getComments = getComment;
@@ -300,24 +304,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
                          openMessageDialog!, async () => { openNewGameDialog?.(); });
   }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand,appStorageBridge]);
-  //
-  // The model defines game.onChange callback, and AppGlobals UI / React code sets it to bumpVersion.
-  // This way the model and UI are isolated, but the model can signal model changes for re-rendering
-  // by signalling the game changed.
-  // LATER GPT5 SAID I don't need this, that setgame() does it at the right time on the first pass.
-  // useEffect(() => {
-  //   const game = gameRef.current;
-  //   game.onChange = bumpVersion;
-  //   game.onTreeLayoutChange = bumpTreeLayoutVersion; // topology changed
-  //   game.onTreeHighlightChange  = bumpTreeHighlightVersion; // highlights and scrolling
-  //   game.onParsedNodeReified = (oldKey, newMove) => {treeRemapperRef.current?.(oldKey, newMove);}
-  //   return () => {
-  //     game.onChange = undefined;
-  //     game.onTreeLayoutChange = undefined;
-  //     game.onTreeHighlightChange = undefined;
-  //     game.onParsedNodeReified = undefined;
-  //   };
-  // }, [bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion]);
   //
   // SETUP INITIAL STATE FOR GAME -- this runs once after initial render due to useEffect.
   // useEffect's run after the DOM has rendered.  useState runs first, when GameProvider runs.

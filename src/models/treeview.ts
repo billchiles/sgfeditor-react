@@ -41,7 +41,7 @@ export type TreeViewNode = {
   kind: TreeViewNodeKind;
   // NoColor for StartBoard node, for which we render a letter "S"
   color: StoneColor;
-  // Node is the underlying model node (Move or ParsedNode)
+  // Node is the underlying Move model object
   node: IMoveNext;
   // Row has nothing to do with node's coordinates. It is about where this node appears
   // in the grid displaying the entire game tree.
@@ -96,10 +96,8 @@ export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: Pa
   return layoutData.treeGrid;
 } // getGameTreeModel()
 
-// ──────────────────────────────────────────────────────────────────────────────
-// NewTreeModelStart creates the special root cell at [0,0].
-// todo clean up tree view gen'ed code
-//
+/// newTreeModelStart creates the sentinel root cell at [0,0].
+///
 function newTreeModelStart(pn: IMoveNext, layoutData: TreeViewLayoutData): TreeViewNode {
   const model: TreeViewNode = {
     kind: TreeViewNodeKinds.StartBoard,
@@ -115,12 +113,11 @@ function newTreeModelStart(pn: IMoveNext, layoutData: TreeViewLayoutData): TreeV
   return model;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// LayoutGameTreeFromRoot takes a Move or ParsedNode and layout data (tree grid and max rows).
-// It returns the model for the start (empty board) node, after laying out the rest of the
-// tree.
-//
-export function layoutGameTreeFromRoot(pn: IMoveNext, layoutData: TreeViewLayoutData): TreeViewNode {
+/// layoutGameTreeFromRoot takes a Move and layout data (tree grid and max rows).
+/// It returns the model for the start (empty board) node, after laying out the rest of the
+/// tree.
+///
+export function layoutGameTreeFromRoot (pn: IMoveNext, layoutData: TreeViewLayoutData): TreeViewNode {
   // Vars to make arguments to calls below more readable.
   let tree_depth = 0;
   let new_branch_depth = 0;
@@ -146,7 +143,7 @@ export function layoutGameTreeFromRoot(pn: IMoveNext, layoutData: TreeViewLayout
   return model;
 }
 
-/// GetLayoutGameTreeNext returns branches[0] if there are branches, else next. Moves chain next to
+/// getLayoutGameTreeNext returns branches[0] if there are branches, else next. Moves chain next to
 /// the branch that is selected, but when laying out the game tree, we always want to first branch.
 ///
 function getLayoutGameTreeNext (pn: IMoveNext): IMoveNext | null {

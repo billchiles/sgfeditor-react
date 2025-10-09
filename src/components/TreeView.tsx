@@ -50,8 +50,9 @@ const TARGET_BOTTOM_MARGIN = 32; // for below case
 
 /// Architecture
 ///   - This is a *pure* view component: it does not compute layout. It only:
-///       1) Builds a Move/ParsedNode → TreeViewNode map (identity map) from the grid
-///       2) Registers a "remapper" so the model can replace ParsedNode→Move during replay
+///       1) Builds a Move -> TreeViewNode map (identity map) from the grid
+///       2) Registers a "remapper" so the model can replace ParsedNode->Move during replay
+///          THIS IS NO LONGER USED because ParsedNodes are gone
 ///       3) Draws edges and nodes (SVG) based on the TreeViewNode graph
 ///       4) Scrolls to keep the current node visible
 /// Rendering order (painter’s algorithm)
@@ -72,8 +73,7 @@ const TARGET_BOTTOM_MARGIN = 32; // for below case
 ///       • Horizontal: bias left (place near the left)
 ///       • Vertical:   if BELOW → near bottom; if ABOVE → near top
 /// Important: This component does not mutate the model grid. The only mutation is the
-///            identity map (Map) when replay reifies a ParsedNode into a Move, mirroring
-///            your C# behavior (replace dictionary key without recomputing layout).
+///            identity map (Map) when replay reifies a ParsedNode into a Move, NO LONGER EXISTS.
 /// 
 export default function TreeView ({ treeViewModel, current, className }: Props) {
   // Build mapping from Move to TreeViewNodes when treeViewModel changes
@@ -94,11 +94,12 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   }, [treeViewModel]);
   // Register remapper so Game can swap a new Move for its parsednode during replay without
   // triggering a full render, and this keeps commands like clicking in the tree view working.
+  // NO LONGER USED.
   const app = React.useContext(GameContext)!;
   React.useEffect(() => {
     if (!app?.setTreeRemapper) return;
     const remap = (oldKey: IMoveNext, newMove: IMoveNext) => {
-      // oldkey was a ParsedNode before erasing them as AST, so now never call remap via game
+      // oldkey was a ParsedNode before erasing them as AST, so NOW NEVER CALL THIS VIA GAME
       const node = treeViewMoveMap.get(oldKey); 
       if (!node) return;
       treeViewMoveMap.delete(oldKey);
@@ -116,15 +117,6 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     let n = treeViewMoveMap.get(key) ?? null;
     if (n) return n;
     debugAssert(true, "lookupMoveOrRemap should always find Move in the map")
-    // const pn = !!key && typeof key === "object" && "parsedNode" in key! ? 
-    //            key.parsedNode as IMoveNext : null;
-    // if (pn !== null && treeViewMoveMap.has(pn)) {
-    //   const node = treeViewMoveMap.get(pn)!;
-    //   treeViewMoveMap.delete(pn);
-    //   treeViewMoveMap.set(key, node);
-    //   (node as any).node = key;
-    //   return node;
-    // }
     return null;
   }, [treeViewMoveMap]);  
 
@@ -180,11 +172,6 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     }
     else {
       debugAssert(true, "Should never see non-move in TreeViewMoveMap!!");
-      // Move is ParsedNode, not a move that's been rendered.
-      // if (! gotoGameTreeParsedNode(node!.node  as ParsedNode)) {
-      //   // Hit conflicting move location due to pasted node or rendering bad parsed node
-      //   await g.message?.message(oopsmsg);
-      // }
     }
     app.bumpVersion();
     app.bumpTreeLayoutVersion();
@@ -192,7 +179,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     // return focus so global keybindings work immediately, not calling focusOnRoot to avid
     // cirular dependencies.
     (document.getElementById("app-focus-root"))?.focus?.();
-  }, [app, treeViewMoveMap]);
+  }, [app, treeViewMoveMap]); // gameTreeMouseDown()
 
   function gotoGameTreeMove(move: Move): boolean {
     // Hack attempt to abort tree clicks on bad parse nodes.  sgfparser.ts parseNodeToMove() didn't
@@ -217,28 +204,6 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     }
     return res;
   }
-
-  // function gotoGameTreeParsedNode(move: ParsedNode): boolean {
-  //   // Hack attempt to abort tree clicks on bad parsenodes.  sgfparser.ts ParseNode funct didn't store
-  //   // msg, game.ts ParsedNodeToMove adds bad node msg, but this is a hack to see a sentinel taint
-  //   // (don't compare string's contents), then disallow clicking on bad parsenodes in the game tree.
-  //   if (move.badNodeMessage !== null) 
-  //     return false;
-  //   const g = app.getGame();
-  //   //if (!g) return false;
-  //   let res = true;
-  //   const path = g.getPathToParsedNode(move);
-  //   if (path !== g.TheEmptyMovePath) {
-  //     if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
-  //     const curmove = g.currentMove;
-  //     if (curmove !== null) //{
-  //       app.setComment?.(curmove.comments);
-  //     // } else {
-  //     //   app.setComment?.(g.comments);
-  //     // }
-  //   }
-  //   return res;
-  // }
 
   // Locate the current node’s rect in client coords and adjust scroll if out of view.  Runs after
   // render.  Derives the cell’s rectangle in the scroll container’s coordinate space and, if

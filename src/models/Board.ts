@@ -158,7 +158,6 @@ export class Move implements IMoveNext {
   branches: Move[] | null; // Branches is null when there is zero or one next move.
   adornments: Adornment[];
   comments: string;
-  // parsedNode: ParsedNode | null;
   rendered: boolean;
   // raw SGF properties from a file, lifted to move when they are readied for rendering
   parsedProperties: Record<string, string[]> | null;
@@ -178,7 +177,6 @@ export class Move implements IMoveNext {
     this.adornments = [];
     this.deadStones = [];
     this.comments = "";
-    //this.parsedNode = null;
     this.rendered = true; // Assume move rendered, parsed game code sets it to false.
     this.parsedProperties = null;
     this.parsedBadNodeMessage = null;
