@@ -302,6 +302,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     const lastCmd = getLastCommand();
     setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
     await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
+                         () => defaultGame, setDefaultGame,
                          openMessageDialog!, async () => { openNewGameDialog?.(); });
   }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand,appStorageBridge]);
   //
@@ -564,7 +565,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     // Move focus to a safe, focusable container so arrows work immediately
     focusOnRoot();
     return;
-  // Save As        / todo if save default game, set default to null, don't close it on new dlg
+  // Save As 
   } else if (browser && control && alt && e.code === "KeyS" || //lower === "s") ||
              ! browser && control && shift && e.code === "KeyS") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
@@ -848,7 +849,7 @@ async function doOpenButtonCmd (
   }; // whole body as doOpenContinuation
   // 
   await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
-                       showMessage!, doOpenContinuation);
+                       getDefaultGame, setDefaultGame, showMessage!, doOpenContinuation);
   //
   // WORKING VERSION WITH LAST CMD HACK TO AVOID BROWSER REFUSING TO OPEN FILES, before all the
   // continuations passed down through checkDirtySave to MessageDialog.
@@ -930,6 +931,8 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
 ///
 async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCommand,
                                setLastCommand: (c: LastCommand) => void, appStorage: AppStorageBridge,
+                               getDefaultGame: () => Game | null, 
+                               setDefaultGame: (g: Game | null) => void,
                                message: ShowMessageDialogSig,
                                continuaton: () => Promise<void>): Promise<void> {
   // Save the current comment back into the model
@@ -948,11 +951,15 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
           if (g.saveCookie !== null) {
              fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
              g.isDirty = false;
+             // if just saved default game, then it is no longer a default game
+             if (g === getDefaultGame()) setDefaultGame(null);
            } else {
              const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
              if (tmp !== null) {
                g.saveGameFileInfo(tmp.cookie, tmp.fileName);
                g.isDirty = false;
+             // if just saved default game, then it is no longer a default game
+             if (g === getDefaultGame()) setDefaultGame(null);
              }
            }
            await continuaton(); // file opening, new game, etc.
@@ -1171,8 +1178,8 @@ function undoLastGameCreation (game: Game | null) {
 //// Save Commands
 ///
 
-async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastCommand, 
-                                 appStorageBridge }: CmdDependencies, flipped = false):
+async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastCommand, getDefaultGame,
+                                 setDefaultGame, appStorageBridge }: CmdDependencies, flipped = false):
     Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
@@ -1185,6 +1192,8 @@ async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastComman
   if (!res) return; // user cancelled dialog when there was no saveCookie or filename.
   if (! flipped) {
     g.isDirty = false;
+    // if just saved default game, then it is no longer a default game
+    if (g === getDefaultGame()) setDefaultGame(null);
     const { fileName, cookie } = res;
     // If saved file, remove any auto save
     const autoSaveName = getAutoSaveName(fileName);
@@ -1199,7 +1208,8 @@ async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastComman
   focusOnRoot(); 
 } // doWriteGameCmd()
 
-async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand,
+async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand, getDefaultGame,
+                                setDefaultGame,
                                 appStorageBridge }: CmdDependencies): Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
@@ -1208,6 +1218,8 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
   if (!res) return; // cancelled
   g.isDirty = false;
+  // if just saved default game, then it is no longer a default game
+  if (g === getDefaultGame()) setDefaultGame(null);
   // delete autosave file
   const { fileName, cookie } = res;
   // If saved file, remove any auto save
@@ -1289,8 +1301,12 @@ function gameInfoCmd (curgame: Game, showGameInfo: () => void) {
 async function closeGameCmd (game: Game, deps: CmdDependencies): Promise<void> {
   const lastcmd = deps.getLastCommand(); // need to do this for checkDirtySave which may change
   deps.setLastCommand({ type: CommandTypes.NoMatter }); // last command kind
+  // checkDirtySave will set default game to null if we save the default game, but if we're saving
+  // default game here, then we're about to close it and set it to null anyway.  If we need a new
+  // one, then blow we make and set it.
   await checkDirtySave(game, deps.fileBridge,lastcmd, deps.setLastCommand, 
-                       deps.appStorageBridge, deps.showMessage!, 
+                       deps.appStorageBridge, deps.getDefaultGame, deps.setDefaultGame, 
+                       deps.showMessage!, 
                        () => Promise.resolve()); // don't need user activation context
   // continue function here, no prompting user or awaiting, so don't need to pack into above lambda
   const curgame = deps.gameRef.current;
