@@ -354,7 +354,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
         // Check if something intervened and aborted UI render or useEffect execution.  This is set
         // in the returned cleanup lambda below.
         if (cancelled) return;
-        // Continue ...
         if (useAutoSave) {
           const data = await appStorageBridge.readText(UNNAMED_AUTOSAVE);
           if (data) {
@@ -1136,8 +1135,9 @@ async function getFileGameCheckingAutoSave
 } // getFileGameCheckingAutoSave()
 
 /// parseAndCreateGame
-/// Callers must be prepared for throw due to parsing and fileHandle/data mishap.
-/// take curgame for messaging
+/// Callers must be prepared for throw due to parsing and fileHandle/data mishap, but
+/// createGameFromParsedGame doesn't throw after calling createGame (and setting current game).
+/// Takes curgame for messaging callbacks.
 ///
 async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBridge: FileBridge,  
                                    data: string, gameRef : React.MutableRefObject<Game>,

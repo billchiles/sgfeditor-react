@@ -193,7 +193,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     let res = true;
     const path = g.getPathToMove(move);
     if (path !== g.TheEmptyMovePath) {
-      if (! g.AdvanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
+      if (! g.advanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
       // Do not update UI using move, use CurrentMove because we didn't make it to move's position.
       const curmove = g.currentMove;
       if (curmove !== null) //{

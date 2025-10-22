@@ -15,21 +15,21 @@ export const DEFAULT_BOARD_SIZE = 19;
 ///
 
 export class Game {
-  firstMove: Move | null;
-  currentMove: Move | null;
+  firstMove: Move | null; // if there is any move, this points to a first move
+  currentMove: Move | null; // this is null when at the game start or empty board
   size: number;
   board: Board;
   nextColor!: StoneColor;
-  moveCount: number;
-  branches: Move[] | null;
+  moveCount: number; // starts at zero, add one when making new moves
+  branches: Move[] | null; // null if only one next move
   komi: string;
   handicap!: number;
   handicapMoves!: Move[] | null; // applied ! to say I know it is initialized.
   allWhiteMoves: Move[] | null;
-  filename: string | null; // fullpath
+  filename: string | null; // fullpath if platform provides it
   filebase: string | null; // <name>.<ext>
-  saveCookie: unknown | null;
-  parsedGame: ParsedGame | null;
+  saveCookie: unknown | null; // fileHandle if platforms supports it, otherwise string token
+  parsedGame: ParsedGame | null; // if from file if game started with file open
   isDirty: boolean;
   playerBlack: string;
   playerWhite: string;
@@ -42,9 +42,8 @@ export class Game {
   miscGameInfo: Record<string, string[]> | null;
   private _cutMove: Move | null = null;
 
-
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
-  // to bumpVersion, keeping model / UI isolation.
+  // to bumpVersion(), keeping model / UI isolation.
   onChange?: () => void; // GameProvider wires this up to bumpVersion, so model can signal UI
   onTreeLayoutChange?: () => void; // full re-render, layout/topolgy change
   onTreeHighlightChange?: () => void; // just highlights or scrolling changes possible
@@ -52,8 +51,8 @@ export class Game {
   // NO LONGER USED -- When a move is reified from a ParsedNode during replay/rendering, need to 
   // tell the UI layer the mapping from moves to view models needs updating.
   onParsedNodeReified?: (oldKey: /* ParsedNode */ any, newMove: Move) => void;
-  getComments?: () => string; // optional: read current comment from UI
-  setComments?: (text: string) => void;
+  getComments?: () => string; // read current comment from UI, explicitly controlled element
+  setComments?: (text: string) => void; // set current comment
 
 
   constructor(size : number = 19, handicap : number = 0, komi : string = "6.5", 
@@ -162,7 +161,6 @@ export class Game {
   /// called because the user clicked. Passing in Board's NoIndex for row and col creates a pass
   /// move.
   ///
-  //makeMove (row: number, column: number) : Move | null {
   async makeMove (row: number, col: number) : Promise<Move | null> {
     const curMove = this.currentMove;
     const maybeBranching = (curMove !== null && curMove.next !== null) ||
@@ -250,7 +248,7 @@ export class Game {
     return noLiberty && noKill;
   }
 
-  /// _make_branching_move sets up cur_move to have more than one next move, that is, branches.  
+  /// makeBranchingMove sets up cur_move to have more than one next move, that is, branches.  
   /// If the new move, move, is at the same location as a next move of cur_move, this this function
   /// dumps move in lieu of the existing next move. This also sets up any next and prev pointers
   /// as appropriate and updates the branches combo. This returns null if it can't return a move
@@ -286,9 +284,7 @@ export class Game {
     return [move, err];
   }
 
-  // Branch helper. Returns [moveToUse, newOrSameBranchesOrNull, hadParseErr].
-  
-  /// _make_branching_move_branches takes a game or move object (the current move), the current
+  /// makeBranchingMoveBranches takes a game or move object (the current move), the current
   /// next move, and a move representing where the user clicked.  If there are no branches yet,
   /// then see if new_move is at the same location as next and toss new_move in this case, which
   /// also means there are still no branches yet.  This returns null if it can't return a move,
@@ -296,7 +292,7 @@ export class Game {
   /// This also returns the branches in case they are new and whether there is a parsenode error
   /// to report.
   ///
-  private makeBranchingMoveBranches(branches: Move[] | null, next: Move | null, newMove: Move):
+  private makeBranchingMoveBranches (branches: Move[] | null, next: Move | null, newMove: Move):
       [Move | null, Move[] | null, boolean] {
     if (branches === null) {
       // We only get here when user is clicking and clicks the location of the next move (only next move)
@@ -322,13 +318,13 @@ export class Game {
     }
   }
 
-  /// _maybe_update_branches takes a branches list and a next move.  Branches must not be null.
+  /// maybeUpdateBranches takes a branches list and a next move.  Branches must not be null.
   /// It returns a pre-existing move if the second argument represents a move at a location for which there
   /// already is a move; otherwise, this function returns the second argument as a new next
   /// move.  If this is a new next move, we add it to branches.  
   /// This return null if it can't return a move, and it returns whether we tried to render a bad parsenode.
   ///
-  private maybeUpdateBranches(branches: Move[], move: Move): [Move | null, boolean] {
+  private maybeUpdateBranches (branches: Move[], move: Move): [Move | null, boolean] {
     debugAssert(branches !== null, "Branches can't be null.");
     const idx = branches.findIndex(m => m.row === move.row && m.column === move.column);
     if (idx !== -1) {
@@ -342,7 +338,6 @@ export class Game {
       return [move, false];
     }
   }
-
 
 
   /// checkForKill checks if the move kills any stones on the board and returns a list of move
@@ -374,18 +369,17 @@ export class Game {
     if (this.board.hasStoneColorDown(row, col, opp) && !this.findLiberty(row + 1, col, opp)) {
       this.collectStones(row + 1, col, opp, dead, visited);
     }
-
     move.deadStones = dead;
     return dead;
   }
 
-  /// find_Liberty starts at row, col traversing all stones with the supplied color to see if any
+  /// findLiberty starts at row, col traversing all stones with the supplied color to see if any
   /// stone has a liberty.  It returns true if it finds a liberty.  If we've already been here,
   /// then its search is still pending (and other stones it connects with should be searched).
   /// See comment for check_for_kill.  Visited can be null if you just want to check if a single
   /// stone/group has any liberties, say, to see if a move was a self capture.
   ///
-  private findLiberty(row: number, col: number, color: StoneColor, visited?: boolean[][]): boolean {
+  private findLiberty (row: number, col: number, color: StoneColor, visited?: boolean[][]): boolean {
     // lazily allocate visited matrix when not provided
     if (!visited) {
       visited = Array.from({ length: this.board.size }, () => Array<boolean>(this.board.size).fill(false));
@@ -477,16 +471,18 @@ export class Game {
     return current;
   }
 
+  /// canUnwindMove -- Entry Point
+  ///
   canUnwindMove(): boolean {
     return this.currentMove !== null;
   }
 
-/// goto_start -- command entry point.
+/// gotoStart -- command entry point.
 /// Resets the model to the initial board state before any moves have been played,
 /// and then resets the UI. This assumes the game has started, but throws an exception to
 /// ensure code is consistent on that.
 ///
-gotoStart(): void {
+gotoStart (): void {
   debugAssert(this.currentMove !== null, "Home button shouldn't be active if not current move!");
   this.saveAndUpdateComments(this.currentMove, null); // empty board is null move.
   this.board.gotoStart(); 
@@ -502,35 +498,7 @@ gotoStart(): void {
   this.onTreeHighlightChange!();
 }
 
-
-/// GotoStartForGameSwap resets the model to the initial board state before any moves
-/// have been played so that the new current game can replay moves to its last current state.
-/// This assumes the UI, board, etc., has been cleared with SetupBoardDisplay.  This does
-/// not need the state guarantees of GotoStart, such as a started game or current move, and
-/// it does not have to rewind all state, like the board view, since we setup the board
-/// display before calling this to replay moves.
-///
-// gotoStartForGameSwap(): void {
-//   // Comments for cur move have already been saved and cleared.  Put initial board comments in
-//   // place in case this.Game is sitting at the intial board state.
-//   this.setComments?.(this.comments);
-//   this.board.gotoStart?.();
-//   if (this.handicapMoves !== null) {
-//     for (const m of this.handicapMoves) this.board.addStone(m);
-//   }
-//   this.nextColor = this.handicap === 0 ? StoneColors.Black : StoneColors.White;
-//   this.currentMove = null;
-//   this.moveCount = 0;
-//   this.blackPrisoners = 0;
-//   this.whitePrisoners = 0;
-//   //this.LastVisited = DateTime.Now;  Moving to MRU order on games list, so can toss last one.
-//   this.onChange!.();
-//   this.onTreeHighlightChange!();
-// }
-
-
-
-  /// replay_move -- command entry point.
+  /// replayMove -- command entry point.
   /// Adds the next move that follows the current move.  Move made (see make_move).
   /// Other than marking the next move as the current move with a UI adornment, this handles
   /// replaying game moves. The next move is always move.next, which points to the selected
@@ -565,15 +533,17 @@ gotoStart(): void {
     return this.currentMove;
   }
 
+  /// canReplayMove -- Entry Point
+  ///
   canReplayMove (): boolean {
     return ((this.currentMove !== null && this.currentMove.next !== null) ||
             (this.currentMove === null && this.firstMove !== null));
   }
 
-  /// goto_last_move -- command entry point.  Handles jumping to the end of the game record 
+  /// gotoLastMove -- command entry point.  Handles jumping to the end of the game record 
   /// following all the currently selected branches.  This handles all game/board model.
   ///
-  async gotoLastMove(): Promise<void> {
+  async gotoLastMove (): Promise<void> {
     let current = this.currentMove;
     const saveOrig = current;
     let next: Move | null;
@@ -616,8 +586,7 @@ gotoStart(): void {
   }
 
 
-
-  /// _replay_move_update_model updates the board model, next move color, etc., when replaying a
+  /// replayMoveUpdateModel updates the board model, next move color, etc., when replaying a
   /// move in the game record. This also handles rendering a move that has only been read from a
   /// file and never displayed in the UI. Rendering here just means its state will be as if it had
   /// been rendered before. We must setup branches to Move objects, and make sure the next Move
@@ -658,7 +627,7 @@ gotoStart(): void {
   } //replayMoveUpdateModel()
 
 
-  /// _ready_for_rendering puts move in a state as if it had been displayed on the screen before.
+  /// readyForRendering puts move in a state as if it had been displayed on the screen before.
   /// Moves from parsed nodes need to be created when their previous move is actually displayed
   /// on the board so that there is a next Move object in the game tree for consistency with the
   /// rest of model. However, until the moves are actually ready to be displayed they do not have
@@ -731,7 +700,6 @@ replayUnrenderedAdornments (move: Move): void {
         move.addAdornment({ kind: AdornmentKinds.Letter, row, column: col, letter: char });
       }
     }
-      
   }
 
   ///
@@ -800,8 +768,6 @@ replayUnrenderedAdornments (move: Move): void {
     return pgame;
   } // genPrintGameFromGame()
 
-  /// genPrintGameRootNode replaces genParsedGameRoot
-  ///
   private genPrintGameRootNode (flipped: boolean): PrintNode {
     let props: Record<string, string[]>;
     // Reuse existing root properties to preserve unknown tags from parsed files
@@ -811,13 +777,6 @@ replayUnrenderedAdornments (move: Move): void {
       props = copyProperties(this.parsedGame.properties); 
     else
       props = {};
-    // if (this.parsedGame !== null) { 
-    //   if (this.miscGameInfo !== null)
-    //     props = copyProperties(this.miscGameInfo);
-    //   else
-    //     props = copyProperties(this.parsedGame.properties); 
-    // } else
-    //   props = {}; 
     const res = new PrintNode(props);
     // App name and game size.
     props["AP"] = ["SGFEditor v2"];
@@ -842,8 +801,6 @@ replayUnrenderedAdornments (move: Move): void {
     return res;
   }
 
-
-  // genPrintGameInitialStones replaces genParsedGameRootInitialStones.
   private genPrintGameInitialStones (props: Record<string, string[]>, flipped: boolean): void {
     // HA
     if (this.handicap !== 0) {
@@ -873,10 +830,6 @@ replayUnrenderedAdornments (move: Move): void {
   } // genPrintGameInitialStones()
 
 
-//// end gen print nodes and start legacy update parsed game
-
-
-
   ///
   //// Saving Comments
   ///
@@ -889,7 +842,7 @@ replayUnrenderedAdornments (move: Move): void {
     this.saveComment(this.currentMove);
   }
 
-  /// _save_and_update_comments ensures the model captures any comment for the origin and
+  /// saveAndUpdateComments ensures the model captures any comment for the origin and
   /// displays dest's comments.  Dest may be a new move, and its empty string comment clears
   /// the textbox.  Dest may also be the previous move of origin if we're unwinding a move
   /// right now.  Dest and origin may not be contiguous when jumping to the end or start of
@@ -943,8 +896,8 @@ replayUnrenderedAdornments (move: Move): void {
   //// Branching Helpers
   ///
 
-  /// selectBranchUp makes one branch higher/earlier in the branches array the current branch and
-  /// fixes curmove's next pointer.
+  /// selectBranchUp -- Command Entry Point makes one branch higher/earlier in the branches array 
+  /// the current branch and fixes curmove's next pointer.
   ///
   selectBranchUp () {
     const curmove = this.currentMove;
@@ -971,10 +924,10 @@ replayUnrenderedAdornments (move: Move): void {
       this.message!.message("Already on highest branch.");
     }
     return;
-  } // moveBranchUp()
+  } // selectBranchUp()
 
-  /// selectBranchDown makes one branch lower/later in the branches array the current branch and
-  /// fixes curmove's next pointer.
+  /// selectBranchDown -- Command Entry Point makes one branch lower/later in the branches array the
+  /// current branch and fixes curmove's next pointer.
   ///
   selectBranchDown () {
     const curmove = this.currentMove;
@@ -1001,7 +954,7 @@ replayUnrenderedAdornments (move: Move): void {
       this.message!.message("Already on highest branch.");
     }
     return;
-  } // moveBranchDown()
+  } // selectBranchDown()
   
 
   /// moveBranchUpp and moveBranchDown -- command entry points
@@ -1018,8 +971,7 @@ replayUnrenderedAdornments (move: Move): void {
     this.onChange!(); 
     this.onTreeLayoutChange!();
   }
-
-  // Move the current branch down in the sibling list.
+  ///
   async moveBranchDown (): Promise<void> {
     const res = await this.branchesForMoving();
     if (res === null) return;
@@ -1108,7 +1060,7 @@ replayUnrenderedAdornments (move: Move): void {
   toggleAdornment (kind: AdornmentKind, row: number, col: number): void {
     const move = this.currentMove;
     const arr = this.adornmentsFor(move);
-    const i = this.indexOfAdornment(arr, row, col, kind);
+    const i = arr.findIndex(a => a.row === row && a.column === col && a.kind === kind);
     if (i >= 0) {
       // Remove existing adornment
       arr.splice(i, 1);
@@ -1133,7 +1085,7 @@ replayUnrenderedAdornments (move: Move): void {
       this.isDirty = true;
       this.onChange?.();
     }
-  }
+  } //toggleAdornment()
 
   addAdornment (move: Move | null, row: number, col: number, kind: AdornmentKind, 
                 data?: string | null): Adornment | null {
@@ -1146,9 +1098,7 @@ replayUnrenderedAdornments (move: Move): void {
   }
 
   /// makeAdornment returns a new adornment or null (for example, running out of letters).
-  /// When porting this from C# app, it turned out we don't use data here.  ReplayUnrenderedAdornments
-  /// has ParseNode explicit letters, but it doesn't need to call this since adornments have less
-  /// maintenance in react.
+  /// todo remove data from signature
   ///
   private makeAdornment (adornments: Adornment[], row: number, col: number, kind: AdornmentKind, 
                          data: string | null = null): Adornment | null {
@@ -1166,31 +1116,18 @@ replayUnrenderedAdornments (move: Move): void {
     // because typescript doesn't return void or null when you fall off the end.
     return null; 
   }
-
-  /// returns the first (should be only) adornment at that point.
-  // getAdornment (row: number, col: number, kind: AdornmentKind): Adornment | null {
-  //   const move = this.currentMove;
-  //   const arr = this.adornmentsFor(move);
-  //   const i = this.indexOfAdornment(arr, row, col, kind);
-  //   return i >= 0 ? arr[i] : null;
-  // }
-
   
-  /// currentAdornmentsArray returns the current move's adornment array or the starting empty
-  /// board's array.
-  ///
-  // private currentAdornments (): Adornment[] {
-  //   return this.adornmentsFor(this.currentMove);
-  // }
 
   private adornmentsFor (move: Move | null): Adornment[] {
     return move ? move.adornments : this.startAdornments;
   }
 
-  private indexOfAdornment (arr: Adornment[], row: number, col: number, kind: AdornmentKind): number {
-    return arr.findIndex(a => a.row === row && a.column === col && a.kind === kind);
-  }
+  // private indexOfAdornment (arr: Adornment[], row: number, col: number, kind: AdornmentKind): number {
+  //   return arr.findIndex(a => a.row === row && a.column === col && a.kind === kind);
+  // }
 
+  /// chooseLetterAdornment looks at existing letter adornments and chooses the first unused letter.
+  ///
   private chooseLetterAdornment (arr: Adornment[]): string | null {
       // Collect letter adornments for this node only
       const used = new Set(
@@ -1276,12 +1213,12 @@ replayUnrenderedAdornments (move: Move): void {
     return final.reverse();
   }
 
-  /// AdvanceToMovePath takes a path, where each tuple is a move number and the
+  /// advanceToMovePath takes a path, where each tuple is a move number and the
   /// branch index to take at that move.  The branch is -1 for the last move.
   /// This returns true if successful, null if the path was bogus, or we encounter
   /// a move conflict in the game tree (can happen from pastes).
   ///
-  public AdvanceToMovePath (path: Array<[number, number]>): boolean {
+  public advanceToMovePath (path: Array<[number, number]>): boolean {
     debugAssert(this.currentMove === null, "Must be at beginning of empty game board.");
     debugAssert(this.firstMove !== null || path === this.TheEmptyMovePath,
                 "If first move is null, then path must be the empty path.");
@@ -1345,7 +1282,7 @@ replayUnrenderedAdornments (move: Move): void {
     return true;
   } // advanceToMovePath()
 
-  /// set_current_branch is a helper for UI that changes which branch to take
+  /// setCurrentBranch is a helper for UI that changes which branch to take
   /// following the current move.  Cur is the index of the selected item in
   /// the branches combo box, which maps to the branches list for the current
   /// move.
@@ -1460,29 +1397,23 @@ replayUnrenderedAdornments (move: Move): void {
     // this.onTreeHighlightChange?.();
   }
 
-  /// PasteMoveNextConflict checks whether pasting at current would conflict with the existing next
-  /// move.  Returns true if there is a conflict.
-  /// PasteMoveNextConflict takes a move representing a cut move and checks that it does not conflict with
+  /// pasteMoveNextConflict takes a move representing a cut move and checks that it does not conflict with
   /// a next move.  Some moves in the pasted branch may be in conflict, but we catch those as we replay
   /// moves.  This check prevents branches where two branches are the same move but different sub trees.
   ///
   private async pasteMoveNextConflict (new_move: Move): Promise<boolean> {
     const curmove = this.currentMove;
     const branches = curmove !== null ? curmove.branches : this.branches;
-    // if (curmove !== null)
-    //   branches = curmove.branches;
-    // else
-    //   branches = this.branches;
     let error = false;
-    if (branches !== null) {
+    if (branches !== null) { // check if a branch has a move at the same place
       const already_move = branches.findIndex(
         (y) => new_move.row === y.row && new_move.column === y.column );
       error = already_move !== -1;
-    } else if (curmove !== null) {
+    } else if (curmove !== null) { // check if current move's next move is at the same place
       error = (curmove.next !== null &&
                curmove.next.row === new_move.row && curmove.next.column === new_move.column);
     } else
-      error = (this.firstMove !== null &&
+      error = (this.firstMove !== null && // check if first move is at the same place
                this.firstMove.row === new_move.row && this.firstMove.column === new_move.column);
     if (error) {
       await this.message?.message?.("You pasted a move that conflicts with a next move of the current move.");
@@ -1491,7 +1422,7 @@ replayUnrenderedAdornments (move: Move): void {
     return false;
   }
 
-  /// PasteMoveInsert take a move represneting a cut move and does the work of inserting the move
+  /// PasteMoveInsert take a move representing a cut move and does the work of inserting the move
   /// into the game model.  This assumes new_move is not in conflict with a move on the board, which
   /// is necessary; otherwise, CheckSelfCaptureNoKill throws.
   ///
@@ -1607,7 +1538,7 @@ export interface MessageOrQuery {
 
 
 ///
-//// Mapping Games to ParsedGames (for printing)
+//// Mapping Games to ParsedGames with PrintNodes (for printing)
 ///
 
 /// copyProperties copies parsed node properties down to leaves, exported for commands in AppGlobals.
@@ -1874,7 +1805,6 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
 
 /// createGame makes the game and makes it current game.  The constructor adds handicap stones to
 /// the board.
-/// TODO does this need to clear the UI comment box? think that was done earlier
 ///
 export function createGame (size : number, handicap : number, komi : string, 
                             handicapStones: Move[] | null = null, all_white : Move[] | null = null,
@@ -2104,9 +2034,8 @@ export function nextMoveGetMessage (move: Move): string | null {
 //// Cut / Paste Helpers
 ///
 
-/// pasteNextMove takes a Move that is the current move to
-/// which _paste_next_move adds cut_move as the next move.  This sets up next
-/// pointers and the branches list appropriately for the move.
+/// pasteNextMove takes a Move that is the current move to which pasteNextMove adds cutMove as the 
+/// next move.  This sets up next pointers and the branches list appropriately for the move.
 ///
 function pasteNextMove (move: Move, cutMove: Move): void {
   if (move.next !== null) {
@@ -2123,7 +2052,6 @@ function pasteNextMove (move: Move, cutMove: Move): void {
   cutMove.previous = move;
   move.next.number = move.number + 1; // moves further out are renumbered by pastMoveInsert
 }
-
 
 /// renumberMoves takes a move with the correct number assignment and walks
 /// the sub tree of moves to reassign new numbers to the nodes.  This is used
