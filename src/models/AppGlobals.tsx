@@ -88,6 +88,8 @@ export type AppGlobals = {
   setLastCommand(lc: LastCommand): void;
 };
 ///
+/// TAGS: gameref vs appglobals.game, gameref explained, useref vs usestate
+///
 /// A bit about appGlobals vs gameref, why two acessors and what about management:
 ///    * appGlobals.game is a reactive snapshot used for rendering (it is state/context, so React
 /// will re-render when it changes).
@@ -199,16 +201,22 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   //const size = DEFAULT_BOARD_SIZE;
   //
   // GAMES
-  // Wrap the current game in a useRef so that this value is not re-executed/evaluated on each
-  // render, which would replace game and all the move state (new Game).  This holds it's value
-  const [defaultGame, setDefaultGame] = useState<Game | null>(null);
+  // Wrap the default game, current game, and games list in a useRef so that this value is not
+  // re-executed/evaluated on each render, which would replace game and all the move state.  Also,
+  // we need these values updated immediately when set so that later command code executing within
+  // the same UI version tick sees the updated value immediately.  This holds it's value across ticks.
+  const defaultGameRef = useRef<Game | null>(null);
+  const getDefaultGame = () => defaultGameRef.current;
+  const setDefaultGame = (g: Game | null) => { defaultGameRef.current = g; };
   // This is global.currentgame essentially, any new games set this to be current for commands to ref.
-  // useRef exeucutes during first render only.
-  const gameRef = useRef<Game>(new Game()); // net yet current, games, defaultGame.
+  // useRef exeucutes during first render only.  setGame() defined later as useCallback.
+  const gameRef = useRef<Game>(new Game()); // not yet current, in games, and defaultGame.
   // Must always call setgames before you call setgame because setgame removes the defaultgame if it
   // is not dirty, and if you setgames to a list that included the default game after calling setgame
   // you would just restore it
-  const [games, setGames] = useState<Game[]>([]);
+  const gamesRef = useRef<Game[]>([]);
+  const getGames = () => gamesRef.current;
+  const setGames = (gs: Game[]) => { gamesRef.current = gs; };
   //
   // COMMENTS AND MESSAGING from the model
   // Enable first game to access comments and messaging/confirming UI.
@@ -242,6 +250,8 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const getGame = useCallback(() => gameRef.current, []);
   // SETGAME -- Callers must call this after setGames if there is a command flow within one render
   //            cycle that calls both so that any computed games list doesn't put back defaultgame
+  // Need to call this for new games, don't just set gameRef.current because the new game won't get
+  // the callbacks for comments, version ticks, etc.
   const setGame = useCallback((g: Game) => {
     g.message = gameRef.current?.message ?? browserMessageOrQuery;
     gameRef.current = g;
@@ -258,8 +268,10 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     g.setComments = setComment;    
     bumpVersion();
   }, [bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion, getComment, setComment]);
-  // useState initial value used first render, same every time unless call setter.
-  const [lastCreatedGame, setLastCreatedGame] = useState<Game | null>(null);
+  // originally gpt5 had useState, but need immediate update in model code to clean up bad open file
+  const lastCreatedRef = useRef<Game | null>(null); 
+  const getLastCreatedGame = () => lastCreatedRef.current;
+  const setLastCreatedGame = (g: Game | null) => { lastCreatedRef.current = g; };
   //
   // PLATFORM BRIDGES
   //const isElectron = !!(window as any)?.process?.versions?.electron;
@@ -302,14 +314,14 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     const lastCmd = getLastCommand();
     setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
     await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
-                         () => defaultGame, setDefaultGame,
+                         getDefaultGame, setDefaultGame,
                          openMessageDialog!, async () => { openNewGameDialog?.(); });
   }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand,appStorageBridge]);
   //
   // SETUP INITIAL STATE FOR GAME -- this runs once after initial render due to useEffect.
   // useEffect's run after the DOM has rendered.  useState runs first, when GameProvider runs.
   useEffect(() => {
-    if (games.length === 0 ) {//&& defaultGame === null) {
+    if (getGames().length === 0 ) {//&& defaultGame === null) {
       const g = gameRef.current;
       // ensure model-to-UI notifications are wired, executes after render, g is default game from above
       //g.onChange = bumpVersion;   done in setgame()
@@ -317,7 +329,6 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
       setGame(g);
       setDefaultGame(g); 
       // Don't set lastCreatedGame (only used when creating a new game throws and needs cleaning up).
-      // make it the active game (also bumps version)
     }
     // run once on mount; guard prevents re-entry
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -359,8 +370,8 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
           if (data) {
             const curgame = gameRef.current;
             await parseAndCreateGame(null, "", fileBridge, data, gameRef,
-                                     { curGame: curgame, setGame, getGames: () => games.slice(),
-                                     setGames, getDefaultGame: () => defaultGame, setDefaultGame });
+                                     { curGame: curgame, setGame, setLastCreatedGame, getGames,
+                                       setGames, getDefaultGame, setDefaultGame });
             // Ensure no file association; treat as unsaved content.
             const g = gameRef.current; // current game and games list already fixed up
             g.isDirty = true;
@@ -451,18 +462,16 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
       () => ({gameRef, bumpVersion, bumpTreeLayoutVersion: bumpTreeLayoutVersion, 
               bumpTreeHighlightVersion: bumpTreeHighlightVersion,
               commonKeyBindingsHijacked, fileBridge, appStorageBridge, 
-              getGames: () => games.slice(), setGames, setGame, getDefaultGame: () => defaultGame,
-              setDefaultGame, getLastCreatedGame: () => lastCreatedGame, 
-              setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
+              getGames, setGames, setGame, getDefaultGame,
+              setDefaultGame, getLastCreatedGame, setLastCreatedGame, 
+              getLastCommand, setLastCommand, startNewGameFlow,
               showHelp: () => { openHelpDialog?.(); },
               showGameInfo: () => { openGameInfoDialog?.(); },
               showMessage: openMessageDialog,
              }), 
-             [gameRef, bumpVersion, fileBridge, appStorageBridge, 
-              games, setGames, setGame, setDefaultGame, 
-              lastCreatedGame, setLastCreatedGame, getLastCommand, setLastCommand, startNewGameFlow,
-              openHelpDialog, commonKeyBindingsHijacked, bumpTreeLayoutVersion, 
-              bumpTreeHighlightVersion, openGameInfoDialog, openMessageDialog]);
+             [gameRef, bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion,
+              fileBridge, appStorageBridge, commonKeyBindingsHijacked,
+              startNewGameFlow, openHelpDialog, openGameInfoDialog, openMessageDialog]);
   //
   // COMMANDS that UI components can call to thunk into actual handlers
   const openSgf   = useCallback(() => doOpenButtonCmd(deps),   [deps]);
@@ -493,10 +502,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // React re-renders when app.game changes.  getGame returns the live gameRef.current ref that is
   // stable across renders, best used in command handlers, timers, async, etc.
   const api: AppGlobals = useMemo(
-    () => ({game: gameRef.current, getGame, setGame, getGames: () => games.slice(), setGames,
-            getDefaultGame: () => defaultGame, setDefaultGame,
-            getLastCreatedGame: () => lastCreatedGame, setLastCreatedGame,
-            getComment, setComment,
+    () => ({game: gameRef.current, getGame, setGame, getGames, setGames,
+            getDefaultGame, setDefaultGame,
+            getLastCreatedGame, setLastCreatedGame, getComment, setComment,
             version, bumpVersion,
             treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, bumpTreeHighlightVersion,
             setTreeRemapper,
@@ -504,8 +512,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
             openSgf, saveSgf, saveSgfAs, newGame,
             getLastCommand, setLastCommand,}),
     [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs,
-     games, setGames, defaultGame, setDefaultGame, lastCreatedGame, setLastCreatedGame,
-     getGame, setGame, treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, 
+     setGames, getGame, setGame, treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, 
      bumpTreeHighlightVersion, setTreeRemapper]
   );
   // Instead of the following line that requires this file be a .tsx file, I could have used this
@@ -751,10 +758,10 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     // web clipboard API (works in Electron too)
     try {
       await navigator.clipboard.writeText(text);
-      // deps.showMessage?.(`Copied: ${text}`);
+      // await deps.showMessage?.(`Copied: ${text}`);
     } catch {
       // If the browser disallows it (e.g., not a secure context), let the user know.
-      deps.showMessage?.("Copy failed (clipboard permissions).");
+      await deps.showMessage?.("Copy failed (clipboard permissions).");
     }
     return;
   } // copy file name
@@ -840,7 +847,7 @@ async function doOpenButtonCmd (
       await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, appStorageBridge,
                               showMessage!,
                              {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames,
-                              getDefaultGame, setDefaultGame });
+                              getDefaultGame, setDefaultGame, setLastCommand });
       bumpVersion();
       bumpTreeLayoutVersion();
     }
@@ -1036,16 +1043,18 @@ async function doOpenGetFileGame (
     showMessage: ShowMessageDialogSig,
     cleanup: {getLastCreatedGame: () => Game | null, setLastCreatedGame: (g: Game | null) => void,
               setGame: (g: Game) => void, getGames: () => Game[], setGames: (gs: Game[]) => void,
-              getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void}) {
+              getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void,
+              setLastCommand: (c: LastCommand) => void}) {
   if (fileHandle !== null || data !== "") { // if we can do anything to get file contents
     const curgame = gameref.current; // Stash in case we have to undo due to file error.
     //console.log(`opening: ${(fileHandle as any).name}`)
     try {
       cleanup.setLastCreatedGame(null);
-      // THIS LINE is the essence of this function.
+      // THE NEXT LINE is the essence of this function.
       await getFileGameCheckingAutoSave(fileHandle, fileName, fileBridge, data, appStorage,
                                         showMessage,
                                         {gameRef: gameref, setGame: cleanup.setGame, 
+                                         setLastCreatedGame: cleanup.setLastCreatedGame,
                                          getGames: cleanup.getGames, setGames: cleanup.setGames,
                                          getDefaultGame: cleanup.getDefaultGame,
                                          setDefaultGame: cleanup.setDefaultGame});
@@ -1060,15 +1069,18 @@ async function doOpenGetFileGame (
           `IO/SGF Error with opening or reading file.\n\n${err.message}\n\n${err.stack}`);
       } else if (err instanceof Error) 
         await curgame.message!.message(`Error opening game.\n\n${err.message}\n\n${err.stack}`);
-      if (cleanup.getLastCreatedGame() !== null) {
+      const lastg = cleanup.getLastCreatedGame();
+      if (lastg !== null) {
         // Error after creating game, so remove it and reset board to last game or default game.
         // The games list may not contain curgame (above) because creating new games may delete the 
         // initial default game.  Did this before message call in C# since it cannot await in catch.
         // I think we want to use curgame here, not gameref, so we see the game that was current
         // when this function started executing.
-        undoLastGameCreation((cleanup.getGames().findIndex((g) => g === curgame)) !== -1 ? 
-        // TODO not impl, need more helpers passed down, like setgames
-                              curgame : null);
+        await removeGame({gameRef: gameref, setGame: cleanup.setGame, getGames: cleanup.getGames,
+                          setGames: cleanup.setGames,
+                          /*getLastCommand: cleanup.getLastCommand,*/ setLastCommand: cleanup.setLastCommand,
+                          getDefaultGame: cleanup.getDefaultGame, setDefaultGame: cleanup.setDefaultGame
+                         }, lastg);
         }
         // await curgame.message!.message(
         //   `Error opening or reading file.\n\n${err.message}\n\n${err.stack}`);
@@ -1088,6 +1100,7 @@ async function getFileGameCheckingAutoSave
     (fileHandle: unknown, fileName: string, fileBridge: FileBridge, data: string,
      appStorage: AppStorageBridge, showMessage: ShowMessageDialogSig,
      gamemgt: {gameRef: React.MutableRefObject<Game>, setGame: (g: Game) => void,
+               setLastCreatedGame: (g: Game | null) => void,
                getGames: () => Game[], setGames: (gs: Game[]) => void,
                getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void}) {
   // Check auto save file exisitence and ask user which to use.
@@ -1108,8 +1121,9 @@ async function getFileGameCheckingAutoSave
       if (autodata === null)
         throw new Error(
           "Auto save file existed, user chose to open it, but App Storage had no data.");
-      parseAndCreateGame(null, autoSaveName, fileBridge, autodata, gamemgt.gameRef, 
-                         {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+      await parseAndCreateGame(null, autoSaveName, fileBridge, autodata, gamemgt.gameRef, 
+                         {curGame: curgame, setGame: gamemgt.setGame, 
+                          setLastCreatedGame: gamemgt.setLastCreatedGame, getGames: gamemgt.getGames, 
                           setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
                           setDefaultGame: gamemgt.setDefaultGame});
       const nowCurrent = gamemgt.gameRef.current;
@@ -1119,15 +1133,17 @@ async function getFileGameCheckingAutoSave
       const parts = nowCurrent.filename!.split(/[/\\]/); 
       nowCurrent.filebase = parts[parts.length - 1];
     } else {// Not using exiting auto save ...
-      parseAndCreateGame(fileHandle, fileName, fileBridge, data, gamemgt.gameRef, 
-                         {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+      await parseAndCreateGame(fileHandle, fileName, fileBridge, data, gamemgt.gameRef, 
+                         {curGame: curgame, setGame: gamemgt.setGame, 
+                          setLastCreatedGame: gamemgt.setLastCreatedGame, getGames: gamemgt.getGames, 
                           setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
                           setDefaultGame: gamemgt.setDefaultGame})
     }
     await appStorage.delete(autoSaveName); // used it or didn't but don't need it now
   } else {// no auto saved file to worry about ...
-    parseAndCreateGame(fileHandle, fileName, fileBridge, data, gamemgt.gameRef, 
-                       {curGame: curgame, setGame: gamemgt.setGame, getGames: gamemgt.getGames, 
+    await parseAndCreateGame(fileHandle, fileName, fileBridge, data, gamemgt.gameRef, 
+                       {curGame: curgame, setGame: gamemgt.setGame, 
+                        setLastCreatedGame: gamemgt.setLastCreatedGame, getGames: gamemgt.getGames, 
                         setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
                         setDefaultGame: gamemgt.setDefaultGame});
 
@@ -1142,6 +1158,7 @@ async function getFileGameCheckingAutoSave
 async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBridge: FileBridge,  
                                    data: string, gameRef : React.MutableRefObject<Game>,
                                    cleanup: {curGame: Game, setGame: (g: Game) => void,
+                                             setLastCreatedGame: (g: Game | null) => void,
                                              getGames: () => Game[], 
                                              setGames: (gs: Game[]) => void,
                                              getDefaultGame: () => Game | null, 
@@ -1161,6 +1178,7 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
   }
   const pg = parseFileToMoves(data);
   const g = await createGameFromParsedGame(pg, cleanup.curGame, cleanup.setGame, 
+                                           cleanup.setLastCreatedGame, 
                                            cleanup.getGames, cleanup.setGames,
                                            cleanup.getDefaultGame, cleanup.setDefaultGame);
   // 
@@ -1168,10 +1186,15 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
   return g; 
 } // parseAndCreateGame()
 
-/// TODO not sure we need this at all, but
-function undoLastGameCreation (game: Game | null) {
-  game
-}
+/// undoLastGameCreation cleans up current game and games list from adding a game that later threw
+/// due to not being able to fully open and ready first moves for rendering.
+///
+// function undoLastGameCreation (game: Game) {
+  
+//   (cleanup.getGames().findIndex((g) => g === curgame)) !== -1 ? 
+//         // TODO not impl, need more helpers passed down, like setgames
+//                               curgame : null
+// }
 
 
 ///
@@ -1249,7 +1272,16 @@ function moveGameToMRU (games: Game[], idx: number /*, setGame: (g: Game) => voi
   return newGames;
 }
 
-async function gotoNextGameCmd(deps : CmdDependencies, last: LastCommand): Promise<void> {
+/// gotoNextGameCmd -- Command Entry Point, called from handleKeyPress and removeGame
+///
+async function gotoNextGameCmd
+    (deps : {gameRef: React.MutableRefObject<Game>, 
+             setGame: (g: Game) => void, getGames: () => Game[], setGames: (gs: Game[]) => void, 
+             /* getLastCommand: () => LastCommand,*/ setLastCommand: (c: LastCommand) => void,
+             getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void, 
+             // When invoked as a cmd, these exist, but from removeGame, they don't exist
+             bumpVersion?: () => void, bumpTreeLayoutVersion?: () => void },
+     last: LastCommand): Promise<void> {
   const games = deps.getGames();
   if (games.length < 2) {
     deps.gameRef.current.message?.message("Only one game open currently.  Can't switch games.");
@@ -1270,8 +1302,8 @@ async function gotoNextGameCmd(deps : CmdDependencies, last: LastCommand): Promi
   addOrGotoGame({idx}, deps.gameRef.current, games, deps.setGame, deps.setGames,
                 deps.getDefaultGame, deps.setDefaultGame);
   deps.setLastCommand({ type: CommandTypes.GotoNextGame, cookie: { idx } })
-  deps.bumpVersion();
-  deps.bumpTreeLayoutVersion();
+  deps.bumpVersion?.(); // When invoked as a cmd, these exist, but from removeGame, they don't exist
+  deps.bumpTreeLayoutVersion?.();
 }
 
 /// gameInfoCmd saves the game comment if shown currently, lifts any parsed game properties to
@@ -1295,8 +1327,8 @@ function gameInfoCmd (curgame: Game, showGameInfo: () => void) {
 
 /// closeGameCmd handles swapping out current game if necessary, checking dirty save, 
 /// creating default game if need be, etc.
-/// Maybe be goofy design here.  In C# it handled arbitrary games, but 1) if we don't use that here
-/// can simply this, and 2) in the general case, probably not in a position to pass all deps.
+/// Overly general code here due to legacy C# app that handled arbitrary games in a dialog.  If no
+/// dialog in this version, can simplify, and if dialog need to pass all the dependencies.
 ///
 async function closeGameCmd (game: Game, deps: CmdDependencies): Promise<void> {
   const lastcmd = deps.getLastCommand(); // need to do this for checkDirtySave which may change
@@ -1309,16 +1341,31 @@ async function closeGameCmd (game: Game, deps: CmdDependencies): Promise<void> {
                        deps.showMessage!, 
                        () => Promise.resolve()); // don't need user activation context
   // continue function here, no prompting user or awaiting, so don't need to pack into above lambda
+  await removeGame(deps, game);
+}
+
+/// removeGame used in closeGameCmd and doOpenGetFileGame for cleanup.
+/// 
+async function removeGame
+    (deps : {gameRef: React.MutableRefObject<Game>, 
+             setGame: (g: Game) => void, getGames: () => Game[], setGames: (gs: Game[]) => void, 
+             /*getLastCommand: () => LastCommand,*/ setLastCommand: (c: LastCommand) => void,
+             getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void, 
+             // When invoked as a cmd, these exist, but from removeGame, they don't exist
+             bumpVersion?: () => void, bumpTreeLayoutVersion?: () => void }, 
+     game: Game): Promise<void> {
   const curgame = deps.gameRef.current;
   const games = deps.getGames();
   if (game === curgame) {
-    if (games.length > 1) { // Just rotate game out of current position
-      gotoNextGameCmd(deps, lastcmd);
+    if (games.length > 1) { // Rotate game out of current position, use NoMatter since closing cmd
+      await gotoNextGameCmd(deps, { type: CommandTypes.NoMatter });
     } else { // No games left, need a default game
-      const newg = createGame(Board.MaxSize, 0, "6.5", null, null, 
-                              {curGame: curgame, setGame: deps.setGame, getGames: deps.getGames, 
-                               setGames: deps.setGames, getDefaultGame: deps.getDefaultGame, 
-                               setDefaultGame: deps.setDefaultGame});
+      const newg = createGame(Board.MaxSize, 0, "6.5", null, null,
+        {
+          curGame: curgame, setGame: deps.setGame, getGames: deps.getGames,
+          setGames: deps.setGames, getDefaultGame: deps.getDefaultGame,
+          setDefaultGame: deps.setDefaultGame
+        });
       // Mark this as a default, so if not used, can toss it.
       deps.setDefaultGame(newg); // we're closing the only game, so the new game is a default game
     }
@@ -1332,15 +1379,18 @@ async function closeGameCmd (game: Game, deps: CmdDependencies): Promise<void> {
 //// Messaging for Model
 ///
 
-/// I really should just move to my MessageDialog, and not use MessageOrConfirm/alert/confirm.
-/// Moving to MessageDialog may be the only way in Electron shell, but I want to keep the
-/// old/bootstrapping code around for now.
+/// I'm keeping browserMessageOrQuery (was simply two lines during bootstrapping) and MessageDialog.
+/// USE_MESSAGE_DIALOG lets me flip between the bootstrapping equivalent (alert/confirm) and 
+/// MessageDialog, but it is always true for consistent UI.  Maybe MessageDialog is the only way in 
+/// Electron shell, but I want to keep the.  I do use browserMessageOrQuery in places rather than
+/// MessageDialog for a simpler API when I don't need a response or user context for a continuation.
 ///
 let USE_MESSAGE_DIALOG = true;
 /// Need GameProvider to set this when it gets openMessageDialog so that we have access to it.  See
 /// setMessageDialogOpener.
 let messageDialogOpener: | ShowMessageDialogSig | null 
     = null;
+
 /// Turn MessageDialog usage on/off at runtime (leave false to use alert/confirm).  Don't really
 /// need this, will likely just change the default false to true to play with this.
 export function setUseMessageDialog(flag: boolean) {
@@ -1364,6 +1414,7 @@ export function setMessageDialogOpener(
 ///    activation issue when asking to save a dirty game and then trying to open a file
 ///
 const browserMessageOrQuery: MessageOrQuery = {
+  // bootstrapping implementation
   //  message: (msg) => alert(msg),
   //  confirm: async (msg) => window.confirm(msg),
   message: (msg: string) => {
@@ -1371,20 +1422,40 @@ const browserMessageOrQuery: MessageOrQuery = {
       // MessageDialog returns Promise<boolean>; discard result to match Promise<void>.
       return messageDialogOpener(msg).then(() => {});
     }
-    alert(msg);                       // synchronous
-    return Promise.resolve();         // present async surface
+    alert(msg);                 // synchronous
+    return Promise.resolve();   // present async surface (acts like I declared the lambda with async)
 
   },
   confirm: (msg: string) => {
     if (USE_MESSAGE_DIALOG && messageDialogOpener) {
       // For confirm we keep the boolean result.
-      return messageDialogOpener(msg);
+      return messageDialogOpener(msg); // return the Promise, caller decides whether to await
     }
     const ok = window.confirm(msg);        // synchronous
     return Promise.resolve(ok);            // present async surface
   },
 };
 
+// gpt5 showed me this equivalent impl by way of explaining async/await in typescript.  It is
+// equivalent to what I have, and my usage sites appropriately await.  In typescript, you can return
+// a Promise without using the async keyword, and async is only required on a function if you await
+// inside it.
+//
+// const browserMessageOrQuery: MessageOrQuery = {
+//   message: async (msg: string) => {
+//     if (USE_MESSAGE_DIALOG && messageDialogOpener) {
+//       await messageDialogOpener(msg); // discard result
+//       return;
+//     }
+//     alert(msg);
+//   },
+//   confirm: async (msg: string) => {
+//     if (USE_MESSAGE_DIALOG && messageDialogOpener) {
+//       return await messageDialogOpener(msg);
+//     }
+//     return window.confirm(msg);
+//   },
+// };
 
 ///
 //// Autosave

@@ -39,9 +39,10 @@ game is dirty, this prompts to save.  Opening a file already open switches to th
 Ctrl-c copies filepath to clipboard.
 
 MULTIPLE OPEN FILES
-You can have up to 10 games open.  Ctrl-w rotates through games.  Ctrl-g brings up 
-a dialog for switching to games and closing games.  When creating or opening games, 
-SgfEditor closes the default game if it is unused.
+You can open multiple games.  Shift-w rotates through games (can't stop chrome
+from stealing ctrl-w).  When creating or opening games, SgfEditor closes the 
+default game if it is unused.  Ctrl-alt-f4 closes the current game in the browser,
+and ctrl-f4 closes in epsilon.
 
 SAVING FILES, SAVE AS
 The save button (or ctrl-s) saves to the associated file name if there is one;

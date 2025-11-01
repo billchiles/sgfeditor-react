@@ -1634,7 +1634,8 @@ export function flipCoordinates (coords: string[], size: number, labels: boolean
 /// up the first moves so that the user can start advancing through the moves.
 ///
 export async function createGameFromParsedGame 
-    (pgame: ParsedGame, curGame: Game, setGame: (g: Game) => void, getGames: () => Game[],
+    (pgame: ParsedGame, curGame: Game, setGame: (g: Game) => void, 
+    setLastCreatedGame: (g: Game | null) => void, getGames: () => Game[],
      setGames: (gs: Game[]) => void, getDefaultGame: () => Game | null, 
      setDefaultGame: (g: Game | null) => void):
     Promise<Game> {
@@ -1666,9 +1667,11 @@ export async function createGameFromParsedGame
   }
   // Komi
   const komi = "KM" in props ? props["KM"][0] : (handicap === 0 ? Game.DefaultKomi : "0.5");
-  // Create new game and clean up current game
+  //
+  // Create new game and clean up current game (throws after this point require model cleanup)
   const g = createGame(size, handicap, komi, allBlack, allWhite, 
                        {curGame, setGame, getGames, setGames, getDefaultGame, setDefaultGame});
+  setLastCreatedGame(g); // for catch in doOpenGetFile
   // Players
   if ("PB" in props) g.playerBlack = props["PB"][0];
   if ("PW" in props) g.playerWhite = props["PW"][0];
