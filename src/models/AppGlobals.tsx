@@ -909,7 +909,7 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
   let newGames: Game[] | null = games;
   let idx: number = "idx" in arg ? arg.idx : 0;
   if (curGame === defaultGame && ! defaultGame.isDirty) {
-    const defaultIdx = games.indexOf(defaultGame);
+    const defaultIdx = games.indexOf(defaultGame); // if curGame, must be at position 0
     if (idx > defaultIdx)
       idx --; // if arg.idx, then game to move is one location less now
     newGames = games.slice(0, defaultIdx).concat(games.slice(defaultIdx + 1));
@@ -1355,7 +1355,7 @@ async function removeGame
              bumpVersion?: () => void, bumpTreeLayoutVersion?: () => void }, 
      game: Game): Promise<void> {
   const curgame = deps.gameRef.current;
-  const games = deps.getGames();
+  let games = deps.getGames();
   if (game === curgame) {
     if (games.length > 1) { // Rotate game out of current position, use NoMatter since closing cmd
       await gotoNextGameCmd(deps, { type: CommandTypes.NoMatter });
@@ -1371,6 +1371,7 @@ async function removeGame
     }
   }
   // Either game is not current (no MRU fuss), or we just set up current game and games list.
+  games = deps.getGames();
   const idx = games.indexOf(game);
   deps.setGames(games.slice(0, idx).concat(games.slice(idx + 1)));
 }
