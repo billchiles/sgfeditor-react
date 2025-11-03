@@ -55,8 +55,8 @@ export class Game {
   setComments?: (text: string) => void; // set current comment
 
 
-  constructor(size : number = 19, handicap : number = 0, komi : string = "6.5", 
-              handicapStones: Move[] | null = null, allWhite : Move[] | null = null) {
+  constructor (size : number = 19, handicap : number = 0, komi : string = "6.5", 
+               handicapStones: Move[] | null = null, allWhite : Move[] | null = null) {
     this.size = size;
     this.board = new Board(size);
     this.firstMove = null;
@@ -68,6 +68,7 @@ export class Game {
     // Full pathname
     if (allWhite !== null)
       allWhite.forEach(m => {this.board.addStone(m)});
+    // todo AB/AW if allwhite not null also set next color to black, override handicap setting
     this.allWhiteMoves = allWhite
     this.filename = null;
     this.filebase = null;

@@ -38,6 +38,41 @@ React UI (App/AppContent/GoBoard)     Model (Game, Board, Move)     Bridges (I/O
   * Bridges: `fileBridge`, `appStorageBridge`, `hotkeys` (internally wired)
 * **GameProvider** owns this context and wires everything up once.
 
+### Game references and defaultGame 
+
+The app maintains `games`, `defaultGame`, and `lastCreatedGame` using **`useRef`** instead of `useState`.
+Because no visible UI element depends directly on the number or list of open games, reactivity is unnecessary and was removed to prevent redundant re-renders.  Also, command logic needs to see immediate changes to properly manage the games list, whether there is a default game, etc., and uses lastCreatedGame.  Changes can't be UI version tick based.
+
+```ts
+const gamesRef = useRef<Game[]>([]);
+const defaultGameRef = useRef<Game | null>(null);
+const lastCreatedGameRef = useRef<Game | null>(null);
+```
+
+Access is provided through helper lambdas rather than direct mutation:
+
+```ts
+const getGames = () => gamesRef.current;
+const setLastCreatedGame = (g: Game | null) => { lastCreatedGameRef.current = g; };
+const getLastCreatedGame = () => lastCreatedGameRef.current;
+const setDefaultGame = (g: Game | null) => { defaultGameRef.current = g; };
+const getDefaultGame = () => defaultGameRef.current;
+```
+
+#### Rationale
+
+* UI does not display a list of open games.
+* Internal logic (autosave, dirty-check, new-game flow) benefits from stable references without reactivity overhead.
+* Dependency arrays in hooks are simplified — `games`, `defaultGame`, etc. should be removed from dependency lists, since `useRef` objects themselves are stable.
+
+#### Implications
+
+* Functions like `startNewGameFlow` and `checkDirtySave` now use `defaultGameRef.current` instead of `defaultGame`.
+* Autosave timers, file activation handlers, and message dialogs read/write these refs directly.
+* The `gamesRef` array can be mutated (push/pop) without forcing React to re-render; if a visible UI ever depends on the game list, it should trigger its own state change or version bump.
+
+This change simplifies global state management and aligns with React best practices for mutable but non-visual state.
+
 ### Model (Pure-ish)
 
 * **Game**: overall game state (board size, players, handicap, comments, tree).
