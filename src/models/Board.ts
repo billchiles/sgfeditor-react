@@ -163,6 +163,15 @@ export class Move implements IMoveNext {
   parsedProperties: Record<string, string[]> | null;
   // parse-time taint that something's wrong with the SGF info for this node, or we don't handle it
   parsedBadNodeMessage: string | null;
+  isEditNode: boolean; // True when this Move represents an SGF node with AB/AW/AE properties (no B/W)
+  // EditNodes have three lists of stones for AB, AW, and AE.
+  addedBlackStones: Move[]; // never null
+  addedWhiteStones: Move[]; // never null
+  editDeletedStones: Move[]; // never null, only holds removed stones that existed before EditNode.
+  // Added black and white stones in the above lists have this set to true.
+  editNodeStone: boolean;
+  // If editNodeStone is true, editParent points at the EditNode that added this stone.
+  editParent: Move | null;
 
 
   constructor(row: number, column: number, color: StoneColor) {
@@ -180,6 +189,12 @@ export class Move implements IMoveNext {
     this.rendered = true; // Assume move rendered, parsed game code sets it to false.
     this.parsedProperties = null;
     this.parsedBadNodeMessage = null;
+    this.isEditNode = false;
+    this.addedBlackStones = [];
+    this.addedWhiteStones = [];
+    this.editDeletedStones = [];
+    this.editNodeStone = false;
+    this.editParent = null;
   }
 
   get isPass(): boolean {
@@ -193,10 +208,10 @@ export class Move implements IMoveNext {
     }
   }
 
-  addBranch (m: Move) {
-    if (this.branches === null) this.branches = [];
-    this.branches.push(m);
-  }
+  // addBranch (m: Move) {
+  //   if (this.branches === null) this.branches = [];
+  //   this.branches.push(m);
+  // }
 
   addAdornment (a: Adornment) {
     this.adornments.push(a);

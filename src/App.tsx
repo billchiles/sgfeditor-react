@@ -142,26 +142,28 @@ function AppContent({
         <div className={styles.panel}>
           <div className={styles.buttonRow}>
             <button className={styles.btn} 
-                    onClick={() => { appGlobals?.newGame(); }}
+                    onClick={() => { if (g?.editMode) g.exitEditMode();
+                                     appGlobals?.newGame(); }}
                     title="Alt-n">
               New
             </button>
             <button
               className={styles.btn}
-              onClick={() => { appGlobals?.openSgf(); }}
+              onClick={() => { if (g?.editMode) g.exitEditMode(); appGlobals?.openSgf(); }}
             >
               Open
             </button>
             <button
               className={styles.btn}
-              onClick={() => { appGlobals?.saveSgf(); }}
+              onClick={() => { if (g?.editMode) g.exitEditMode(); appGlobals?.saveSgf(); }}
               title="c-s"
             >
               Save
             </button>
             <button
               className={styles.btn}
-              onClick={() => { appGlobals?.saveSgfAs(); }}  // calls saveAsCommand via provider
+              onClick={() => { if (g?.editMode) g.exitEditMode();
+                               appGlobals?.saveSgfAs(); }}  // calls saveAsCommand via provider
               title="c-shift-s"
             >
               Save As…
@@ -175,7 +177,7 @@ function AppContent({
             </button> */}
             <button
               className={styles.btn}
-              onClick={() => { appGlobals?.showHelp(); }}
+              onClick={() => { if (g?.editMode) g.exitEditMode(); appGlobals?.showHelp(); }}
               title="F1"
             >
               Help
@@ -341,12 +343,14 @@ function MoveNavCommandButtons() {
   // home, prev, next, end buttons
   const onHome = useCallback(async () => {
     if (!game?.gotoStart || !bumpVersion) return;
+    if (game.editMode) game.exitEditMode();
     game.gotoStart(); // signals onchange
     // bumpVersion();
   }, [game, bumpVersion]);
   const onPrev = useCallback(async () => {
     if (!game?.unwindMove || !bumpVersion) return;
     if (!game.canUnwindMove?.()) return;
+    if (game.editMode) game.exitEditMode();
     game.unwindMove(); // unwindmove call onchange and always returns a move
   }, [game, bumpVersion]);
   const onNext = useCallback(async () => {
@@ -354,6 +358,7 @@ function MoveNavCommandButtons() {
     // fires what the UI would look like.  Can't invoke this command until all UI and game is loaded.
     if (!game?.replayMove || !bumpVersion) return; 
     if (!game.canReplayMove?.()) return;
+    if (game.editMode) game.exitEditMode();
     const m = await game.replayMove();
     if (m !== null) {
       bumpVersion(); // call this because captured stones changes board.
@@ -363,6 +368,7 @@ function MoveNavCommandButtons() {
   const onEnd = useCallback(async () => {
     if (!game?.gotoLastMove || !bumpVersion) return;
     if (!game.canReplayMove?.()) return;
+    if (game.editMode) game.exitEditMode();
     await game.gotoLastMove(); // signals onchange
   }, [game, bumpVersion]);
   // Branches reporting button
@@ -392,6 +398,16 @@ function MoveNavCommandButtons() {
         title={hasBranches ? "Current branch position / total branches" : "No branches"}
       >
         {branchesLabel}
+      </button>
+      <button
+        className={`${styles.btn} ${game && game.editMode ? styles.btnBranchActive : ""}`}
+        title="Toggle edit move mode (F2)"
+        onClick={() => {
+          if (! game) return;
+          game.toggleEditMode();
+        }}
+      >
+        AB/AW/AE
       </button>
     </>
   );

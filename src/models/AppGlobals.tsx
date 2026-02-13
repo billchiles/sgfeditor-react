@@ -570,6 +570,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     // Move focus to a safe, focusable container so arrows work immediately
     focusOnRoot();
+    // Don't exit edit move mode because esc useful to exit comment box, don't need more convenience
     return;
   // Save As 
   } else if (browser && control && alt && e.code === "KeyS" || //lower === "s") ||
@@ -578,23 +579,27 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
     (e as any).stopImmediatePropagation?.(); // stop any addins from granning keys
+    curgame.exitEditMode();
     void saveAsCommand(deps);
     return;
   // Save File
   } else if (control && ! shift && e.code === "KeyS") { //lower === "s"
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
+    curgame.exitEditMode();
     void doWriteGameCmd(deps);
     return;
   } else if (control && shift && alt && e.code === "KeyF") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
+    curgame.exitEditMode();
     void doWriteGameCmd(deps, true); // true = flipped
   // Open File
   } else if (e.ctrlKey && !e.shiftKey && lower === "o") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     e.stopPropagation();
+    curgame.exitEditMode();
     void doOpenButtonCmd(deps); // do not await inside keydown
     return;
   // Game Info
@@ -602,6 +607,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     e.stopPropagation();
+    curgame.exitEditMode();
     gameInfoCmd(curgame, deps.showGameInfo!);
     return;
   // New Game -- browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
@@ -609,6 +615,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     //deps.setLastCommand( {type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
+    curgame.exitEditMode();
     // startNewGameFlow sets last command type to NoMatter, but checkDirtySave() may change it
     void deps.startNewGameFlow(); // void explicitly ignores result
     return;
@@ -616,6 +623,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   } else if (! e.ctrlKey && e.shiftKey && ! e.altKey && lower === "w") {
     e.preventDefault();
     //e.stopPropagation(); Can't stop chrome from taking c-w, so using s-w
+    curgame.exitEditMode();
     gotoNextGameCmd(deps,deps.getLastCommand()); // sets last command type
     return;
   // F1: show Help dialog
@@ -623,7 +631,16 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
+    curgame.exitEditMode();
     deps.showHelp?.();
+    return;
+  // F2: toggle edit move mode (shift+F2 exits)
+  } else if (! control && ! alt && (e.code === "F2" || lower === "f2")) {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
+    e.preventDefault();
+    e.stopPropagation();
+    if (shift) curgame.exitEditMode();
+    else curgame.toggleEditMode();
     return;
   // c-F4: Close Game
   } else if ((control && (e.code === "F4" || lower === "f4")) ||
@@ -631,7 +648,8 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     //deps.setLastCommand({ type: CommandTypes.NoMatter }); set in closeGameCmd
     e.preventDefault();
     e.stopPropagation();
-    await closeGameCmd(deps.gameRef.current, deps);
+    curgame.exitEditMode();
+    await closeGameCmd(curgame, deps);
     return;
   }
   //
@@ -641,15 +659,16 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   if (isEditingTarget(e.target)) {
     return; // let the content-editable elt handle cursor movement
   }
+  // Unwinding moves
   if (lower === "arrowleft" && curgame.canUnwindMove()) {
+    curgame.exitEditMode();
     if (control) {
       // setup for loop so do not stop on current move if it has branches
-      const game = deps.gameRef.current;
-      let move = game.unwindMove();
-      let curmove = game.currentMove;
+      let move = curgame.unwindMove();
+      let curmove = curgame.currentMove;
       // find previous move with branches
       while (curmove !== null && curmove.branches === null) {
-        move = game.unwindMove();
+        move = curgame.unwindMove();
         curmove = move.previous;
       }
       //focusOnRoot(); see if I need this as ubiquitously as in dontnet.
@@ -663,6 +682,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   if (lower === "arrowright" && curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
+    curgame.exitEditMode();
     const m = await curgame.replayMove();
     if (m !== null) {
       deps.bumpVersion();
@@ -670,26 +690,30 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     }
     return;
   }
-  if (lower === "arrowup" && !e.ctrlKey) {
+  if (lower === "arrowup" && ! e.ctrlKey) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
+    curgame.exitEditMode();
     curgame.selectBranchUp(); // Calls onchange if needed.
     return;
   }
-  if (lower === "arrowdown" && !e.ctrlKey&& curgame.canReplayMove()) {
+  if (lower === "arrowdown" && ! e.ctrlKey&& curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
+    curgame.exitEditMode();
     curgame.selectBranchDown(); // Calls onchange if needed
     return;
   }
   if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && lower === "arrowup") {
     e.preventDefault(); // called before await so browser scrolling etc blocked immediately.
+    curgame.exitEditMode();
     await curgame.moveBranchUp();   // or curgame.()
     return;
   }
 
   if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && lower === "arrowdown") {
     e.preventDefault();
+    curgame.exitEditMode();
     await curgame.moveBranchDown(); // or curgame.moveBranchOrderDown()
     return;
   }
@@ -697,12 +721,14 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   if (lower === "home" && curgame.canUnwindMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
+    curgame.exitEditMode();
     curgame.gotoStart(); // signals onchange
     return;
   }
   if (lower === "end" && curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
+    curgame.exitEditMode();
     curgame.gotoLastMove(); // signals onchange, and don't await in handleKeyDown says gpt5
     return;
   }
@@ -712,8 +738,11 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
     if (curgame.canUnwindMove() &&
-      await curgame.message?.confirm?.("Cut current move from game tree?  OK, is yes.  Escape/Cancel is no."))
+        await curgame.message?.confirm?.(
+          "Cut current move from game tree?  OK, is yes.  Escape/Cancel is no.")) {
+      curgame.exitEditMode();
       curgame.cutMove(); // signals UI to update if makes changes
+    }
     return;
   }
   // Paste Move
@@ -721,9 +750,10 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
-    const g = deps.gameRef.current;
-    if (g.canPaste())
-      await g.pasteMove();
+    if (curgame.canPaste()) {
+      await curgame.pasteMove();
+      curgame.exitEditMode();
+    }
     else
       await curgame.message?.message("No cut move to paste at this time.");
     return;
@@ -736,8 +766,10 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     const games = deps.getGames();
     if (games.length >= 2) {
       const other = games.findIndex( (g) => curgame !== g && g.canPaste() );
-      if (other !== -1)
+      if (other !== -1) {
         await curgame.pasteMoveOtherGame(games[other]);
+        curgame.exitEditMode();
+      }
       else
         await curgame.message?.message("No other game has a cut move at this time.");
     } else

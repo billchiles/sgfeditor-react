@@ -153,6 +153,9 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     // Reset board before advancing to move.
     //const move = n!.node as Move; total fucking lie in typescript returns non-null for everthing.
     const g = app.getGame();
+    if (g.editMode) {
+      g.exitEditMode();
+    }
     if (g.currentMove !== null) { 
       g.gotoStart();
     } else
@@ -364,7 +367,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               )}
 
               {/* main disc */}
-              {cell.kind === TreeViewNodeKinds.Move && (
+              {cell.kind === TreeViewNodeKinds.Move && (cell.node as Move).isEditNode && (
                 <circle
                   cx={cx}
                   cy={cy}
@@ -373,6 +376,19 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
                   stroke={stroke}
                   strokeWidth={strokeWidth}
                 />
+              )}
+              {/* Edit node as letter 'E' */}
+              {cell.kind === TreeViewNodeKinds.Move && (cell.node as Move).isEditNode && (
+                <text
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={12}
+                  fontWeight={700}
+                >
+                  E
+                </text>
               )}
               {/* Start node as letter 'S' */}
               {cell.kind === TreeViewNodeKinds.StartBoard && (
@@ -388,14 +404,18 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
                 </text>
               )}
 
-              {/* Move number inside the stone (if available) 
-              {cell.kind !== TreeViewNodeKinds.StartBoard && cell.kind !== TreeViewNodeKinds.LineBend && (() => {
+              {/* Move number inside the stone if Move node 
+              {cell.kind !== TreeViewNodeKinds.StartBoard && 
+               cell.kind !== TreeViewNodeKinds.LineBend && (() => {
               */}
               {cell.kind === TreeViewNodeKinds.Move && (() => {
                 const n: any = cell.node;
                 let num = typeof n?.number === "number" ? n.number : null;
                 // unrendered moves have a number that is zero, all actual moves have number > 0
-                if (num === null || num === 0) num = cell.column;
+                // if (num === null || num === 0) num = cell.column;
+                if ((n as Move).isEditNode) return null;
+                // Moves come out of the parser numbered, so this should never fire.
+                if (num === null || num === 0) return null;
                 const numFill = cell.color === StoneColors.Black ? "#fff" : "#000";
                 const numStr = String(num);
                 const numFontSize = numStr.length >= 3 ? "10pt" : "12pt";

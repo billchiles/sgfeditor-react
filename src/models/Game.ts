@@ -41,6 +41,8 @@ export class Game {
   startAdornments: Adornment[] = [];
   miscGameInfo: Record<string, string[]> | null;
   private _cutMove: Move | null = null;
+  editMode: boolean; // global edit move mode (F2) for placing/removing setup stones (AB/AW/AE)
+  
 
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion(), keeping model / UI isolation.
@@ -86,6 +88,7 @@ export class Game {
     this.comments = "";
     this.startAdornments = [];
     this.miscGameInfo = null; // Invariant: only set if showing info dialog, then supercedes parsed
+    this.editMode = false;
   }
 
   static readonly DefaultKomi = "6.5";
@@ -382,7 +385,7 @@ export class Game {
   ///
   private findLiberty (row: number, col: number, color: StoneColor, visited?: boolean[][]): boolean {
     // lazily allocate visited matrix when not provided
-    if (!visited) {
+    if (! visited) {
       visited = Array.from({ length: this.board.size }, () => Array<boolean>(this.board.size).fill(false));
     }
     if (visited[row - 1][col - 1]) return false;
@@ -454,15 +457,29 @@ export class Game {
   unwindMove (): Move {
     const current = this.currentMove;
     debugAssert(current !== null, "Prev button should be disabled if there is no current move.")
-    if (!current.isPass) {
-      this.board.removeStone(current);
+    if (current.isEditNode) {
+      // Remove any stones added by this edit node and restore any stones it removed.
+      for (const m of current.addedBlackStones) this.board.removeStone(m);
+      for (const m of current.addedWhiteStones) this.board.removeStone(m);
+      // Add deletions last in case the edit node removed a stone and then added a different color.
+      for (const m of current.editDeletedStones) this.board.addStone(m);
+      // Edit nodes do not affect moveCount or nextColor.
+    } else {
+      if (! current.isPass) {
+        this.board.removeStone(current);
+      }
+      // Restore previously captured stones
+      current.deadStones.forEach((m) => this.board.addStone(m));
+      this.updatePrisoners(current.color, - current.deadStones.length);
+      this.nextColor = current.color; // it’s that player’s turn again
+      this.moveCount -= 1;
     }
-    // Restore previously captured stones
-    current.deadStones.forEach((m) => this.board.addStone(m));
-    this.updatePrisoners(current.color, - current.deadStones.length);
-    this.nextColor = current.color; // it’s that player’s turn again
-    this.moveCount -= 1;
     const previous = current.previous;
+    if (current.isEditNode && previous !== null) {
+      // After unwinding an edit node, restore counters from the previous real move.
+      this.moveCount = previous.number;
+      this.nextColor = oppositeColor(previous.color);
+    }
     // save current comment into current (origin), then display dest
     this.saveAndUpdateComments(current, previous);
     this.currentMove = previous;
@@ -597,7 +614,21 @@ gotoStart (): void {
   /// is the arg obj.
   ///
   private replayMoveUpdateModel (move: Move): [Move | null, boolean] {
+    // Edit/setup nodes do not place a move stone and do not change nextColor or moveCount.
+    if (move.isEditNode) {
+      let hadParseErr = false;
+      if (! move.rendered) {
+        const [retMove, err] = this.readyForRendering(move);
+        if (retMove === null) return [null, err];
+        hadParseErr = err;
+      } else {
+        this.applyEditNodeToBoard(move);
+      }
+      return [move, hadParseErr];
+    }
+    // Handling normal move (but it could be on a pasted branch and still have issues)
     let cleanup = false;
+    let conflictWithEditStone = false;
     if (! move.isPass) {
       // Normally there won't be a stone in place because we verify as we go that board locations are
       // empty, but if we're replaying a branch that was pasted, it may have a move that conflicts.
@@ -605,27 +636,77 @@ gotoStart (): void {
         this.board.addStone(move);
         cleanup = true;
       } else {
-        return [null, false]; // Error situation with no error message from here.
+        // If an edit node placed a stone here, keep that stone on the board and still allow
+        // replaying the move in the tree, but we ignore if the edit stone is the same color.
+        const existing = this.board.moveAt(move.row, move.column);
+        if (existing !== null && existing.editNodeStone) {
+          conflictWithEditStone = true;
+        } else {
+          return [null, false]; // Error situation with no error message from here.
+        }
       }
     }
+    // We've added a stone for move or ignored due to a conflicting stone, now check if first time
+    // we've seen this move and need to ready it for rendering.
     this.nextColor = oppositeColor(move.color);
     let hadParseErr = false;
-    if (!move.rendered) {
+    if (! move.rendered) {
       // Move just has parsedProperties and has never been displayed.
       const [retMove, err] = this.readyForRendering(move);
       if (retMove === null) { // Issue with parsed node, cannot go forward.
-        // Current move comes back if some branches had bad parsenodes, but good moves existed. 
+        // Current move comes back if some branches had bad parsenodes, but good moves existed.
+        // Now that we support AB/AW/AE nodes, "bad parsenodes" may no longer normally exist.
         if (cleanup) this.board.removeStone(move);
         return [null, err]; // There was an error, and we found an error msg.
       }
       hadParseErr = err;
     }
     this.moveCount += 1;
-    // Apply captures
-    for (const m of move.deadStones) this.board.removeStone(m);
-    this.updatePrisoners(move.color, move.deadStones.length);
+    // Apply captures unless we did not actually place the move stone due to an edit-node conflict.
+    if (! conflictWithEditStone) {
+      for (const m of move.deadStones) this.board.removeStone(m);
+      this.updatePrisoners(move.color, move.deadStones.length);
+    }
     return [move, hadParseErr];
   } //replayMoveUpdateModel()
+
+
+  /// applyEditNodeToBoard applies an edit/setup node's stone changes to the board model.
+  /// This is called every time we replay to an edit node.  When the node is first rendered
+  /// from parsedProperties, readyForRendering initializes the node's added/deleted lists.
+  ///
+  private applyEditNodeToBoard (move: Move): void {
+    debugAssert(move.isEditNode, "applyEditNodeToBoard requires an edit node.");
+    // Remove stones this edit node deleted (these were restored on unwind).
+    for (const m of move.editDeletedStones) {
+      if (this.board.hasStone(m.row, m.column)) {
+        this.board.removeStone(m);
+      }
+    }
+    // Add stones this edit node added.
+    for (const m of move.addedBlackStones) {
+      if (this.board.hasStone(m.row, m.column)) {
+        const existing = this.board.moveAt(m.row, m.column);
+        if (existing !== null && existing !== m) {
+          this.board.removeStone(existing);
+          if (!move.editDeletedStones.includes(existing))
+            move.editDeletedStones.push(existing);
+        }
+      }
+      this.board.addStone(m);
+    }
+    for (const m of move.addedWhiteStones) {
+      if (this.board.hasStone(m.row, m.column)) {
+        const existing = this.board.moveAt(m.row, m.column);
+        if (existing !== null && existing !== m) {
+          this.board.removeStone(existing);
+          if (!move.editDeletedStones.includes(existing))
+            move.editDeletedStones.push(existing);
+        }
+      }
+      this.board.addStone(m);
+    }
+  }
 
 
   /// readyForRendering puts move in a state as if it had been displayed on the screen before.
@@ -703,6 +784,189 @@ replayUnrenderedAdornments (move: Move): void {
     }
   }
 
+  
+  ///
+  //// Edit Move Mode (setup/edit nodes for AB/AW/AE)
+  ///
+
+  toggleEditMode (): void {
+    // Do not create an edit node until the user adds/removes a stone.
+    this.editMode = ! this.editMode;
+    this.onChange!(); // Need UI to update Edit button highlight
+  }
+
+  exitEditMode (): void {
+    var changed = this.editMode;
+    this.editMode = false;
+    if (changed) this.onChange!(); // Need UI to update Edit button highlight if mode changed
+  }
+
+  /// editStoneClick -- Entry point used by GoBoard when in edit move mode.
+  /// The current move may not be an isEditNode even if game.isEditMode is true.  Left click adds
+  /// a black stone, left-shift-click adds a white stone.  Clicking a stone removes the stone.
+  ///
+  async editStoneClick (row: number, col: number, color: StoneColor): Promise<void> {
+    if (this.currentMove === null) {
+      // Editing starting board
+      await this.editRootStoneClick(row, col, color);
+      this.isDirty = true;
+      this.onChange!();
+      //this.onTreeLayoutChange!();
+      return;
+    }
+    // Check if we already have an edit node move.
+    let editMove: Move = this.currentMove;
+    if (! editMove.isEditNode) {
+      // Lazy-create edit node on first stone change.
+      editMove = this.insertNewEditNode(editMove);
+    }
+    await this.applyEditStoneChange(editMove, row, col, color);
+    this.isDirty = true;
+    this.onChange!();
+    this.onTreeHighlightChange!();
+  }
+
+  private async editRootStoneClick (row: number, col: number, color: StoneColor): Promise<void> {
+    const existing = this.board.moveAt(row, col);
+    if (existing !== null) {
+      // Remove stone from root setup lists.
+      this.board.removeStone(existing);
+      if (existing.color === StoneColors.Black && this.handicapMoves !== null) {
+        this.handicapMoves = this.handicapMoves.filter((m) => !(m.row === row && m.column === col));
+      } else if (existing.color === StoneColors.White && this.allWhiteMoves !== null) {
+        this.allWhiteMoves = this.allWhiteMoves.filter((m) => !(m.row === row && m.column === col));
+      }
+      return;
+    }
+    // Add new stone to root setup and remove any captured stones or warn of filling last liberty
+    const m = new Move(row, col, color); // m.editNodeStone = true; ... ignored for root edit stones
+    this.board.addStone(m);
+    const captured = this.checkForKill(m); // populates m.deadStones
+    const noLiberty = ! this.findLiberty(m.row, m.column, m.color);
+    if (captured.length === 0 && noLiberty) {
+      // Added stone filled last liberty of a group.  Revert.
+      this.board.removeStone(m);
+      await this.message?.message("You cannot make a move that removes a group's last liberty.");
+      return;
+    }
+    // Now add stone to list since it stayed on the board (didn't fill its last liberty)
+    if (color === StoneColors.Black) {
+      if (this.handicapMoves === null) this.handicapMoves = [];
+      this.handicapMoves.push(m);
+    } else {
+      if (this.allWhiteMoves === null) this.allWhiteMoves = [];
+      this.allWhiteMoves.push(m);
+    }
+    // Remove "captured stones" appropriately.
+    for (const c of captured) {
+      this.board.removeStone(c);
+      if (c.color === StoneColors.Black && this.handicapMoves !== null)
+        this.handicapMoves = this.handicapMoves.filter((s) => s !== c);
+      // Need to test for color white in case the 'if' failed on handicapMoves being null
+      else if (c.color === StoneColors.White && this.allWhiteMoves !== null)
+        this.allWhiteMoves = this.allWhiteMoves.filter((s) => s !== c);
+    }
+  } // editRootStoneClick()
+
+  /// insertNewEditNode adds an isEditNode move after the current move.  We do this on the first
+  /// stone add or delete, and any adornment changes before the first stone change modify the
+  /// current move.  After the first stone change, adornment changes go to the isEditNode.
+  ///
+  private insertNewEditNode (curMove: Move): Move {
+    const editMove = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
+    // Keep isPass true (NoIndex) so replay logic does not try to add a stone for this node.
+    editMove.isEditNode = true;
+    editMove.rendered = true;
+    editMove.previous = curMove;
+    //editMove.number = 0;
+    // If there is any next move (including an edit node), always create a new next sibling branch.
+    if (curMove.next !== null) {
+      if (curMove.branches !== null) {
+        curMove.branches.push(editMove);
+      } else {
+        curMove.branches = [ curMove.next, editMove];
+      }
+    }
+    curMove.next = editMove;
+    this.currentMove = editMove;
+    // editStoneClick calls this.onChange() and this.onTreeHighlightChange(), and sets this.isDirty
+    this.onTreeLayoutChange!();
+    return editMove;
+  }
+
+  private async applyEditStoneChange (editMove: Move, row: number, col: number, 
+                                      color: StoneColor):  Promise<void> {
+    debugAssert(editMove.isEditNode, "applyEditStoneChange requires an edit node move.");
+    const existing = this.board.moveAt(row, col);
+    // If stone was added during this edit node, remove it from the added list.  Otherwise, treat
+    // as deleting a pre-existing stone and remember it for undo/navigation.
+    if (existing !== null) {
+      if (existing.editNodeStone && existing.editParent === editMove) {
+        this.board.removeStone(existing);
+        if (existing.color === StoneColors.Black) {
+          editMove.addedBlackStones = editMove.addedBlackStones.filter((m) => m !== existing);
+        } else {
+          editMove.addedWhiteStones = editMove.addedWhiteStones.filter((m) => m !== existing);
+        }
+      } else {
+        this.board.removeStone(existing);
+        if (! editMove.editDeletedStones.includes(existing))
+          editMove.editDeletedStones.push(existing);
+      }
+      return;
+    }
+    // Adding a stone ...
+    // Check for a pre-existing matching stone that was deleted and restore it.
+    const match = editMove.editDeletedStones.find(
+                    (m) => m.row === row && m.column === col && m.color === color);
+    const stone = (match !== undefined) ? match : new Move(row, col, color);
+    if (match !== undefined) {
+      editMove.editDeletedStones = editMove.editDeletedStones.filter((m) => m !== match);
+    } else {
+      // Setup stone as edit node stone and add to appropriate list for writing SGF.
+      stone.editNodeStone = true;
+      stone.editParent = editMove;
+      if (stone.color === StoneColors.Black) editMove.addedBlackStones.push(stone);
+      else editMove.addedWhiteStones.push(stone);
+    }
+    // Add stone and apply captures/illegality checks similar to makeMove, but do not update prisoners.
+    this.board.addStone(stone);
+    const killed = this.checkForKill(stone); // populates stone.deadStones
+    const noLiberty = ! this.findLiberty(stone.row, stone.column, stone.color);
+    if (killed.length === 0 && noLiberty) {
+      // Added stone filled last liberty of a group.  Revert.
+      this.board.removeStone(stone);
+      if (stone.editNodeStone && stone.editParent === editMove) {
+        if (stone.color === StoneColors.Black)
+          editMove.addedBlackStones = editMove.addedBlackStones.filter((m) => m !== stone);
+        else 
+          editMove.addedWhiteStones = editMove.addedWhiteStones.filter((m) => m !== stone);
+        //stone.editNodeStone = false;
+        stone.editParent = null; // Throwing it away, but clean up the pointer for good measure.
+      } else {
+        // It was a restored-from-deleted stone; put it back in deleted list.
+        editMove.editDeletedStones.push(stone);
+      }
+      await this.message?.message("You cannot make a move that removes a group's last liberty.");
+      return;
+    }
+    // Remove "captured stones" appropriately.
+    for (const m of killed) {
+      this.board.removeStone(m);
+      if (m.editNodeStone && m.editParent === editMove) {
+        // Captured an edit-session stone: remove it from added lists.
+        if (m.color === StoneColors.Black)
+          editMove.addedBlackStones = editMove.addedBlackStones.filter((s) => s !== m);
+        else 
+          editMove.addedWhiteStones = editMove.addedWhiteStones.filter((s) => s !== m);
+      } else {
+        // Remember previously existing moves so that unwinding restores them to the board.
+        if (! editMove.editDeletedStones.includes(m))
+          editMove.editDeletedStones.push(m);
+      }
+    }
+  } // applyEditStoneChange()
+  
   ///
   //// Generating SGF Representation of Games
   ///
@@ -1498,14 +1762,15 @@ replayUnrenderedAdornments (move: Move): void {
       await nextMoveDisplayError(other.message!.message, head);
       return null;
     }
-    const [resmove, err] = this.readyForRendering(head);
-    if (resmove === null || err) { // Issue with parsed properties, cannot go forward.
-    const msg = resmove !== null ? nextMoveGetMessage(resmove as Move) : "";
-      await this.message?.message?.(
-        "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
-        "in the SGF file.\nYou cannot play further down that branch... " + msg );
-      if (resmove === null) return null;
-    }
+    //XXX is this ok??????????????????
+    // const [resmove, err] = this.readyForRendering(head);
+    // if (resmove === null || err) { // Issue with parsed properties, cannot go forward.
+    //   const msg = resmove !== null ? nextMoveGetMessage(resmove as Move) : "";
+    //   await this.message?.message?.(
+    //     "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
+    //     "in the SGF file.\nYou cannot play further down that branch... " + msg );
+    //   if (resmove === null) return null;
+    // }
     return head;
   }
 
@@ -1823,8 +2088,8 @@ export function createGame (size : number, handicap : number, komi : string,
 }
 
 
-/// parsedPropertiesToMove takes an unrendered move with parsed properties and returns the Move or
-/// null if there were errors. This expecs next move colors and no random setup nodes (AB, AW, AE)
+/// liftPropertiesToMove takes an unrendered move with parsed properties and returns the Move or
+/// null if there were errors. This expects next move colors and no random setup nodes (AB, AW, AE)
 /// that place several stones. This takes the game board size for computing indexes because
 /// SGF files count rows from the top, but SGF programs display boards counting bottom up. This
 /// returns null for failure cases, setting the move's parsed error msg.

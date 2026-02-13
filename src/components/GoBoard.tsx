@@ -145,13 +145,23 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
       const curGame = appGlobals?.getGame ? appGlobals.getGame() : appGlobals?.game;
       debugAssert(curGame !== null, "Eh?! How can there be no game, but we're clicking?!");
       const curBoard = curGame.board;
-      // Modifier-clicks toggle adornments; plain click places a stone.
+      // Modifier-clicks toggle adornments and black/white stones in edit move mode.
       const ctrl = e.ctrlKey || e.getModifierState?.("Control");
       const shift = e.shiftKey || e.getModifierState?.("Shift");
       const alt = e.altKey || e.getModifierState?.("Alt");
       if (ctrl) { curGame.toggleAdornment(AdornmentKinds.Triangle, row, col); return; }
+      if (alt) { curGame.toggleAdornment(AdornmentKinds.Letter, row, col); return; }
+      // Edit move mode changes left click (black) and left shift click (white), and clicking on
+      // an occupied point removes that stone.
+      if (curGame.editMode) {
+        // square adornments need a new key binding in edit move move.
+        if (ctrl && shift) { curGame.toggleAdornment(AdornmentKinds.Square, row, col); return; }
+        const color = shift ? StoneColors.White : StoneColors.Black;
+        await curGame.editStoneClick(row, col, color); // editStoneClick bumps version
+        return;
+      }
+      // Didn't return due to edit move mode, so check for square adornment click
       else if (shift) { curGame.toggleAdornment(AdornmentKinds.Square, row, col); return; }
-      else if (alt) { curGame.toggleAdornment(AdornmentKinds.Letter, row, col); return; }
       /// Normal click...
       const curMove = curGame.currentMove;
       if (curMove !== null && curMove.row === row && curMove.column === col) {
@@ -294,7 +304,7 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
           // const isCurrent = current ? (current === m) ||
           //                             (current.row === m.row && current.column === m.column)
           //                           : false;
-          if (current === m) {
+          if (current === m && current.isEditNode === false) {
             const ringColor = m.color === StoneColors.Black ? "#fff" : "#000";
             circles.push(
               <circle key={`curmark-${x}-${y}`} cx={cx} cy={cy} r={markRadius} fill="none"
