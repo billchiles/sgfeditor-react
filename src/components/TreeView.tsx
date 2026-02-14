@@ -440,7 +440,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
                 const hasComment =
                   (typeof n?.comments === "string" && n.comments.length > 0) ||
                   (n?.properties?.C && n.properties.C[0] && n.properties.C[0].length > 0);
-                if (!hasComment) return null;
+                if (! hasComment) return null;
                 return (
                   <rect
                     x={cx - (NODE_R + HILITE_PAD)}

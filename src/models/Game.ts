@@ -64,10 +64,7 @@ export class Game {
     this.firstMove = null;
     this.currentMove = null;
     this.moveCount = 0;
-    this.initHandicapNextColor(handicap, handicapStones);
-    // this.handicap = handicap;
-    // this.handicapStones = handicapStones; // will be set if handicap > 0
-    // Full pathname
+    this.initHandicapNextColor(handicap, handicapStones, allWhite);
     if (allWhite !== null)
       allWhite.forEach(m => {this.board.addStone(m)});
     // todo AB/AW if allwhite not null also set next color to black, override handicap setting
@@ -100,7 +97,8 @@ export class Game {
   /// their number must agree. This sets nextColor based on handicap since sgfeditor ignores
   /// the PL property in root node.
   ///
-  private initHandicapNextColor (handicap: number, handicapStones: Move[] | null): void {
+  private initHandicapNextColor (handicap: number, handicapStones: Move[] | null,
+                                 allWhite: Move[] | null): void {
     this.handicap = handicap;
     if (handicap === 0) {
       // Even if no handicap, could have All Black (AB) property in game root, which we model as handicap.
@@ -114,7 +112,7 @@ export class Game {
       return;
     }
     // handicap > 0
-    this.nextColor = "white";
+    this.nextColor = (allWhite !== null) ? "black" : "white"; // if AW, ignore handicap to set color
     this.handicapMoves = handicapStones;
     if (handicapStones === null) {
       this.handicapMoves = [];
@@ -461,7 +459,9 @@ export class Game {
       // Remove any stones added by this edit node and restore any stones it removed.
       for (const m of current.addedBlackStones) this.board.removeStone(m);
       for (const m of current.addedWhiteStones) this.board.removeStone(m);
-      // Add deletions last in case the edit node removed a stone and then added a different color.
+      // Add deletions last in case the edit node removed a stone and then added a different color
+      // to the same location.  Adding first means the later removeStone would not restore the board
+      // to the pre-existing state.
       for (const m of current.editDeletedStones) this.board.addStone(m);
       // Edit nodes do not affect moveCount or nextColor.
     } else {
@@ -597,8 +597,22 @@ gotoStart (): void {
     // Finalize state at last move
     this.saveAndUpdateComments(saveOrig, current);
     this.currentMove = current;
-    this.moveCount = current.number;
-    this.nextColor = oppositeColor(current.color);
+    // this.moveCount = current.number;
+    // this.nextColor = oppositeColor(current.color);
+    if (current.isEditNode) {
+      const prev = current.previous;
+      if (prev !== null) {
+        this.moveCount = prev.number;
+        this.nextColor = oppositeColor(prev.color);
+      } else {
+        this.moveCount = 0;
+        this.nextColor = (this.allWhiteMoves !== null || this.handicapMoves === null) ? 
+                            StoneColors.Black : StoneColors.White;
+      }
+    } else {
+      this.moveCount = current.number;
+      this.nextColor = oppositeColor(current.color);
+    }
     this.onChange!(); 
     this.onTreeHighlightChange!();
   }
@@ -678,6 +692,10 @@ gotoStart (): void {
   private applyEditNodeToBoard (move: Move): void {
     debugAssert(move.isEditNode, "applyEditNodeToBoard requires an edit node.");
     // Remove stones this edit node deleted (these were restored on unwind).
+    // Delete stones first on replay to avoid an edit move session where the user removed a black
+    // stone and then clicked to add a white stones (which doesn't remove the pre-existing move from
+    // editDeletedStones).  We don't want to first add the white stone, then remove a stone from
+    // that location.
     for (const m of move.editDeletedStones) {
       if (this.board.hasStone(m.row, m.column)) {
         this.board.removeStone(m);
@@ -717,21 +735,113 @@ gotoStart (): void {
   /// makes the moves completely ready for display. This returns (same) move if we can advance
   /// the display, but this also returns if there was an error with a parsenode.
   ///
-  /// Callers must ensure calling parsePropertiesToMove on move before calling readyForRendering.
+  /// Callers must ensure calling liftPropertiesToMove on move before calling readyForRendering, and
+  /// callers must add move to the board and handle cleaning it up if this returns null.
   ///
   private readyForRendering (move: Move): [Move | null, boolean] {
-    if (! move.isPass)
-      this.checkForKill(move); // collects any move.deadStones
     debugAssert(move.parsedProperties !== null, "Only call readyForRendering on moves made from parsed nodes.");
+    if (move.isEditNode) {
+      // Initialize edit node stone lists from parsed properties.
+      // IMPORTANT: make AB/AW Move objects, but don't add them to the board before doing deletions.
+      const props = move.parsedProperties!;
+      const telemetryComment = (r: number, c: number, sgf: string, msg: string) => {
+        // Capture some telemetry for debugging or discovering bad SGF writers.
+        // SGF counts rows from the top, but goban display counts from bottom.
+        const rowStr = String(this.size + 1 - r);
+        const displayCol = modelCoordinateToDisplayLetter(c); 
+        move.comments += `\nSGF ${sgf} stone at ${displayCol}${rowStr}, but there's ${msg}.`;
+
+      }
+      if (props["AB"]) {
+        for (const coord of props["AB"]) {
+          const [r, c] = parsedToModelCoordinates(coord);
+          const existing = this.board.moveAt(r, c);
+          if (existing !== null) {
+            const s = new Move(r, c, StoneColors.Black);
+            s.editNodeStone = true;
+            s.editParent = move;
+            move.addedBlackStones.push(s);
+          }
+          else {
+            telemetryComment(r, c, "AB", "already a stone");
+            // Capture some telemetry for debugging or discovering bad SGF writers.
+            // SGF counts rows from the top, but goban display counts from bottom.
+            // const rowStr = String(this.size + 1 - r);
+            // const displayCol = modelCoordinateToDisplayLetter(c); 
+            // move.comments += `\nSGF AB stone at ${displayCol}${rowStr}, but there's already a stone.`;
+          }
+        }
+      }
+      if (props["AW"]) {
+        for (const coord of props["AW"]) {
+          const [r, c] = parsedToModelCoordinates(coord);
+          const existing = this.board.moveAt(r, c);
+          if (existing !== null) {
+            const s = new Move(r, c, StoneColors.White);
+            s.editNodeStone = true;
+            s.editParent = move;
+            move.addedWhiteStones.push(s);
+          }
+          else {
+            telemetryComment(r, c, "AW", "already a stone");
+          }
+        }
+      }
+      // AE removal is applied against the current board and captured into editDeletedStones so that
+      // rewinding/restoring works consistently.
+      if (props["AE"]) {
+        for (const coord of props["AE"]) {
+          const [r, c] = parsedToModelCoordinates(coord);
+          const existing = this.board.moveAt(r, c);
+          if (existing !== null) {
+            move.editDeletedStones.push(existing);
+          }
+          else { 
+            telemetryComment(r, c, "AE", "no stone");
+            // Capture some telemetry for debugging or discovering bad SGF writers.
+            // SGF counts rows from the top, but goban display counts from bottom.
+            // const rowStr = String(this.size + 1 - r);
+            // const displayCol = modelCoordinateToDisplayLetter(c); 
+            // move.comments += `\nSGF AE stone at ${displayCol}${rowStr}, but there's no stone.`;
+          }
+        }
+      }
+      // Apply added stones and any captures they create.
+      // for (const s of [...move.addedBlackStones, ...move.addedWhiteStones]) {
+      //   if (this.board.hasStone(s.row, s.column)) {
+      //     const existing = this.board.moveAt(s.row, s.column);
+      //     if (existing !== null) {
+      //       this.board.removeStone(existing);
+      //       move.editDeletedStones.push(existing);
+      //       // Captured this occurred for curiosity and debugging.
+      //       // SGF counts rows from the top, but goban display counts from bottom.
+      //       const rowStr = String(this.size + 1 - r);
+      //       const displayCol = modelCoordinateToDisplayLetter(c); 
+      //       move.comments += `\nSGF added stone at ${displayCol}${rowStr}, but there's already a stone.`;
+      //     }
+      //   }
+      //   this.board.addStone(s);
+      //   const killed = this.checkForKill(s);
+      //   for (const k of killed) {
+      //     this.board.removeStone(k);
+      //     move.editDeletedStones.push(k);
+      //   }
+      // }
+      //this.replayUnrenderedAdornments(move);
+    } else if (! move.isPass) {
+      this.checkForKill(move); // collects any move.deadStones
+    }
+    // Now lift parsed properties of any branches/next nodes.
     let hadErr = false;
     let oneGood = false; 
     if (move.branches !== null) {
       for (const m of move.branches) {
-        const hadErr = liftPropertiesToMove(m, this.board.size) === null;
+        hadErr = liftPropertiesToMove(m, this.board.size) === null;
         // No longer return if had error.  Some branches are viewable, but signal to callers had err.
         if (hadErr) continue;   
         oneGood = true;
-        m.number = this.moveCount + 2;
+        //m.number = this.moveCount + 2;
+        if (! m.isEditNode) m.number = this.moveCount + 2;
         // Check if parsed properties had setup node props in the middle of game nodes.
         // Need to set color because parsedPropertiesToMove has no access to Game.nextColor.
         if (m.comments.includes(SetupNodeCommentStart)) {
@@ -744,7 +854,8 @@ gotoStart (): void {
         return [null, true];
       }
       oneGood = true;
-      move.next.number = this.moveCount + 2;
+      //move.next.number = this.moveCount + 2;
+      if (! move.next.isEditNode) move.next.number = this.moveCount + 2;
       if (move.next.comments.includes(SetupNodeCommentStart)) {
         move.next.color = oppositeColor(move.color);
       }
@@ -1848,23 +1959,44 @@ if (mmove !== null) {
   return res;
 } // genPrintNodes()
 
-function genPrintNode(move: Move, flipped: boolean, size: number): PrintNode {
+function genPrintNode (move: Move, flipped: boolean, size: number): PrintNode {
   // Grab parsedProperties to preserve any properties we ignored from opening the file.
   const props: Record<string, string[]> = move.parsedProperties !== null
                                             ? copyProperties(move.parsedProperties!) 
                                             : {}
   // if rendered, move could be modified.  If not rendered, just use parsed data.
   if (move.rendered) { 
-    // Color
-    const coord = getParsedCoordinates(move, flipped, size);
-      if (move.color === StoneColors.Black) props["B"] = [coord];
-      else props["W"] = [coord]; // todo need to test for w, delete props, check for AB if I add that
+     // Edit/setup nodes write as AB/AW/AE (no B/W).
+    if (move.isEditNode) {
+      delete props["B"]; // really shouldn't be in props, but just in case
+      delete props["W"]; // same
+      if (move.addedBlackStones.length > 0) {
+        props["AB"] = move.addedBlackStones.map((m) => getParsedCoordinates(m, flipped, size));
+      } else {
+        delete props["AB"]; // could have parsed AB, so delete if no move.addedBlackStones
+      }
+      if (move.addedWhiteStones.length > 0) {
+        props["AW"] = move.addedWhiteStones.map((m) => getParsedCoordinates(m, flipped, size));
+      } else {
+        delete props["AW"]; // could have parsed AW, so delete if no move.addedWhiteStones
+      }
+      if (move.editDeletedStones.length > 0) {
+        props["AE"] = move.editDeletedStones.map((m) => getParsedCoordinates(m, flipped, size));
+      } else {
+        delete props["AE"]; // could have parsed AE, so delete if no move.editDeletedStones
+      }
+    } else { // normal move
+      // Color
+      const coord = getParsedCoordinates(move, flipped, size);
+        if (move.color === StoneColors.Black) props["B"] = [coord];
+        else props["W"] = [coord]; 
+    } // if isEditNode?
     // Comments 
     if (move.comments !== "") props["C"] = [move.comments];
-    else delete props["C"];
+    else delete props["C"]; // could have parsed C, so delete if no move.comments
     // Adornments
     genAdornmentProps(move.adornments, props, flipped, size);
-  } // rendered?
+  } // if rendered?
   return new PrintNode(props);
 } // genPrintNode()
 
@@ -2031,7 +2163,7 @@ function createGameFromParsedAW(props: Record<string, string[]>): Move[] {
 
 
 /// setupFirstParsedMove ensures the parsed game's first move (and all first moves of any branches)
-/// is ready to ready for readyForRendering to be called on it.  move is the first move of the game
+/// is ready for readyForRendering to be called on it.  move is the first move of the game
 /// (or first branch's first move), not a fake first parsed artifact to hold game properties.
 ///
 function setupFirstParsedMove (g : Game, move : Move) : Move | null {
@@ -2050,9 +2182,9 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
       }
       // Note, do not incr g.move_count since first move has not been rendered,
       // so if user clicks on the board, that should be number 1 too.
-      mv.number = g.moveCount + 1;
+      if (! mv.isEditNode) mv.number = g.moveCount + 1;
+      renumberMoves(mv);
       // Don't set previous point because these are first moves, so prev is null.
-      // moves.push(mv);
     }
     g.branches = g.parsedGame!.branches;
     debugAssert(g.branches[0] === move, "What?!  How did parsed moves not set next to branches[0]"); 
@@ -2065,7 +2197,8 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
       }
       // Note, do not incr g.move_count since first move has not been rendered,
       // so if user clicks, that should be number 1 too.
-      move.number = g.moveCount + 1;
+      if (! move.isEditNode) move.number = g.moveCount + 1;
+      renumberMoves(move);
     }
   }
   g.firstMove = move;
@@ -2116,16 +2249,23 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
       move.isPass = true;
   } else if (("AW" in move.parsedProperties!) || ("AB" in move.parsedProperties!) || 
              ("AE" in move.parsedProperties!)) {
-    // Don't handle setup nodes in the middle of game nodes.  This is a light hack to use
-    // a Pass node with a big comment and adornments to show what the setup node described.
-    setupNodeToPassNode(move, size);
-    // Set this to null to stop UI from popping dialogs that you cannot advance to
-    // this node.  We modify this when trying to ready moves for rendering, which we do
+    // // Don't handle setup nodes in the middle of game nodes.  This is a light hack to use
+    // // a Pass node with a big comment and adornments to show what the setup node described.
+    // setupNodeToPassNode(move, size);
+    // THE ABOVE 3 LINES ARE PRE-AB/AW/AE SUPPORT.  BELOW "WE modify parsedBadNodeMessage ..." IS OLD.
+    // Set parsedBadNodeMessage to null to stop UI from popping dialogs that you cannot advance to
+    // this node.  We modify parsedBadNodeMessage when trying to ready moves for rendering, which we do
     // when the user advances through the tree.  If the user clicks on a tree view node based
     // on the parsed node only, 1) they will still get the error dialog 2) the node doesn't
-    // show the green highlight that there is a comment.
+    // show the green highlight that there is a comment ().
     move.parsedBadNodeMessage = null;
-  } else {
+    // Setup/edit node: AB/AW/AE only (no B/W).  Set isPass true (NoIndex) so replay code doesn't 
+    // place a move-stone.
+    move.isEditNode = true;
+    move.isPass = true;
+    move.color = StoneColors.NoColor;
+    move.number = 0;
+  } else { // Probably never hit this branch, but could be really erroneous SGF file.
     move.parsedBadNodeMessage = "Next nodes must be moves, don't handle arbitrary nodes yet -- " +
                                 genPrintNode(move, false, size).nodeString(false);  
     return null;
@@ -2322,17 +2462,22 @@ function pasteNextMove (move: Move, cutMove: Move): void {
   move.next.number = move.number + 1; // moves further out are renumbered by pastMoveInsert
 }
 
-/// renumberMoves takes a move with the correct number assignment and walks
-/// the sub tree of moves to reassign new numbers to the nodes.  This is used
-/// by game.pasteMoveInsert
+/// renumberMoves takes a move with the correct number assignment (or an override number) and walks
+/// the sub tree of moves to reassign new numbers to Moves.  setupFirstParsedMove calls this after
+/// so that parsed-state Move objects have a number for tree view display.  game.pasteMoveInsert 
+/// also calls this to fix move numbers to their new locations.
 ///
-function renumberMoves (move: Move): void {
- let count = move.number;
+function renumberMoves (move: Move, countOverride: number | null = null): void {
+ let count = (countOverride !== null) ? countOverride : move.number;
  if (move.branches === null) {
    move = move.next!;
    while (move !== null) {
-     move.number = count + 1;
-     count += 1;
+     if (move.isEditNode) {
+       move.number = 0;
+     } else {
+       move.number = count + 1;
+       count += 1;
+     }
      if (move.branches === null)
        move = move.next!;
      else
@@ -2341,8 +2486,13 @@ function renumberMoves (move: Move): void {
   // Only get here when move is None, or we're recursing on branches.
   if (move !== null)
     for (const m of move.branches!) {
-      m.number = count;
-      renumberMoves(m);
+      if (m.isEditNode) {
+        m.number = 0;
+        renumberMoves(m, count);
+      } else {
+        m.number = count;
+        renumberMoves(m);
+      }
     }
   }
 } // renumberMoves()
