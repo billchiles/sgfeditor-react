@@ -507,7 +507,9 @@ gotoStart (): void {
   if (this.handicapMoves !== null) {
     for (const m of this.handicapMoves) this.board.addStone(m);
   }
-  this.nextColor = this.handicap === 0 ? StoneColors.Black : StoneColors.White;
+  // Same logic that initHandicapNextColor uses ...
+  this.nextColor = (this.allWhiteMoves !== null || this.handicapMoves === null) ? 
+                    StoneColors.Black : StoneColors.White; 
   this.currentMove = null;
   this.moveCount = 0;
   this.blackPrisoners = 0;
@@ -606,8 +608,9 @@ gotoStart (): void {
         this.nextColor = oppositeColor(prev.color);
       } else {
         this.moveCount = 0;
+        // Same logic that initHandicapNextColor uses ...
         this.nextColor = (this.allWhiteMoves !== null || this.handicapMoves === null) ? 
-                            StoneColors.Black : StoneColors.White;
+                            StoneColors.Black : StoneColors.White; 
       }
     } else {
       this.moveCount = current.number;
@@ -635,9 +638,8 @@ gotoStart (): void {
         const [retMove, err] = this.readyForRendering(move);
         if (retMove === null) return [null, err];
         hadParseErr = err;
-      } else {
-        this.applyEditNodeToBoard(move);
       }
+      this.applyEditNodeToBoard(move);
       return [move, hadParseErr];
     }
     // Handling normal move (but it could be on a pasted branch and still have issues)
@@ -756,7 +758,7 @@ gotoStart (): void {
         for (const coord of props["AB"]) {
           const [r, c] = parsedToModelCoordinates(coord);
           const existing = this.board.moveAt(r, c);
-          if (existing !== null) {
+          if (existing === null) {
             const s = new Move(r, c, StoneColors.Black);
             s.editNodeStone = true;
             s.editParent = move;
@@ -776,7 +778,7 @@ gotoStart (): void {
         for (const coord of props["AW"]) {
           const [r, c] = parsedToModelCoordinates(coord);
           const existing = this.board.moveAt(r, c);
-          if (existing !== null) {
+          if (existing === null) {
             const s = new Move(r, c, StoneColors.White);
             s.editNodeStone = true;
             s.editParent = move;
@@ -840,10 +842,13 @@ gotoStart (): void {
         // No longer return if had error.  Some branches are viewable, but signal to callers had err.
         if (hadErr) continue;   
         oneGood = true;
-        //m.number = this.moveCount + 2;
-        if (! m.isEditNode) m.number = this.moveCount + 2;
+        // For normal move nodes, next move number is current move number + 1.  Because m is one
+        // past move, and this.moveCount is one behind move during rendering for replay. 
+        // Edit nodes do not increase moveCount, so next move is + 1 in this case.  Lastly, we don't
+        // have to set m.number if it is an editNode because the default of 0 is good.
+        if (! m.isEditNode) m.number = this.moveCount + (move.isEditNode ? 1 : 2);
         // Check if parsed properties had setup node props in the middle of game nodes.
-        // Need to set color because parsedPropertiesToMove has no access to Game.nextColor.
+        // Need to set color because liftPropertiesToMove has no access to Game.nextColor.
         if (m.comments.includes(SetupNodeCommentStart)) {
           m.color = oppositeColor(move.color);
         }
@@ -854,8 +859,7 @@ gotoStart (): void {
         return [null, true];
       }
       oneGood = true;
-      //move.next.number = this.moveCount + 2;
-      if (! move.next.isEditNode) move.next.number = this.moveCount + 2;
+      if (! move.next.isEditNode) move.next.number = this.moveCount + (move.isEditNode ? 1 : 2);
       if (move.next.comments.includes(SetupNodeCommentStart)) {
         move.next.color = oppositeColor(move.color);
       }
@@ -2273,7 +2277,7 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
   if ("C" in move.parsedProperties!)
       move.comments = move.parsedProperties!["C"][0];
   return move;
-} //parsedPropertiesToMove()
+} //liftPropertiesToMove()
 
 
 

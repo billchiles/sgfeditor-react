@@ -143,9 +143,9 @@ This change simplifies global state management and aligns with React best practi
 
 * **Parser output invariant:** When a `Move` comes **directly from the parser**, it starts with
   `row = Board.NoIndex`, `column = Board.NoIndex`, `color = NoColor`, **`isPass = false`**, `rendered = false`, and `parsedProperties` set to the raw SGF props. The parser **does not** decide pass/non-pass. (This matches `parseNodeToMove` setting `move.isPass = false`.) 
-* **Authoritative pass decision:** Later, **`parsedPropertiesToMove(move, size)`** computes coordinates from `B[...]` or `W[...]`. If those coordinates are empty (`""` → `NoIndex`), **it sets `move.isPass = true`**; otherwise the move becomes a normal point move with concrete `row/column` and color. 
-* **Constructor vs parser:** The `Move` **constructor** keeps its current behavior for user-created moves: if you construct with `row/column = NoIndex`, the constructor sets `isPass = true`. This does **not** apply to parser-created moves because the parser immediately overrides `isPass` to `false` until `parsedPropertiesToMove` runs.
-* **Rationale:** This avoids rendering an “empty-coords” parser node as a pass by accident (e.g., pasted subtrees), and ensures the board advances only after `parsedPropertiesToMove` interprets `B`/`W` properly.
+* **Authoritative pass decision:** Later, **`liftPropertiesToMove(move, size)`** computes coordinates from `B[...]` or `W[...]`. If those coordinates are empty (`""` → `NoIndex`), **it sets `move.isPass = true`**; otherwise the move becomes a normal point move with concrete `row/column` and color. 
+* **Constructor vs parser:** The `Move` **constructor** keeps its current behavior for user-created moves: if you construct with `row/column = NoIndex`, the constructor sets `isPass = true`. This does **not** apply to parser-created moves because the parser immediately overrides `isPass` to `false` until `liftPropertiesToMove` runs.
+* **Rationale:** This avoids rendering an “empty-coords” parser node as a pass by accident (e.g., pasted subtrees), and ensures the board advances only after `liftPropertiesToMove` interprets `B`/`W` properly.
 
 
 

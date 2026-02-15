@@ -220,7 +220,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   //
   // COMMENTS AND MESSAGING from the model
   // Enable first game to access comments and messaging/confirming UI.
-  // These execute every render but store teh same functions every time.
+  // These execute every render but store the same functions every time.
   gameRef.current.getComments = getComment;
   gameRef.current.setComments = setComment;
   gameRef.current.message = browserMessageOrQuery;

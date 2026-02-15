@@ -186,7 +186,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
 
   function gotoGameTreeMove(move: Move): boolean {
     // Hack attempt to abort tree clicks on bad parse nodes.  sgfparser.ts parseNodeToMove() didn't
-    // store msg, game.ts parsedPropertiesToMove adds bad node msg, but this is a hack to see a 
+    // store msg, game.ts liftPropertiesToMove adds bad node msg, but this is a hack to see a 
     // sentinel taint (don't need to compare string's contents), then disallow clicking on bad
     // moves for bad parse nodes in the game tree.
     if (move.parsedBadNodeMessage !== null) 
@@ -367,7 +367,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               )}
 
               {/* main disc */}
-              {cell.kind === TreeViewNodeKinds.Move && (cell.node as Move).isEditNode && (
+              {cell.kind === TreeViewNodeKinds.Move && ! (cell.node as Move).isEditNode && (
                 <circle
                   cx={cx}
                   cy={cy}

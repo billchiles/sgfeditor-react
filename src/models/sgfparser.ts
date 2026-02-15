@@ -191,7 +191,7 @@ export function parseNodeToMove (lexer: Lexer): Move {
     const id = lexer.getPropertyId();
     if (id === null) {
       if (! ("B" in props || "W" in props)) {
-        // game.cs parsedPropertiesToMove overwrites this
+        // game.cs liftPropertiesToMove overwrites this
         move.parsedBadNodeMessage = "no B or W; marking as setup/odd node";
       }
       // Expected return from here due to no properties or syntax at end of properties (id == null)
