@@ -190,7 +190,8 @@ export function parseNodeToMove (lexer: Lexer): Move {
     const id = lexer.getPropertyId();
     if (id === null) {
       if (! ("B" in props || "W" in props)) {
-        // game.cs liftPropertiesToMove overwrites this
+        // game.cs liftPropertiesToMove overwrites this and sets up move as isEditNode
+        // Now that there is support for edit / setup nodes in the game tree, we could clean this up.
         move.parsedBadNodeMessage = parserSignalBadMsg;
       }
       // Expected return from here due to no properties or syntax at end of properties (id == null)

@@ -169,8 +169,8 @@ export class Move implements IMoveNext {
   addedWhiteStones: Move[]; // never null
   editDeletedStones: Move[]; // never null, only holds removed stones that existed before EditNode.
   // Added black and white stones in the above lists have this set to true.
-  editNodeStone: boolean;
-  // If editNodeStone is true, editParent points at the EditNode that added this stone.
+  isEditNodeStone: boolean;
+  // If iseditNodeStone is true, editParent points at the EditNode that added this stone.
   editParent: Move | null;
 
 
@@ -193,7 +193,7 @@ export class Move implements IMoveNext {
     this.addedBlackStones = [];
     this.addedWhiteStones = [];
     this.editDeletedStones = [];
-    this.editNodeStone = false;
+    this.isEditNodeStone = false;
     this.editParent = null;
   }
 

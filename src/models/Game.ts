@@ -581,6 +581,12 @@ gotoStart (): void {
         await nextMoveDisplayError(this.message!.message, current);
       }
     }
+    // let temp = current;
+    // while (temp != null) {
+    //   console.log(`Move: ${temp.number}, edit: ${temp.isEditNode}, x,y: ${temp.row},${temp.column}` +
+    //               `msg: ${temp.parsedBadNodeMessage}, rendered: ${temp.rendered}`);
+    //   temp = temp.next;
+    // }
     next = current.next;
     // Walk to last move ...
     while (next !== null) {
@@ -588,11 +594,10 @@ gotoStart (): void {
       // const [ret, err] = this.replayMoveUpdateModel(next);
       // if (!ret) {
       //   if (err) this.message?.info?.("Encountered an SGF parse issue while advancing.");
-      if (this.replayMoveUpdateModel(next) === null) {
+      if (this.replayMoveUpdateModel(next)[0] === null) {
         await nextMoveDisplayError(this.message!.message, next); // ! must be bound if running cmds.
         break;
       }
-      //this.mainWin.AddNextStoneNoCurrent(next);
       current = next;
       next = current.next;
     }
@@ -655,7 +660,7 @@ gotoStart (): void {
         // If an edit node placed a stone here, keep that stone on the board and still allow
         // replaying the move in the tree, but we ignore if the edit stone is the same color.
         const existing = this.board.moveAt(move.row, move.column);
-        if (existing !== null && existing.editNodeStone) {
+        if (existing !== null && existing.isEditNodeStone) {
           conflictWithEditStone = true;
         } else {
           return [null, false]; // Error situation with no error message from here.
@@ -760,7 +765,7 @@ gotoStart (): void {
           const existing = this.board.moveAt(r, c);
           if (existing === null) {
             const s = new Move(r, c, StoneColors.Black);
-            s.editNodeStone = true;
+            s.isEditNodeStone = true;
             s.editParent = move;
             move.addedBlackStones.push(s);
           }
@@ -780,7 +785,7 @@ gotoStart (): void {
           const existing = this.board.moveAt(r, c);
           if (existing === null) {
             const s = new Move(r, c, StoneColors.White);
-            s.editNodeStone = true;
+            s.isEditNodeStone = true;
             s.editParent = move;
             move.addedWhiteStones.push(s);
           }
@@ -954,7 +959,7 @@ replayUnrenderedAdornments (move: Move): void {
       return;
     }
     // Add new stone to root setup and remove any captured stones or warn of filling last liberty
-    const m = new Move(row, col, color); // m.editNodeStone = true; ... ignored for root edit stones
+    const m = new Move(row, col, color); // m.iseditNodeStone = true; ... ignored for root edit stones
     this.board.addStone(m);
     const captured = this.checkForKill(m); // populates m.deadStones
     const noLiberty = ! this.findLiberty(m.row, m.column, m.color);
@@ -1016,7 +1021,7 @@ replayUnrenderedAdornments (move: Move): void {
     // If stone was added during this edit node, remove it from the added list.  Otherwise, treat
     // as deleting a pre-existing stone and remember it for undo/navigation.
     if (existing !== null) {
-      if (existing.editNodeStone && existing.editParent === editMove) {
+      if (existing.isEditNodeStone && existing.editParent === editMove) {
         this.board.removeStone(existing);
         if (existing.color === StoneColors.Black) {
           editMove.addedBlackStones = editMove.addedBlackStones.filter((m) => m !== existing);
@@ -1039,7 +1044,7 @@ replayUnrenderedAdornments (move: Move): void {
       editMove.editDeletedStones = editMove.editDeletedStones.filter((m) => m !== match);
     } else {
       // Setup stone as edit node stone and add to appropriate list for writing SGF.
-      stone.editNodeStone = true;
+      stone.isEditNodeStone = true;
       stone.editParent = editMove;
       if (stone.color === StoneColors.Black) editMove.addedBlackStones.push(stone);
       else editMove.addedWhiteStones.push(stone);
@@ -1051,12 +1056,12 @@ replayUnrenderedAdornments (move: Move): void {
     if (killed.length === 0 && noLiberty) {
       // Added stone filled last liberty of a group.  Revert.
       this.board.removeStone(stone);
-      if (stone.editNodeStone && stone.editParent === editMove) {
+      if (stone.isEditNodeStone && stone.editParent === editMove) {
         if (stone.color === StoneColors.Black)
           editMove.addedBlackStones = editMove.addedBlackStones.filter((m) => m !== stone);
         else 
           editMove.addedWhiteStones = editMove.addedWhiteStones.filter((m) => m !== stone);
-        //stone.editNodeStone = false;
+        //stone.iseditNodeStone = false;
         stone.editParent = null; // Throwing it away, but clean up the pointer for good measure.
       } else {
         // It was a restored-from-deleted stone; put it back in deleted list.
@@ -1068,7 +1073,7 @@ replayUnrenderedAdornments (move: Move): void {
     // Remove "captured stones" appropriately.
     for (const m of killed) {
       this.board.removeStone(m);
-      if (m.editNodeStone && m.editParent === editMove) {
+      if (m.isEditNodeStone && m.editParent === editMove) {
         // Captured an edit-session stone: remove it from added lists.
         if (m.color === StoneColors.Black)
           editMove.addedBlackStones = editMove.addedBlackStones.filter((s) => s !== m);
@@ -1637,7 +1642,7 @@ replayUnrenderedAdornments (move: Move): void {
           this.setCurrentBranch(0);
           next = curMove.next; // Update next, now that curMove is updated.
         }
-        if (this.replayMoveUpdateModel(next!) === null) {
+        if (this.replayMoveUpdateModel(next!)[0] === null) {
           // had issue with rendering parsed node or conflicting location for pasted move
           this.currentMove = curMove;  // Restore state to clean up.
           return false;
@@ -1653,7 +1658,7 @@ replayUnrenderedAdornments (move: Move): void {
       this.currentMove = curMove; // Needs to be right for SetCurrentBranch.
       this.setCurrentBranch(branch);
       next = curMove.next; // Update next, now that curMove is updated.
-      if (this.replayMoveUpdateModel(next!) === null)
+      if (this.replayMoveUpdateModel(next!)[0] === null)
         return false;
       curMove = next!; // until we get to the end, there is always a next
       next = curMove.next;
@@ -2486,7 +2491,8 @@ function renumberMoves (move: Move, countOverride: number | null = null): void {
  if (move.branches === null) {
    move = move.next!;
    while (move !== null) {
-     if (move.isEditNode) {
+    // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
+     if (move.isEditNode || (! move.rendered && move.parsedBadNodeMessage === parserSignalBadMsg)) {
        move.number = 0;
      } else {
        move.number = count + 1;
@@ -2500,7 +2506,8 @@ function renumberMoves (move: Move, countOverride: number | null = null): void {
   // Only get here when move is None, or we're recursing on branches.
   if (move !== null)
     for (const m of move.branches!) {
-      if (m.isEditNode) {
+      // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
+      if (m.isEditNode || (! move.rendered && move.parsedBadNodeMessage === parserSignalBadMsg)) {
         m.number = 0;
         renumberMoves(m, count);
       } else {
