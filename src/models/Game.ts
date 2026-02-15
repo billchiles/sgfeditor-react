@@ -750,91 +750,7 @@ gotoStart (): void {
     if (move.isEditNode) {
       // Initialize edit node stone lists from parsed properties.
       // IMPORTANT: make AB/AW Move objects, but don't add them to the board before doing deletions.
-      const props = move.parsedProperties!;
-      const telemetryComment = (r: number, c: number, sgf: string, msg: string) => {
-        // Capture some telemetry for debugging or discovering bad SGF writers.
-        // SGF counts rows from the top, but goban display counts from bottom.
-        const rowStr = String(this.size + 1 - r);
-        const displayCol = modelCoordinateToDisplayLetter(c); 
-        move.comments += `\nSGF ${sgf} stone at ${displayCol}${rowStr}, but there's ${msg}.`;
-
-      }
-      if (props["AB"]) {
-        for (const coord of props["AB"]) {
-          const [r, c] = parsedToModelCoordinates(coord);
-          const existing = this.board.moveAt(r, c);
-          if (existing === null) {
-            const s = new Move(r, c, StoneColors.Black);
-            s.isEditNodeStone = true;
-            s.editParent = move;
-            move.addedBlackStones.push(s);
-          }
-          else {
-            telemetryComment(r, c, "AB", "already a stone");
-            // Capture some telemetry for debugging or discovering bad SGF writers.
-            // SGF counts rows from the top, but goban display counts from bottom.
-            // const rowStr = String(this.size + 1 - r);
-            // const displayCol = modelCoordinateToDisplayLetter(c); 
-            // move.comments += `\nSGF AB stone at ${displayCol}${rowStr}, but there's already a stone.`;
-          }
-        }
-      }
-      if (props["AW"]) {
-        for (const coord of props["AW"]) {
-          const [r, c] = parsedToModelCoordinates(coord);
-          const existing = this.board.moveAt(r, c);
-          if (existing === null) {
-            const s = new Move(r, c, StoneColors.White);
-            s.isEditNodeStone = true;
-            s.editParent = move;
-            move.addedWhiteStones.push(s);
-          }
-          else {
-            telemetryComment(r, c, "AW", "already a stone");
-          }
-        }
-      }
-      // AE removal is applied against the current board and captured into editDeletedStones so that
-      // rewinding/restoring works consistently.
-      if (props["AE"]) {
-        for (const coord of props["AE"]) {
-          const [r, c] = parsedToModelCoordinates(coord);
-          const existing = this.board.moveAt(r, c);
-          if (existing !== null) {
-            move.editDeletedStones.push(existing);
-          }
-          else { 
-            telemetryComment(r, c, "AE", "no stone");
-            // Capture some telemetry for debugging or discovering bad SGF writers.
-            // SGF counts rows from the top, but goban display counts from bottom.
-            // const rowStr = String(this.size + 1 - r);
-            // const displayCol = modelCoordinateToDisplayLetter(c); 
-            // move.comments += `\nSGF AE stone at ${displayCol}${rowStr}, but there's no stone.`;
-          }
-        }
-      }
-      // Apply added stones and any captures they create.
-      // for (const s of [...move.addedBlackStones, ...move.addedWhiteStones]) {
-      //   if (this.board.hasStone(s.row, s.column)) {
-      //     const existing = this.board.moveAt(s.row, s.column);
-      //     if (existing !== null) {
-      //       this.board.removeStone(existing);
-      //       move.editDeletedStones.push(existing);
-      //       // Captured this occurred for curiosity and debugging.
-      //       // SGF counts rows from the top, but goban display counts from bottom.
-      //       const rowStr = String(this.size + 1 - r);
-      //       const displayCol = modelCoordinateToDisplayLetter(c); 
-      //       move.comments += `\nSGF added stone at ${displayCol}${rowStr}, but there's already a stone.`;
-      //     }
-      //   }
-      //   this.board.addStone(s);
-      //   const killed = this.checkForKill(s);
-      //   for (const k of killed) {
-      //     this.board.removeStone(k);
-      //     move.editDeletedStones.push(k);
-      //   }
-      // }
-      //this.replayUnrenderedAdornments(move);
+      this.readyUnrenderedEditNode(move);
     } else if (! move.isPass) {
       this.checkForKill(move); // collects any move.deadStones
     }
@@ -871,18 +787,76 @@ gotoStart (): void {
     } else {
       oneGood = true; // no branches, no next move to render, good to go
     }
-    this.replayUnrenderedAdornments(move);
+    this.readyUnrenderedAdornments(move);
     // move.number = this.moveCount + 1;
     move.rendered = true;
     return [oneGood ? move : null, hadErr];
   } // readyForRendering()
 
+  /// readyUnrenderedEditNode is just a helper for readyForRendering.  It fills in move's edit node
+  /// lists with Move object so later we can replayMove(move).
+  ///
+  private readyUnrenderedEditNode(move: Move) {
+    const props = move.parsedProperties!;
+    const telemetryComment = (r: number, c: number, sgf: string, msg: string) => {
+      // Capture some telemetry for debugging or discovering bad SGF writers.
+      // SGF counts rows from the top, but goban display counts from bottom.
+      const rowStr = String(this.size + 1 - r);
+      const displayCol = modelCoordinateToDisplayLetter(c);
+      move.comments += `\nSGF ${sgf} stone at ${displayCol}${rowStr}, but there's ${msg}.`;
 
-/// replayUnrenderedAdornments is just a helper for _replay_move_update_model.  This does not 
+    };
+    if (props["AB"]) {
+      for (const coord of props["AB"]) {
+        const [r, c] = parsedToModelCoordinates(coord);
+        const existing = this.board.moveAt(r, c);
+        if (existing === null) {
+          const s = new Move(r, c, StoneColors.Black);
+          s.isEditNodeStone = true;
+          s.editParent = move;
+          move.addedBlackStones.push(s);
+        }
+        else {
+          telemetryComment(r, c, "AB", "already a stone");
+        }
+      }
+    }
+    if (props["AW"]) {
+      for (const coord of props["AW"]) {
+        const [r, c] = parsedToModelCoordinates(coord);
+        const existing = this.board.moveAt(r, c);
+        if (existing === null) {
+          const s = new Move(r, c, StoneColors.White);
+          s.isEditNodeStone = true;
+          s.editParent = move;
+          move.addedWhiteStones.push(s);
+        }
+        else {
+          telemetryComment(r, c, "AW", "already a stone");
+        }
+      }
+    }
+    // AE removal is applied against the current board and captured into editDeletedStones so that
+    // rewinding/restoring works consistently.
+    if (props["AE"]) {
+      for (const coord of props["AE"]) {
+        const [r, c] = parsedToModelCoordinates(coord);
+        const existing = this.board.moveAt(r, c);
+        if (existing !== null) {
+          move.editDeletedStones.push(existing);
+        }
+        else {
+          telemetryComment(r, c, "AE", "no stone");
+        }
+      }
+    }
+  }
+
+/// readyUnrenderedAdornments is just a helper for _replay_move_update_model.  This does not 
 /// need to check add_adornment for a None result since we're trusting the file was written correctly,
 /// or it doesn't matter if there are dup'ed letters.  Move must have parsedProperties non-null.
 ///
-replayUnrenderedAdornments (move: Move): void {
+readyUnrenderedAdornments (move: Move): void {
     const props = move.parsedProperties!;
     if (props["TR"]) { // Triangles: TR[aa][bb]...
       for (const coord of props["TR"]) {
@@ -2427,7 +2401,8 @@ async function nextMoveDisplayError (callback: (msg: string) => Promise<void> | 
 }
 
 /// nextMoveGetMessage digs into move and next moves to see if rendering parse nodes put
-/// an error msg into one of these nodes, then returns the string or null.
+/// an error msg into one of these nodes, then returns the string or null.  STring literals here
+/// must match taintmsg and taintmsg2.
 ///
 export function nextMoveGetMessage (move: Move): string | null {
   if (move.parsedBadNodeMessage !== null) return move.parsedBadNodeMessage;
