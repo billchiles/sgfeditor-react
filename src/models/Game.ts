@@ -1878,6 +1878,10 @@ replayUnrenderedAdornments (move: Move): void {
       return null;
     }
     //XXX is this ok??????????????????
+    // Commented this out when we realized we're calling readyForRendering without ever placing the
+    // stone on the board.  We could forgo checking here, maybe it is a self capture or captures
+    // stones, but we'll find out when we go to replay it.  Or we can add head, call the function,
+    // the remove it.
     // const [resmove, err] = this.readyForRendering(head);
     // if (resmove === null || err) { // Issue with parsed properties, cannot go forward.
     //   const msg = resmove !== null ? nextMoveGetMessage(resmove as Move) : "";
@@ -2392,7 +2396,13 @@ export function setupNodeDisplayCoords(props: Record<string, string[]>, newComme
   return newComment;
 }
 
-
+/// With support for AB/AW/AE nodes, we should never encounter the parserSignalBadMsg.  Now we check
+/// in nextMoveDisplayError if we got back the signal bad msg, ignore it if we do, and emit the msg
+/// users used to get because they probably pasted a move that conflicts with the board.
+export const parserSignalBadMsg = "no B or W; marking as setup/odd node";
+/// The next two string literals are used in nextMoveGetMessage.
+const taintmsg = "Rendering next move's branch nodes ...\n" + parserSignalBadMsg;
+const taintmsg2 = "Rendering the next move's next move ...\n" + parserSignalBadMsg;
 
 /// NextMoveDisplayError figures out the error msg for the user when trying to replay
 /// or render next moves.  It gives a general message if there is nothing specific.
@@ -2400,7 +2410,7 @@ export function setupNodeDisplayCoords(props: Record<string, string[]>, newComme
 async function nextMoveDisplayError (callback: (msg: string) => Promise<void> | void,
                                      move: Move): Promise<void> {
   const msg = nextMoveGetMessage(move);
-  if (msg !== null) {
+  if (msg !== null && msg != taintmsg && msg != taintmsg2) {
     await callback(msg);
   } else {
     await callback(

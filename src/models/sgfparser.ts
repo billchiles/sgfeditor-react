@@ -5,8 +5,7 @@
 /// nodes could represent setup for a problem.
 ///
 import { StoneColors, Board, Move } from "./Board";
-// import { type StoneColor, type IMoveNext } from "./Board";
-
+import { parserSignalBadMsg } from "./Game";
 
 export class ParsedGame {
   properties: Record<string, string[]> = {}; // Always have parsed root properties
@@ -192,7 +191,7 @@ export function parseNodeToMove (lexer: Lexer): Move {
     if (id === null) {
       if (! ("B" in props || "W" in props)) {
         // game.cs liftPropertiesToMove overwrites this
-        move.parsedBadNodeMessage = "no B or W; marking as setup/odd node";
+        move.parsedBadNodeMessage = parserSignalBadMsg;
       }
       // Expected return from here due to no properties or syntax at end of properties (id == null)
       move.parsedProperties = props;
