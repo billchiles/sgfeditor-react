@@ -720,8 +720,10 @@ gotoStart (): void {
       if (this.board.hasStone(m.row, m.column)) {
         const existing = this.board.moveAt(m.row, m.column);
         if (existing !== null && existing !== m) {
+          // This only happens if the user pastes an edit node after moves that weren't on the board
+          // when the user made the edit node.
           this.board.removeStone(existing);
-          if (!move.editDeletedStones.includes(existing))
+          if (! move.editDeletedStones.includes(existing))
             move.editDeletedStones.push(existing);
         }
       }
@@ -731,8 +733,10 @@ gotoStart (): void {
       if (this.board.hasStone(m.row, m.column)) {
         const existing = this.board.moveAt(m.row, m.column);
         if (existing !== null && existing !== m) {
+          // This only happens if the user pastes an edit node after moves that weren't on the board
+          // when the user made the edit node.
           this.board.removeStone(existing);
-          if (!move.editDeletedStones.includes(existing))
+          if (! move.editDeletedStones.includes(existing))
             move.editDeletedStones.push(existing);
         }
       }
@@ -781,9 +785,11 @@ gotoStart (): void {
                     `readyForRendering move numbering mismatch. expected ${expectedNumber}, got ${m.number}`);
         // Check if parsed properties had setup node props in the middle of game nodes.
         // Need to set color because liftPropertiesToMove has no access to Game.nextColor.
-        if (m.comments.includes(SetupNodeCommentStart)) {
-          m.color = oppositeColor(move.color);
-        }
+        // LEGACY NOTE: old setup-node-as-pass fallback used a comment prefix marker and then
+        // fixed move color here.  Edit/setup nodes now render natively, so this stays retired.
+        // if (m.comments.includes(SetupNodeCommentStart)) {
+        //   m.color = oppositeColor(move.color);
+        // }
       }
       if (!oneGood) return [null, true];
     } else if (move.next !== null) {
@@ -795,9 +801,11 @@ gotoStart (): void {
       debugAssert(move.isEditNode ? move.next.number === 0 : move.next.number === expectedNumber,
                   `readyForRendering move numbering mismatch. expected ${expectedNumber}, ` +
                   `got ${move.next.number}`);
-      if (move.next.comments.includes(SetupNodeCommentStart)) {
-        move.next.color = oppositeColor(move.color);
-      }
+      // LEGACY NOTE: old setup-node-as-pass fallback used a comment prefix marker and then
+      // fixed move color here.  Edit/setup nodes now render natively, so this stays retired.
+      // if (move.next.comments.includes(SetupNodeCommentStart)) {
+      //   move.next.color = oppositeColor(move.color);
+      // }
     } else {
       oneGood = true; // no branches, no next move to render, good to go
     }
@@ -904,7 +912,7 @@ readyUnrenderedAdornments (move: Move): void {
   }
 
   exitEditMode (): void {
-    var changed = this.editMode;
+    const changed = this.editMode;
     this.editMode = false;
     if (changed) this.onChange!(); // Need UI to update Edit button highlight if mode changed
   }
@@ -1639,7 +1647,7 @@ readyUnrenderedAdornments (move: Move): void {
         next = curMove.next;
       }
       // Select next moves branch correctly ...
-      var branch = n[1];
+      const branch = n[1];
       if (branch === -1) break;
       debugAssert(curMove.branches !== null && branch > 0 && branch < curMove.branches.length,
                   "Move path does not match game's tree.");
@@ -2215,24 +2223,27 @@ export function createGame (size : number, handicap : number, komi : string,
                                       getGames: () => Game[], setGames: (gs: Game[]) => void,
                                       getDefaultGame: () => Game | null, 
                                       setDefaultGame: (g: Game | null) => void}): Game {
-    var g = new Game(size, handicap, komi, handicapStones, all_white);
+    const g = new Game(size, handicap, komi, handicapStones, all_white);
     addOrGotoGame({g}, gamemgt.curGame, gamemgt.getGames(), gamemgt.setGame, gamemgt.setGames,
                   gamemgt.getDefaultGame, gamemgt.setDefaultGame);
     return g;
 }
 
 
-/// liftPropertiesToMove takes an unrendered move with parsed properties and returns the Move or
-/// null if there were errors. This expects next move colors and no random setup nodes (AB, AW, AE)
-/// that place several stones. This takes the game board size for computing indexes because
-/// SGF files count rows from the top, but SGF programs display boards counting bottom up. This
-/// returns null for failure cases, setting the move's parsed error msg.
+/// liftPropertiesToMove takes an unrendered move with parsed properties and returns the
+/// Move or null if there were errors. In the past, this expected next move colors to
+/// alternate and no random setup nodes (AB, AW, AE) that place and/or remove several
+/// stones.  This takes the game board size for computing indexes because SGF files count
+/// rows from the top, but SGF programs display boards counting bottom up. This returns
+/// null for failure cases, setting the move's parsed error msg.
 ///
-/// Trial hack that stuck: parseNodeToMove marks moves that had no B or W notation with a special
-/// parsedBadNodeMessage, and this function stopped checking for it being non-null.  We used to
-/// immediately return null that there is no next move we can show the user.  Now this code works 
-/// around some bad node situations, converting move to a pass move as a hack to display to the user
-/// what we found in the parsed file.
+/// LEGACY CONTEXT: a trial hack that stuck for a while is that parseNodeToMove marked
+/// moves that had no B or W notation with a sentinel parsedBadNodeMessage, and this
+/// function stopped checking for the sentinel being non-null.  Before the trial hack, we
+/// used to immediately return null that there is no next move we can show the user.  With
+/// the hack, this code worked around some bad node situations, converting move to a pass
+/// move with adornments and detailed comment to display to the user what we found in the
+/// parsed file.  Now edit/setup nodes manifest full support for AB/AW/AE nodes.
 ///
 export function liftPropertiesToMove (move: Move, size : number) : Move | null {
   // Removed optimization to avoid computing msg again, due to experiment to taint nodes in sgfparser
@@ -2250,15 +2261,10 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
       move.isPass = true;
   } else if (("AW" in move.parsedProperties!) || ("AB" in move.parsedProperties!) || 
              ("AE" in move.parsedProperties!)) {
-    // // Don't handle setup nodes in the middle of game nodes.  This is a light hack to use
-    // // a Pass node with a big comment and adornments to show what the setup node described.
-    // setupNodeToPassNode(move, size);
-    // THE ABOVE 3 LINES ARE PRE-AB/AW/AE SUPPORT.  BELOW "WE modify parsedBadNodeMessage ..." IS OLD.
-    // Set parsedBadNodeMessage to null to stop UI from popping dialogs that you cannot advance to
-    // this node.  We modify parsedBadNodeMessage when trying to ready moves for rendering, which we do
-    // when the user advances through the tree.  If the user clicks on a tree view node based
-    // on the parsed node only, 1) they will still get the error dialog 2) the node doesn't
-    // show the green highlight that there is a comment ().
+    // LEGACY CONTEXT: We no longer do this hack of converting setup nodes in the middle of the game
+    // to a Pass node with a big comment and adornments to show what the setup node described.
+    // setupNodeToPassNode(move, size).  Set parsedBadNodeMessage to null so UI paths that still 
+    // inspect this field do not reject edit/setup nodes with AB/AW/AE.    
     move.parsedBadNodeMessage = null;
     // Setup/edit node: AB/AW/AE only (no B/W).  Set isPass true (NoIndex) so replay code doesn't 
     // place a move-stone.
@@ -2276,11 +2282,13 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
   return move;
 } //liftPropertiesToMove()
 
+///
+//// LEGACY Setup Node to Pass Move AND Next Move Error Display
+///
 
-
-const SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
-                              "Don't handle arbitrary nodes in the middle of a game.\n" +
-                              "Converting node to Pass move and adding adornments as follows:\n";
+// const SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
+//                               "Don't handle arbitrary nodes in the middle of a game.\n" +
+//                               "Converting node to Pass move and adding adornments as follows:\n";
 
 
 /// SetupNodeToPassNode takes a Move and board size and returns it as a Pass move as a hack to
@@ -2291,54 +2299,52 @@ const SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
 /// move with various adornments and a comment explaining what the user sees.  Before, the sgfEditor
 /// showed the node, popped a dialog that it was not viewable, and that was it.  
 ///
-export function setupNodeToPassNode (move: Move, size: number): Move {
-  // Capture any pre-existing comment to append at the end
-  let comment = "C" in move.parsedProperties! ? move.parsedProperties["C"][0] : "";
-  if (comment !== "")
-    comment = "The following is the original comment from the SGF file ...\n" + comment;
-  let newComment = SetupNodeCommentStart;
-  const props: Record<string, string[]> = {}; // New props to replace parsed properties
-  // const passMove = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
-  // Sweep properties, rewriting to adornment forms and documenting
-  for (const [k, v] of Object.entries(move.parsedProperties!)) {
-    if (k === "AB") { // turn AB's to triangles
-      newComment = setupNodeDisplayCoords(props, newComment, "All Black stones", "TR", v, size);
-      if (move.parsedProperties!["TR"]) {
-        newComment = setupNodeDisplayCoords(props, newComment, "triangles", "TR", move.parsedProperties!["TR"],
-                                            size, true); // true = concat coord lists
-      }
-    } else if (k === "AW") { // turn AWs to squares
-      newComment = setupNodeDisplayCoords(props, newComment, "All White stones", "SQ", v, size);
-      if (move.parsedProperties!["SQ"]) {
-        newComment = setupNodeDisplayCoords(props, newComment, "squares", "SQ", move.parsedProperties!["SQ"],
-                                            size, true); // true = concat coord lists
-      }
-    } else if (k === "AE") { // turn AEs to labels using "X"
-      newComment = setupNodeDisplayCoords(props, newComment, "All Empty points (X)", "LB", v, size);
-      if (move.parsedProperties!["LB"]) {
-        newComment = setupNodeDisplayCoords(props, newComment, "letters", "LB", move.parsedProperties!["LB"],
-        size, true); // true = concat coord lists
-      }
-    } else if (k === "TR" || k === "SQ" || k === "LB" || k === "C") {
-      // Already swept into new properties and comment, so skip here.
-      continue;
-    } else {
-      // Preserve any other properties but note them in the comment
-      props[k] = v.slice();
-      newComment += "Setup node also had this unrecognized notation:\n" + "     " + k + "[" +
-                    v.join("][") + "]\n";
-    }
-  } // for loop
-  newComment = newComment + "\n\n" + comment;
-  props["C"] = [newComment];
-  // Replace the node’s properties (so later rendering paths see the adornments/comment)
-  move.parsedProperties = props;
-  move.isPass = true;
-  move.color = StoneColors.NoColor;
-  return move;
-} // setupNodeToPassNode()
-
-
+// function setupNodeToPassNode (move: Move, size: number): Move {
+//   // Capture any pre-existing comment to append at the end
+//   let comment = "C" in move.parsedProperties! ? move.parsedProperties["C"][0] : "";
+//   if (comment !== "")
+//     comment = "The following is the original comment from the SGF file ...\n" + comment;
+//   let newComment = SetupNodeCommentStart;
+//   const props: Record<string, string[]> = {}; // New props to replace parsed properties
+//   // const passMove = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
+//   // Sweep properties, rewriting to adornment forms and documenting
+//   for (const [k, v] of Object.entries(move.parsedProperties!)) {
+//     if (k === "AB") { // turn AB's to triangles
+//       newComment = setupNodeDisplayCoords(props, newComment, "All Black stones", "TR", v, size);
+//       if (move.parsedProperties!["TR"]) {
+//         newComment = setupNodeDisplayCoords(props, newComment, "triangles", "TR", move.parsedProperties!["TR"],
+//                                             size, true); // true = concat coord lists
+//       }
+//     } else if (k === "AW") { // turn AWs to squares
+//       newComment = setupNodeDisplayCoords(props, newComment, "All White stones", "SQ", v, size);
+//       if (move.parsedProperties!["SQ"]) {
+//         newComment = setupNodeDisplayCoords(props, newComment, "squares", "SQ", move.parsedProperties!["SQ"],
+//                                             size, true); // true = concat coord lists
+//       }
+//     } else if (k === "AE") { // turn AEs to labels using "X"
+//       newComment = setupNodeDisplayCoords(props, newComment, "All Empty points (X)", "LB", v, size);
+//       if (move.parsedProperties!["LB"]) {
+//         newComment = setupNodeDisplayCoords(props, newComment, "letters", "LB", move.parsedProperties!["LB"],
+//         size, true); // true = concat coord lists
+//       }
+//     } else if (k === "TR" || k === "SQ" || k === "LB" || k === "C") {
+//       // Already swept into new properties and comment, so skip here.
+//       continue;
+//     } else {
+//       // Preserve any other properties but note them in the comment
+//       props[k] = v.slice();
+//       newComment += "Setup node also had this unrecognized notation:\n" + "     " + k + "[" +
+//                     v.join("][") + "]\n";
+//     }
+//   } // for loop
+//   newComment = newComment + "\n\n" + comment;
+//   props["C"] = [newComment];
+//   // Replace the node’s properties (so later rendering paths see the adornments/comment)
+//   move.parsedProperties = props;
+//   move.isPass = true;
+//   move.color = StoneColors.NoColor;
+//   return move;
+// } // setupNodeToPassNode()
 
 /// SetupNodeDisplayCoords creates comment text describing the nodes conversion to a pass move
 /// with adornments, where we placed adornments, and what they mean.  This takes the new properties
@@ -2348,46 +2354,46 @@ export function setupNodeToPassNode (move: Move, size: number): Move {
 /// computing indexes because SGF files count rows from the top, but SGF programs display boards 
 /// counting bottom up.
 ///
-export function setupNodeDisplayCoords(props: Record<string, string[]>, newComment: string,
-                                       setup: string, adornment: "TR" | "SQ" | "LB", v: string[],
-                                       size: number, concat = false): string {
-  const LBChar = "X"; 
-  if (concat) {
-    // Picking up explict notation from SGF file that is the same as we chose to note unhandled notations.
-    // Just add it in here, below add to the comment what's going on.
-    props[adornment] = (props[adornment] ?? []).concat(v);
-  } else if (adornment === "LB") {
-    // Convert value from just indexes to <indexes>:<char> form.
-    // Use X for labels (not A, B, C, ...) because marking all clear (AE) notation.
-    props[adornment] = v.map((c) => `${c}:${LBChar}`);
-  } else {
-    // The value used for the unsupported SGF notation (AB/AW) is good as-is to use with the new 
-    // adornment. TR/SQ can use the coordinates as-is.
-    props[adornment] = v.slice(); // ok to alias it, but gpt5 generated new array.
-  }
-  newComment += `\nThis node adds ${setup} at `;
-  const coords = v.map((c) => {
-      const [row, col] = parsedToModelCoordinates(c);
-      // SGF counts rows from the top, but goban display counts from bottom.
-      const rowStr = String(size + 1 - row);
-      const displayCol = modelCoordinateToDisplayLetter(col); 
-      if (adornment === "LB") {
-        if (concat) {
-          // Existing label entries are already like "aa:X", keep the label suffix
-          const suffix = c.slice(2); // ":X" (or longer)
-          return `${displayCol}${rowStr}${suffix}`; // readable coordinates : letter
-        } else {
-          // We added ":X" above
-          return `${displayCol}${rowStr}${LBChar}`;
-        }
-      }
-      return `${displayCol}${rowStr}`;
-  });
-  newComment += coords.join(", ") + ".\n";
-  const word = adornment === "TR" ? "triangles" : adornment === "SQ" ? "squares" : "letters";
-  newComment += `SGFEditor shows these as ${word} on the board.\n`;
-  return newComment;
-}
+// function setupNodeDisplayCoords(props: Record<string, string[]>, newComment: string,
+//                                        setup: string, adornment: "TR" | "SQ" | "LB", v: string[],
+//                                        size: number, concat = false): string {
+//   const LBChar = "X"; 
+//   if (concat) {
+//     // Picking up explict notation from SGF file that is the same as we chose to note unhandled notations.
+//     // Just add it in here, below add to the comment what's going on.
+//     props[adornment] = (props[adornment] ?? []).concat(v);
+//   } else if (adornment === "LB") {
+//     // Convert value from just indexes to <indexes>:<char> form.
+//     // Use X for labels (not A, B, C, ...) because marking all clear (AE) notation.
+//     props[adornment] = v.map((c) => `${c}:${LBChar}`);
+//   } else {
+//     // The value used for the unsupported SGF notation (AB/AW) is good as-is to use with the new 
+//     // adornment. TR/SQ can use the coordinates as-is.
+//     props[adornment] = v.slice(); // ok to alias it, but gpt5 generated new array.
+//   }
+//   newComment += `\nThis node adds ${setup} at `;
+//   const coords = v.map((c) => {
+//       const [row, col] = parsedToModelCoordinates(c);
+//       // SGF counts rows from the top, but goban display counts from bottom.
+//       const rowStr = String(size + 1 - row);
+//       const displayCol = modelCoordinateToDisplayLetter(col); 
+//       if (adornment === "LB") {
+//         if (concat) {
+//           // Existing label entries are already like "aa:X", keep the label suffix
+//           const suffix = c.slice(2); // ":X" (or longer)
+//           return `${displayCol}${rowStr}${suffix}`; // readable coordinates : letter
+//         } else {
+//           // We added ":X" above
+//           return `${displayCol}${rowStr}${LBChar}`;
+//         }
+//       }
+//       return `${displayCol}${rowStr}`;
+//   });
+//   newComment += coords.join(", ") + ".\n";
+//   const word = adornment === "TR" ? "triangles" : adornment === "SQ" ? "squares" : "letters";
+//   newComment += `SGFEditor shows these as ${word} on the board.\n`;
+//   return newComment;
+// }
 
 /// With support for AB/AW/AE nodes, we should never encounter the parserSignalBadMsg.  Now we check
 /// in nextMoveDisplayError if we got back the signal bad msg, ignore it if we do, and emit the msg

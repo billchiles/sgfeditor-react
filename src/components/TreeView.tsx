@@ -367,7 +367,8 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               )}
 
               {/* main disc */}
-              {cell.kind === TreeViewNodeKinds.Move && ! (cell.node as Move).isEditNode && (
+              {cell.kind === TreeViewNodeKinds.Move && cell.node instanceof Move && 
+               ! cell.node.isEditNode && (
                 <circle
                   cx={cx}
                   cy={cy}
@@ -378,6 +379,9 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
                 />
               )}
               {/* Edit node as letter 'E' */}
+              {/* This test doesn't confirm anything at runtime since the as operator in typescript
+                  is a no-op except to squelch compiler warnings, but the test used for main disc
+                  confirms Move kind cells only have Move node objects and silences the compiler.*/}
               {cell.kind === TreeViewNodeKinds.Move && (cell.node as Move).isEditNode && (
                 <text
                   x={cx}
