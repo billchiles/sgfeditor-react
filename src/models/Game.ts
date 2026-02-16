@@ -448,9 +448,8 @@ export class Game {
   ///
 
   /// unwindMove -- command entry point.  Move the current pointer one step *back* along the main 
-  /// line.  Returns the move that was unwound, or undefined if at the beginning.
-  /// Note: This just moves the pointer and unlinks forward; your UI
-  /// may also want to update the board view separately.
+  /// line.  Returns the move that was unwound, or undefined if at the beginning.  this.currentMove
+  /// must be non-null.
   ///
   unwindMove (): Move {
     const current = this.currentMove;
@@ -465,15 +464,22 @@ export class Game {
       for (const m of current.editDeletedStones) this.board.addStone(m);
       // Edit nodes do not affect moveCount or nextColor.
     } else {
-      if (! current.isPass) {
+      // A normal move can be "replayed" onto a point occupied by an edit-node stone. In that
+      // case we intentionally leave the edit stone on the board (conflictWithEditStone path in
+      // replayMoveUpdateModel), so unwinding this move must not remove that board stone or restore
+      // captures/prisoners that were never applied.
+      const moveStoneWasPlaced = current.isPass ? false : 
+                                   (this.board.moveAt(current.row, current.column) === current);
+      if (moveStoneWasPlaced) {
         this.board.removeStone(current);
+        // Restore previously captured stones
+        current.deadStones.forEach((m) => this.board.addStone(m));
+        this.updatePrisoners(current.color, - current.deadStones.length);
       }
-      // Restore previously captured stones
-      current.deadStones.forEach((m) => this.board.addStone(m));
-      this.updatePrisoners(current.color, - current.deadStones.length);
       this.nextColor = current.color; // it’s that player’s turn again
       this.moveCount -= 1;
     }
+
     const previous = current.previous;
     if (current.isEditNode && previous !== null) {
       // After unwinding an edit node, restore counters from the previous real move.
@@ -507,6 +513,7 @@ gotoStart (): void {
   if (this.handicapMoves !== null) {
     for (const m of this.handicapMoves) this.board.addStone(m);
   }
+  if (this.allWhiteMoves !== null) this.allWhiteMoves.forEach(m => {this.board.addStone(m)});
   // Same logic that initHandicapNextColor uses ...
   this.nextColor = (this.allWhiteMoves !== null || this.handicapMoves === null) ? 
                     StoneColors.Black : StoneColors.White; 
@@ -735,12 +742,13 @@ gotoStart (): void {
 
 
   /// readyForRendering puts move in a state as if it had been displayed on the screen before.
-  /// Moves from parsed nodes need to be created when their previous move is actually displayed
-  /// on the board so that there is a next Move object in the game tree for consistency with the
-  /// rest of model. However, until the moves are actually ready to be displayed they do not have
-  /// captured lists hanging off them, their next branches and moves set up, etc. This function
-  /// makes the moves completely ready for display. This returns (same) move if we can advance
-  /// the display, but this also returns if there was an error with a parsenode.
+  /// Moves from parsed nodes need to be lifted from parsed properties when their previous move is 
+  /// actually displayed (being readied) on the board so that there is a next Move object in the 
+  /// game tree with its object properties filled in for consistency with the rest of model. 
+  /// Getting ready to be displayed includes calculating captured lists, lifting properties for 
+  /// their next branches and moves. This function makes the moves completely ready for display. 
+  /// This returns (same) move if we can advance the display, but this also returns error info if 
+  /// there was an error with parsed properties.
   ///
   /// Callers must ensure calling liftPropertiesToMove on move before calling readyForRendering, and
   /// callers must add move to the board and handle cleaning it up if this returns null.
@@ -763,11 +771,14 @@ gotoStart (): void {
         // No longer return if had error.  Some branches are viewable, but signal to callers had err.
         if (hadErr) continue;   
         oneGood = true;
+        // Move numbering now happens right after parsing in setupFirstParsedMove. This is just some
+        // integrity and model checking against previous model for managing move numbers.
         // For normal move nodes, next move number is current move number + 1.  Because m is one
-        // past move, and this.moveCount is one behind move during rendering for replay. 
-        // Edit nodes do not increase moveCount, so next move is + 1 in this case.  Lastly, we don't
-        // have to set m.number if it is an editNode because the default of 0 is good.
-        if (! m.isEditNode) m.number = this.moveCount + (move.isEditNode ? 1 : 2);
+        // move past current, and this.moveCount is one behind move during rendering for replay,
+        // we normally add 2.  Edit nodes do not increase moveCount, so next move is + 1 in this case.
+        const expectedNumber = this.moveCount + (move.isEditNode ? 1 : 2);
+        debugAssert(m.isEditNode ? m.number === 0 : m.number === expectedNumber,
+                    `readyForRendering move numbering mismatch. expected ${expectedNumber}, got ${m.number}`);
         // Check if parsed properties had setup node props in the middle of game nodes.
         // Need to set color because liftPropertiesToMove has no access to Game.nextColor.
         if (m.comments.includes(SetupNodeCommentStart)) {
@@ -780,7 +791,10 @@ gotoStart (): void {
         return [null, true];
       }
       oneGood = true;
-      if (! move.next.isEditNode) move.next.number = this.moveCount + (move.isEditNode ? 1 : 2);
+      const expectedNumber = this.moveCount + (move.isEditNode ? 1 : 2);
+      debugAssert(move.isEditNode ? move.next.number === 0 : move.next.number === expectedNumber,
+                  `readyForRendering move numbering mismatch. expected ${expectedNumber}, ` +
+                  `got ${move.next.number}`);
       if (move.next.comments.includes(SetupNodeCommentStart)) {
         move.next.color = oppositeColor(move.color);
       }

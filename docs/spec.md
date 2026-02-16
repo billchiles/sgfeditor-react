@@ -501,7 +501,7 @@ Perfect—paste this at the very end of `spec.md`:
 
 ---
 
-# Tree View (React/TypeScript) — Final Design Notes
+# 25) Tree View (React/TypeScript) — Final Design Notes
 
 ## Goals
 
@@ -735,10 +735,105 @@ function lookupOrRemap(key: IMoveNext): TreeViewNode | null {
 
 ---
 
-## Future Refinements
+# 26) Edit / Setup Nodes (AB/AW/AE) in the Middle of a Game
 
-* Optional dev overlay/legend toggle for verifying highlights visually.
-* Virtualize very large trees (> 1–2k nodes).
-* Configurable scroll anchor (e.g., center-center vs top-left) as a preference.
+This section captures the current design for SGF setup/edit nodes represented as `Move` nodes in
+the tree.
+
+## 26.1 Feature intent
+
+* Support SGF setup properties `AB`, `AW`, `AE` in the middle of a game tree.
+* Represent these as **edit nodes** in the model (`move.isEditNode === true`), distinct from
+  normal play moves.
+* Edit nodes are entered via explicit edit mode (F2 / Edit button), not implicitly by navigation.
+
+## 26.2 Core model invariants
+
+* `Move.isEditNode` marks setup/edit nodes (no `B`/`W` move stone).
+* Stones added during edit mode for a node are tracked as `Move` objects with:
+  * `isEditNodeStone = true`
+  * `editParent = <that edit node>`
+* For root-board setup editing, `editParent` remains `null` (root setup is not itself an edit node).
+* Stones removed by an edit node are represented by pre-existing `Move` objects in
+  `move.editDeletedStones`.
+* `editDeletedStones` contains stones that existed before the edit operation (including captures of
+  pre-existing stones during edit placements).
+* Edit nodes do not consume turn order:
+  * they do **not** increment `moveCount`
+  * they do **not** change `nextColor`
+
+## 26.3 Ordering rules (replay vs unwind)
+
+Ordering is critical for correctness when an edit node removes and re-adds at overlapping points.
+
+* Replay/apply edit node:
+  1. Process deletions (`AE` + captured pre-existing stones)
+  2. Process additions (`AB` / `AW`)
+* Unwind edit node:
+  1. Remove added stones first
+  2. Restore deleted stones after
+
+## 26.4 `readyForRendering` contract for parsed nodes
+
+* Callers must call `liftPropertiesToMove(move, size)` before `readyForRendering(move)`.
+* The board already contains prior moves on this branch when `readyForRendering` executes.
+* `readyForRendering` may inspect board state but should not permanently mutate board state.
+* Responsibilities:
+  * for edit nodes, materialize `addedBlackStones`, `addedWhiteStones`, `editDeletedStones`
+  * for normal nodes, compute `deadStones`
+  * lift next/branch parsed properties so future replay steps are ready
+  * mark `move.rendered = true`
+
+Move numbering now occurs during parsed tree setup. `readyForRendering` should verify parity with
+assertions rather than rewriting numbers.
+
+## 26.5 Move numbering rules with edit nodes
+
+* Normal moves: number starts at 1 and increments along replay path.
+* Edit nodes: number remains sentinel `0` and render as non-numbered tree nodes.
+* Parsed game setup assigns numbers before first replay (`setupFirstParsedMove` + renumber walk).
+* Runtime replay code should not re-assign parsed move numbers except via explicit renumbering
+  operations (e.g., structural edits such as paste/insert).
+
+## 26.6 Edit-mode click semantics
+
+While `game.editMode === true`:
+
+* Left click empty point: add black stone.
+* Shift + left click empty point: add white stone.
+* Left click occupied point:
+  * if stone was added in this same edit node (`isEditNodeStone && editParent === editMove`),
+    remove from corresponding added list
+  * otherwise remove from board and append to `editDeletedStones` (deduped)
+* On captures caused by edit placement:
+  * captured edit-session stones are removed from added lists
+  * captured pre-existing stones are appended to `editDeletedStones`
+* Illegal self-capture/no-liberty placement without capture is reverted and user is informed.
+* Prisoner counters do not change in edit mode.
+
+## 26.7 Navigation and mode policy
+
+* Entering an edit node by navigation does not auto-enable edit mode.
+* Navigation commands should exit edit mode first (`arrow/home/end/tree actions/new game/open/save`).
+* Edit mode is a global interaction mode; the current move may or may not already be an edit node.
+
+## 26.8 Tree view representation
+
+* Edit nodes render as **"E"** (no stone fill, no move number).
+* Standard moves continue rendering as stones with move numbers.
+
+## 26.9 SGF IO semantics
+
+* Edit nodes serialize as `AB`/`AW`/`AE` and explicitly omit `B`/`W`.
+* Root setup remains root setup (`AB`/`AW` at root); root board start is not represented as an
+  edit node.
+* Parsed unknown properties should still be preserved via copy/merge SGF print behavior.
+
+## 26.10 Guardrails for future changes
+
+* Do not merge edit-node captures into `deadStones`; keep `deadStones` for normal move captures.
+* Keep deletion-before-addition and unwind inverse ordering; this is a correctness invariant.
+* Prefer explicit null checks and tight diffs when changing edit-node logic.
+* Preserve comments documenting historical edge cases and parser migration behavior.
 
 ---
