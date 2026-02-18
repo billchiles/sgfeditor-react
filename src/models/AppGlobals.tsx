@@ -976,12 +976,14 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
   // Save the current comment back into the model
   g.saveCurrentComment();
   let ranContinuation = false;
-  // HACK for browser event / dialog handling.  Sometimes when we prompt the user to save
+  // HACK lastCmd.type for browser event / dialog handling.  Sometimes prompting the user to save
   // the browser doesn't show the new or open dialog, and you have to invoke the command again and
   // try a different timing when you answer the prompt to save.  So, let's try not prompting the
   // second time the command is invoked.
   if (g.isDirty && 
       // Don't prompt to save if user just denied saving and had to re-invoke new/open game
+      // LEGACY: Now wired with continuation so don't lose user-initiated context to prompt,
+      // so can prompt to save dirty and continue open dialog.  Don't really use lastCmd.type now.
       ! (lastCmd.type === CommandTypes.SavePromptHack && lastCmd.cookie.dirtyGame === g)) {
     await message("Game is unsaved.  Confirm saving game.",
       { title: "Confirm Saving Game", primary: "Save", secondary: "Don’t Save",
@@ -1020,7 +1022,7 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
   if (! ranContinuation) continuaton();
 } // checkDirtySave()
 //
-// WORKING VERSION WITH LAST CMD HACK TO AVOID BROWSER REFUSING TO OPEN FILES, before all the
+// LEGACY: WORKING VERSION WITH LAST CMD HACK TO AVOID BROWSER REFUSING TO OPEN FILES, before all the
 // continuations passed down from doOpenButtonCmd, startNewGameFlow, etc., through checkDirtySave,
 // to MessageDialog.
 //
@@ -1412,11 +1414,12 @@ async function removeGame
 //// Messaging for Model
 ///
 
-/// I'm keeping browserMessageOrQuery (was simply two lines during bootstrapping) and MessageDialog.
+/// Keeping old browserMessageOrQuery (was just two lines when bootstrapping) and new MessageDialog.
 /// USE_MESSAGE_DIALOG lets me flip between the bootstrapping equivalent (alert/confirm) and 
 /// MessageDialog, but it is always true for consistent UI.  Maybe MessageDialog is the only way in 
-/// Electron shell, but I want to keep the.  I do use browserMessageOrQuery in places rather than
-/// MessageDialog for a simpler API when I don't need a response or user context for a continuation.
+/// Electron shell, but I want to keep this.  I ended up using browserMessageOrQuery in places 
+/// rather than MessageDialog for a simpler API when I don't need a response or user context for a 
+/// continuation dialog prompt.
 ///
 let USE_MESSAGE_DIALOG = true;
 /// Need GameProvider to set this when it gets openMessageDialog so that we have access to it.  See
@@ -1425,7 +1428,7 @@ let messageDialogOpener: | ShowMessageDialogSig | null
     = null;
 
 /// Turn MessageDialog usage on/off at runtime (leave false to use alert/confirm).  Don't really
-/// need this, will likely just change the default false to true to play with this.
+/// need this, vestigial only.
 export function setUseMessageDialog(flag: boolean) {
   USE_MESSAGE_DIALOG = !!flag;
 }
