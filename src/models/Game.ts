@@ -798,7 +798,7 @@ gotoStart (): void {
       }
       oneGood = true;
       const expectedNumber = this.moveCount + (move.isEditNode ? 1 : 2);
-      debugAssert(move.isEditNode ? move.next.number === 0 : move.next.number === expectedNumber,
+      debugAssert(move.next.isEditNode ? move.next.number === 0 : move.next.number === expectedNumber,
                   `readyForRendering move numbering mismatch. expected ${expectedNumber}, ` +
                   `got ${move.next.number}`);
       // LEGACY NOTE: old setup-node-as-pass fallback used a comment prefix marker and then
@@ -2496,11 +2496,12 @@ function renumberMoves (move: Move, countOverride: number | null = null): void {
      else
        break;
    }
+  }
   // Only get here when move is None, or we're recursing on branches.
   if (move !== null)
     for (const m of move.branches!) {
       // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
-      if (m.isEditNode || (! move.rendered && move.parsedBadNodeMessage === parserSignalBadMsg)) {
+      if (m.isEditNode || (! m.rendered && m.parsedBadNodeMessage === parserSignalBadMsg)) {
         m.number = 0;
         renumberMoves(m, count);
       } else {
@@ -2508,8 +2509,35 @@ function renumberMoves (move: Move, countOverride: number | null = null): void {
         renumberMoves(m);
       }
     }
-  }
 } // renumberMoves()
+
+// function renumberMoves (move: Move, countOverride: number | null = null): void {
+//   let count = (countOverride !== null) ? countOverride : move.number;
+//   let cur: Move | null = move.next;
+//   while (cur !== null) {
+//     // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
+//     if (cur.isEditNode || (! cur.rendered && cur.parsedBadNodeMessage === parserSignalBadMsg)) {
+//       cur.number = 0;
+//     } else {
+//       cur.number = count + 1;
+//       count += 1;
+//     }
+//     if (cur.branches !== null) {
+//       for (const m of cur.branches) {
+//         // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
+//         if (m.isEditNode || (! m.rendered && m.parsedBadNodeMessage === parserSignalBadMsg)) {
+//           m.number = 0;
+//           renumberMoves(m, count);
+//         } else {
+//           m.number = count + 1;
+//           renumberMoves(m);
+//         }
+//       }
+//       break;
+//     }
+//     cur = cur.next;
+//   }
+// } // renumberMoves()
 
 ///
 //// Generating Print and Parser-mimicking Moves
