@@ -169,12 +169,12 @@ export class Game {
                            (curMove === null && this.firstMove !== null);
     // Construct the candidate move at the click location (pass if NoIndex), may replace this below
     const move = new Move(row, col, this.nextColor);
-    if (!move.isPass && this.board.hasStone(row, col)) {
+    if (! move.isPass && this.board.hasStone(row, col)) {
       await this.message?.message("Can't play where there already is a stone.");
     return null;
     }
     // Check self capture or collect captures if this move would capture stones.
-    if (!move.isPass && this.checkSelfCaptureNoKill(move)) {
+    if (! move.isPass && this.checkSelfCaptureNoKill(move)) {
       await this.message?.message("You cannot make a move that removes a group's last liberty.");
       return null;
     }
@@ -193,8 +193,8 @@ export class Game {
       if (retMove === null || hadParseErr) {
         // NOTE, if we do not return here, ReplayMove below will report on the SGF issue, but
         // it puts up two dialogs which feels ugly (can get error msg by using arrows to next move).
-        // Can fetch msg sometimes since we can flow through here now if only some moves in
-        // branches had parsenode errors, but used to fully punt if any next move was bad.
+        // Can fetch msg sometimes since we can flow through here when only some moves in
+        // branches had parse errors, but used to fully punt if any next move was bad.
         const msg = retMove === null ? "" : (nextMoveGetMessage(retMove) ?? "");
         await this.message?.message(
           "You clicked where a next move exists in the game tree, but that move had bad properties " +
@@ -245,16 +245,16 @@ export class Game {
     this.board.addStone(move);
     const killed = this.checkForKill(move);       // computes move.deadStones
     const noKill = killed.length === 0;
-    const noLiberty = !this.findLiberty(move.row, move.column, move.color);
+    const noLiberty = ! this.findLiberty(move.row, move.column, move.color);
     this.board.removeStone(move);
     return noLiberty && noKill;
   }
 
   /// makeBranchingMove sets up cur_move to have more than one next move, that is, branches.  
-  /// If the new move, move, is at the same location as a next move of cur_move, this this function
+  /// If the new move, move, is at the same location as a next move of cur_move, this function
   /// dumps move in lieu of the existing next move. This also sets up any next and prev pointers
   /// as appropriate and updates the branches combo. This returns null if it can't return a move
-  /// This also returns if there was a parsenode rendering error to display.
+  /// This also returns if there was a parsed node rendering error to display.
   ///
   private makeBranchingMove (curMove: Move | null, move: Move): [Move | null, boolean] {
     let err = false;
@@ -286,12 +286,12 @@ export class Game {
     return [move, err];
   }
 
-  /// makeBranchingMoveBranches takes a game or move object (the current move), the current
+  /// makeBranchingMoveBranches takes the current move's or empty board's branches, the current
   /// next move, and a move representing where the user clicked.  If there are no branches yet,
   /// then see if new_move is at the same location as next and toss new_move in this case, which
   /// also means there are still no branches yet.  This returns null if it can't return a move,
   /// which happens if it finds an existing move in the tree, but that move has bad parse info.
-  /// This also returns the branches in case they are new and whether there is a parsenode error
+  /// This also returns the branches in case they are new and whether there is a parsed node error
   /// to report.
   ///
   private makeBranchingMoveBranches (branches: Move[] | null, next: Move | null, newMove: Move):
@@ -301,7 +301,7 @@ export class Game {
       branches = next ? [next] : []; // Must pass non-null branches.
       const [move, err] = this.maybeUpdateBranches(branches, newMove);
       if (move === null) {
-        // Already move at location from file, but rendering it saw bad parsenode.
+        // Already move at location from file, but rendering it saw bad parsed node.
         // Since no good move to advance to, and just created branches, return null for branches.
         return [null, null, err];
       }
@@ -324,17 +324,20 @@ export class Game {
   /// It returns a pre-existing move if the second argument represents a move at a location for which there
   /// already is a move; otherwise, this function returns the second argument as a new next
   /// move.  If this is a new next move, we add it to branches.  
-  /// This return null if it can't return a move, and it returns whether we tried to render a bad parsenode.
+  /// This return null if it can't return a move, and it returns whether we tried to render a bad parsed node.
   ///
   private maybeUpdateBranches (branches: Move[], move: Move): [Move | null, boolean] {
     debugAssert(branches !== null, "Branches can't be null.");
     const idx = branches.findIndex(m => m.row === move.row && m.column === move.column);
     if (idx !== -1) {
-      const m = branches[idx];
-      if (!m.rendered) {
-        return this.readyForRendering(m); // returns m if can proceed (or null) + err bool
-      }
-      return [m, false];
+      // const m = branches[idx];
+      // if (! m.rendered) {
+      //   // ERROR!!!!!!!!!! m is not on board, so doesn't pick up captured stones
+      //   return this.readyForRendering(m); // returns m if can proceed (or null) + err bool
+      // }
+      // return [m, false];
+      // When we return to makeMove, we immediately call replayMove which handles readyForRendering
+      return [branches[idx], false];
     } else {
       branches.push(move);
       return [move, false];
@@ -351,7 +354,7 @@ export class Game {
   /// independent and the overhead of allocating a new matrix is negligible for typical board
   /// sizes. This avoids sharing state between recursive calls and keeps the logic simpler.
   ///
-  private checkForKill(move: Move): Move[] {
+  private checkForKill (move: Move): Move[] {
     const row = move.row;
     const col = move.column;
     const opp = oppositeColor(move.color);
@@ -454,6 +457,7 @@ export class Game {
   unwindMove (): Move {
     const current = this.currentMove;
     debugAssert(current !== null, "Prev button should be disabled if there is no current move.")
+    // Clean up board for removing move
     if (current.isEditNode) {
       // Remove any stones added by this edit node and restore any stones it removed.
       for (const m of current.addedBlackStones) this.board.removeStone(m);
@@ -479,7 +483,7 @@ export class Game {
       this.nextColor = current.color; // it’s that player’s turn again
       this.moveCount -= 1;
     }
-
+    // Update model and signal UI
     const previous = current.previous;
     if (current.isEditNode && previous !== null) {
       // After unwinding an edit node, restore counters from the previous real move.
@@ -546,7 +550,7 @@ gotoStart (): void {
     // Try to replay ...
     const [retMove, hadParseErr] = this.replayMoveUpdateModel(this.currentMove!); // ! def not null
     if (retMove === null) {
-      // Current move comes back if some branches had bad parsenodes, but some branches were good.
+      // Current move comes back if some branches had bad parsed nodes, but some branches were good.
       // ! on this.message because must be defined if replaying, and ! on currentmove tested above
       await nextMoveDisplayError(this.message!.message, this.currentMove!); // ! cuz must be defined if replaying
       this.currentMove = fixup;
@@ -580,7 +584,7 @@ gotoStart (): void {
       current = this.firstMove;
       const [ret, err] = this.replayMoveUpdateModel(current);
       if (ret === null) {
-        // Current move comes back if some branches had bad parsenodes, but some branches good.
+        // Current move comes back if some branches had bad parsed nodes, but some branches good.
         await nextMoveDisplayError(this.message!.message, current); // ! cuz can't do cmds before UI done.
         return; // No model mutations, just return
       }
@@ -588,12 +592,7 @@ gotoStart (): void {
         await nextMoveDisplayError(this.message!.message, current);
       }
     }
-    // let temp = current;
-    // while (temp != null) {
-    //   console.log(`Move: ${temp.number}, edit: ${temp.isEditNode}, x,y: ${temp.row},${temp.column}` +
-    //               `msg: ${temp.parsedBadNodeMessage}, rendered: ${temp.rendered}`);
-    //   temp = temp.next;
-    // }
+    // loop over moves replaying them
     next = current.next;
     // Walk to last move ...
     while (next !== null) {
@@ -639,7 +638,7 @@ gotoStart (): void {
   /// been rendered before. We must setup branches to Move objects, and make sure the next Move
   /// object is created and marked unrendered so that code elsewhere that checks move.next will
   /// know there's a next move. This returns null if there is an issue replaying the move, and it
-  /// returns a bool whether to display an error msg due to a bad parsenode. The move obj returned
+  /// returns a bool whether to display an error msg due to a bad parsed node. The move obj returned
   /// is the arg obj.
   ///
   private replayMoveUpdateModel (move: Move): [Move | null, boolean] {
@@ -647,6 +646,7 @@ gotoStart (): void {
     if (move.isEditNode) {
       let hadParseErr = false;
       if (! move.rendered) {
+        // Note, readyForRendering won't gather captures because no stone placed for checkForKill()
         const [retMove, err] = this.readyForRendering(move);
         if (retMove === null) return [null, err];
         hadParseErr = err;
@@ -682,8 +682,8 @@ gotoStart (): void {
       // Move just has parsedProperties and has never been displayed.
       const [retMove, err] = this.readyForRendering(move);
       if (retMove === null) { // Issue with parsed node, cannot go forward.
-        // Current move comes back if some branches had bad parsenodes, but good moves existed.
-        // Now that we support AB/AW/AE nodes, "bad parsenodes" may no longer normally exist.
+        // Current move comes back if some branches had bad parsed nodes, but good moves existed.
+        // Now that we support AB/AW/AE nodes, "bad parsed nodes" may no longer normally exist.
         if (cleanup) this.board.removeStone(move);
         return [null, err]; // There was an error, and we found an error msg.
       }
@@ -1047,9 +1047,9 @@ readyUnrenderedAdornments (move: Move): void {
     }
     // Add stone and apply captures/illegality checks similar to makeMove, but do not update prisoners.
     this.board.addStone(stone);
-    const killed = this.checkForKill(stone); // populates stone.deadStones
+    const captured = this.checkForKill(stone); // populates stone.deadStones
     const noLiberty = ! this.findLiberty(stone.row, stone.column, stone.color);
-    if (killed.length === 0 && noLiberty) {
+    if (captured.length === 0 && noLiberty) {
       // Added stone filled last liberty of a group.  Revert.
       this.board.removeStone(stone);
       if (stone.isEditNodeStone && stone.editParent === editMove) {
@@ -1067,7 +1067,7 @@ readyUnrenderedAdornments (move: Move): void {
       return;
     }
     // Remove "captured stones" appropriately.
-    for (const m of killed) {
+    for (const m of captured) {
       this.board.removeStone(m);
       if (m.isEditNodeStone && m.editParent === editMove) {
         // Captured an edit-session stone: remove it from added lists.
@@ -1617,12 +1617,12 @@ readyUnrenderedAdornments (move: Move): void {
     const stuff = this.replayMoveUpdateModel(curMove);
     const retmove = stuff[0];
     if (retmove === null || stuff[1]) { // return false even if move to keep old behavior here.
-      // Current move comes back if some branches had bad parsenodes, but some branches good.
+      // Current move comes back if some branches had bad parsed nodes, but some branches good.
       // However due to the uses of AdvanceToMovePath (clicking in game tree, switching games,
       // undoing game creation as a cleanup), we stop propagating the difference of no possible move
-      // vs. a move that works while a sibling move has a parsenode issue.  Users can use arrows
+      // vs. a move that works while a sibling move has a parsed node issue.  Users can use arrows
       // after the ffwd op to see the error display.
-      // BUG: If user clicks on treeview nodes representing bad parsenodes, the code will try to
+      // BUG: If user clicks on treeview nodes representing bad parsed nodes, the code will try to
       // advance to it, users gets an err display, but you cannot then arrow around even when if you
       // had only arrowed around to begin with, you could arrow all around the tree's good nodes.
       return false;
@@ -1778,9 +1778,10 @@ readyUnrenderedAdornments (move: Move): void {
     // this.onTreeHighlightChange?.();
   }
 
-  /// pasteMoveNextConflict takes a move representing a cut move and checks that it does not conflict with
-  /// a next move.  Some moves in the pasted branch may be in conflict, but we catch those as we replay
-  /// moves.  This check prevents branches where two branches are the same move but different sub trees.
+  /// pasteMoveNextConflict takes a move representing a cut move and checks that it does not 
+  /// conflict with a next move.  Some later moves in the pasted branch may be in conflict, but we 
+  /// catch those as we replay moves.  This check prevents branches where two branches are the same 
+  /// move but different sub trees.
   ///
   private async pasteMoveNextConflict (new_move: Move): Promise<boolean> {
     const curmove = this.currentMove;
@@ -1878,19 +1879,16 @@ readyUnrenderedAdornments (move: Move): void {
       await nextMoveDisplayError(other.message!.message, head);
       return null;
     }
-    //XXX is this ok??????????????????
-    // Commented this out when we realized we're calling readyForRendering without ever placing the
-    // stone on the board.  We could forgo checking here, maybe it is a self capture or captures
-    // stones, but we'll find out when we go to replay it.  Or we can add head, call the function,
-    // the remove it.
-    // const [resmove, err] = this.readyForRendering(head);
-    // if (resmove === null || err) { // Issue with parsed properties, cannot go forward.
-    //   const msg = resmove !== null ? nextMoveGetMessage(resmove as Move) : "";
-    //   await this.message?.message?.(
-    //     "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
-    //     "in the SGF file.\nYou cannot play further down that branch... " + msg );
-    //   if (resmove === null) return null;
-    // }
+    this.board.addStone(head); // Must add before calling readyForRendering which calls checkForKill
+    const [resmove, err] = this.readyForRendering(head);
+    if (resmove === null || err) { // Issue with parsed properties, cannot go forward.
+      const msg = resmove !== null ? nextMoveGetMessage(resmove as Move) : "";
+      await this.message?.message?.(
+        "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
+        "in the SGF file.\nYou cannot play further down that branch... " + msg );
+      if (resmove === null) return null;
+    }
+    this.board.removeStone(head); // Gets added by pasteMoveOtherGame via pasteMoveInsert
     return head;
   }
 
@@ -1974,7 +1972,7 @@ function genPrintNode (move: Move, flipped: boolean, size: number): PrintNode {
                                             ? copyProperties(move.parsedProperties!) 
                                             : {}
   // if rendered, move could be modified.  If not rendered, just use parsed data.
-  if (move.rendered) { 
+  if (move.rendered) {
      // Edit/setup nodes write as AB/AW/AE (no B/W).
     if (move.isEditNode) {
       delete props["B"]; // really shouldn't be in props, but just in case
@@ -2506,7 +2504,7 @@ function renumberMoves (move: Move, countOverride: number | null = null): void {
         m.number = 0;
         renumberMoves(m, count);
       } else {
-        m.number = count;
+        m.number = count + 1;
         renumberMoves(m);
       }
     }

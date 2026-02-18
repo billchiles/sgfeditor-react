@@ -23,6 +23,7 @@ import { TreeViewNodeKinds, getTreeViewModelRowsSize,
          getTreeViewModelColumnsSize } from "../models/treeview";
 import { debugAssert } from "../debug-assert";
 import { GameContext } from "../models/AppGlobals";
+import { parserSignalBadMsg } from "../models/Game";
 
 
 type Props = {
@@ -185,12 +186,12 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   }, [app, treeViewMoveMap]); // gameTreeMouseDown()
 
   function gotoGameTreeMove(move: Move): boolean {
-    // Hack attempt to abort tree clicks on bad parse nodes.  sgfparser.ts parseNodeToMove() didn't
-    // store msg, game.ts liftPropertiesToMove adds bad node msg, but this is a hack to see a 
-    // sentinel taint (don't need to compare string's contents), then disallow clicking on bad
-    // moves for bad parse nodes in the game tree.
-    if (move.parsedBadNodeMessage !== null) 
-      return false;
+    // Hack attempt to abort tree clicks on bad parse nodes.  Check for a sentinel taint (don't need
+    // to compare string's contents), then disallow clicking on bad moves for bad parse nodes in the
+    // game tree.
+    // LEGACY: We can now advance through these nodes.
+    // if (move.parsedBadNodeMessage !== null) 
+    //   return false;
     const g = app.getGame();
     //if (!g) return false;
     let res = true;
@@ -368,27 +369,32 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
 
               {/* main disc */}
               {cell.kind === TreeViewNodeKinds.Move && cell.node instanceof Move && 
-               ! cell.node.isEditNode && (
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={NODE_R}
-                  fill={fill}
-                  stroke={stroke}
-                  strokeWidth={strokeWidth}
-                />
-              )}
+               ! (cell.node.isEditNode || 
+                  (! cell.node.rendered && cell.node.parsedBadNodeMessage === parserSignalBadMsg)) && 
+                (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={NODE_R}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth={strokeWidth}
+                  />
+                )}
               {/* Edit node as letter 'E' */}
               {/* This test doesn't confirm anything at runtime since the as operator in typescript
                   is a no-op except to squelch compiler warnings, but the test used for main disc
                   confirms Move kind cells only have Move node objects and silences the compiler.*/}
-              {cell.kind === TreeViewNodeKinds.Move && (cell.node as Move).isEditNode && (
+              {cell.kind === TreeViewNodeKinds.Move && cell.node instanceof Move && 
+                (cell.node.isEditNode || 
+                  (! cell.node.rendered && cell.node.parsedBadNodeMessage === parserSignalBadMsg)) && 
+                (
                 <text
                   x={cx}
                   y={cy}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  fontSize={12}
+                  fontSize={16}
                   fontWeight={700}
                 >
                   E
@@ -413,11 +419,13 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
                cell.kind !== TreeViewNodeKinds.LineBend && (() => {
               */}
               {cell.kind === TreeViewNodeKinds.Move && (() => {
-                const n: any = cell.node;
+                const n = cell.node;
+                debugAssert(n instanceof Move, "Node kind of Move must have a Move object.");
                 let num = typeof n?.number === "number" ? n.number : null;
                 // unrendered moves have a number that is zero, all actual moves have number > 0
                 // if (num === null || num === 0) num = cell.column;
-                if ((n as Move).isEditNode) return null;
+                if (n.isEditNode || (! n.rendered && n.parsedBadNodeMessage === parserSignalBadMsg)) 
+                  return null; 
                 // Moves come out of the parser numbered, so this should never fire.
                 if (num === null || num === 0) return null;
                 const numFill = cell.color === StoneColors.Black ? "#fff" : "#000";

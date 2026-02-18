@@ -105,14 +105,6 @@ export class PrintNode {
 /// Parser
 ///
 
-// export function parseFile (text: string): ParsedGame {
-//   const l = new Lexer(text);
-//   l.scanFor("(", "Can't find game start");
-//   const g = new ParsedGame();
-//   g.nodes = parseNodes(l);
-//   return g;
-// }
-
 export function parseFileToMoves(text: string): ParsedGame {
   const lexer = new Lexer(text);
   lexer.scanFor("(", "Can't find game start");

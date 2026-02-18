@@ -693,14 +693,14 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   if (lower === "arrowup" && ! e.ctrlKey) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
-    curgame.exitEditMode();
+    //curgame.exitEditMode();
     curgame.selectBranchUp(); // Calls onchange if needed.
     return;
   }
   if (lower === "arrowdown" && ! e.ctrlKey&& curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
-    curgame.exitEditMode();
+    //curgame.exitEditMode();
     curgame.selectBranchDown(); // Calls onchange if needed
     return;
   }

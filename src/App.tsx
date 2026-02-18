@@ -182,6 +182,15 @@ function AppContent({
             >
               Help
             </button>
+            <button
+              className={`${styles.btn} ${g && g.editMode ? styles.btnBranchActive : ""}`}
+              title="Toggle edit move mode (F2)"
+              onClick={() => {
+                if (! g) return;
+                g.toggleEditMode();
+              }}>
+              AB/AW/AE
+            </button>
           </div>
           <div className={styles.buttonRow}>
             <MoveNavCommandButtons/>
@@ -399,7 +408,7 @@ function MoveNavCommandButtons() {
       >
         {branchesLabel}
       </button>
-      <button
+      {/* <button
         className={`${styles.btn} ${game && game.editMode ? styles.btnBranchActive : ""}`}
         title="Toggle edit move mode (F2)"
         onClick={() => {
@@ -407,8 +416,8 @@ function MoveNavCommandButtons() {
           game.toggleEditMode();
         }}
       >
-        AB/AW/AE
-      </button>
+        foo
+      </button> */}
     </>
   );
 }
