@@ -214,7 +214,7 @@ Important fields:
 
 ### 4.5 isEditNode invariant
 
-move.isEditNode is only valid to test after calling liftPropertiesToMove or testing that move.rendered is true.  Before liftPropertiesToMove, you can test with `(! move.rendered && move.parsedBadNodeMessage === parserSignalBadMsg)`.
+move.isEditNode is only valid to test after calling liftPropertiesToMove or testing that move.rendered is true.  Code that traverses the game tree beyond rendered moves (tree view node display, renumberMoves(), etc.) should call move.isEditNodeMaybeUnrendered().  A couple places that advance through moves call liftPropertiesToMove and then test move.isEditNode.
 
 ### 4.6 StoneColor
 
@@ -406,7 +406,7 @@ In edit mode:
 
 ### 8.2 Cut/paste subtree contract
 
-* cut removes current subtree after confirmation.  Keybinding: `Ctrl+X` or `Delete`. Remove the current node from the tree, unwind the model (restore captured stones), and set `_cutMove` to null. UI invalidation and tree-layout ticks fire.
+* cut removes current subtree after confirmation.  Keybinding: `Ctrl+X` or `Delete`. Remove the current node from the tree, unwind the model (restore captured stones), and set `_cutMove` = cut_move only if cut_move.next !== null (if delete the very last move, do not overwrite the previous cut subtree). UI invalidation and tree-layout ticks fire.
 * paste validates subtree root turn color, board occupancy, and sibling-location conflicts.  Keybinding: `Ctrl+V`. If `canPaste()` is false, show a message; otherwise, insert at the current position.  Renumber from the inserted node, `replayMove()` to update board state, and tick UI/layout. 
 * moves after the subtree root move may conflict with pre-existing stones on the board, and we don't allow the user to advance past such a conflict
 * cross-game paste deep-copies via parser-output move generation to avoid shared object graphs.  Keybinding: `Ctrl+Shift+V`. Choose the first other open game in MRU order that has a cut subtree; the rest of the checks and insertion are identical.
@@ -416,7 +416,7 @@ In edit mode:
 ## 9) MRU Games & Last Command
 
 * **MRU**: games array is ordered `[most-recent, ...]`. `setGame(g)` moves it to front.
-* **Ctrl+W (cycle games):**
+* **Ctrl+W (cycle games):** however when browswers hijack ctrl+w, shift+w rotates through the MRU games list.
 
   * Use `lastCommand` `{ type: 'CycleGame', cursor: number }`.
   * On each invocation, increment `cursor`, clamp to array length, pick the target index, and `setGame(target)`, then rebuild MRU.
@@ -442,9 +442,9 @@ It is React-first UI, and there are no imperative element cleanups.  It renders 
 
 * **`components/TreeView.tsx`** (view):
 
-  * Builds an **identity map** `Map<IMoveNext | "start", TreeViewNode>` from the layout matrix (with a `"start"` key).
+  * Builds an **identity map** `Map<Move | "start", TreeViewNode>` from the layout matrix (with a `"start"` key).
   * Renders **SVG** nodes/edges; handles **scroll-to-current**.
-  * **LEGACY Registers a remapper** so the model can signal `ParsedNode → Move` swaps without recomputing layout.  NO LONGER USED because ParseNode no longer exists in code.
+  * **LEGACY Registers a remapper** so the model can signal `ParsedNode → Move` swaps without recomputing layout.  NO LONGER USED because ParseNode no longer exists in code, but the remapper and callback are still wired up in the code.
   * Implements **highlights** (current, next-branch, comment) and **move labeling**.
 
 * **`Game.ts`** (model):
@@ -458,7 +458,7 @@ It is React-first UI, and there are no imperative element cleanups.  It renders 
 * **`AppGlobals.tsx`** (provider):
 
   * **Single place** that wires callbacks on a `Game` **inside `setGame(g)`** (initial game and all new ones).
-  * Exposes LEGACY `setTreeRemapper(fn)` to let `TreeView` register its remap function; forwards `onParsedNodeReified` to it.  NO LONGER NEEDED now that ParseNode no longer exists.
+  * Exposes LEGACY `setTreeRemapper(fn)` to let `TreeView` register its remap function; forwards `onParsedNodeReified` to it.  NO LONGER NEEDED now that ParseNode no longer exists, but the remapper and callback are still wired up in the code.
 
 ---
 
@@ -467,7 +467,7 @@ It is React-first UI, and there are no imperative element cleanups.  It renders 
 * **Layout token**: `treeLayoutVersion`
   `getGameTreeModel(game)` is memoized on this token → **recreates** the layout matrix when topology changes.
 
-* **Paint token**: `treePaintVersion`
+* **Paint token**: `treeHighlightVersion / bumpTreeHighlightVersion`
   Highlights/scrolling depend on this token → **do not** recreate the layout matrix.
 
 **Result:** paint-only changes (navigate, select next branch, toggle comment) re-render a few SVG attributes but **do not** rebuild layout or the identity map.
@@ -479,12 +479,12 @@ It is React-first UI, and there are no imperative element cleanups.  It renders 
 * **`treeViewModel`**: matrix of `TreeViewNode | null`.
 
 * **Identity Map** (UI-owned):
-  `Map<IMoveNext | "start", TreeViewNode>`
+  `Map<Move | "start", TreeViewNode>`
 
   * Every placed node (including Start) is keys → node.
-  * `"start"` maps to `[0,0]` cell for convenience (we don’t keep a stable faux `Move` object outside the model).
+  * `"start"` maps to a TreeViewNode at `[0,0]` cell with a sentinel `new Move(-1, -1, StoneColors.NoColor)` for convenience.  It makes walking the TreeViewNode graph uniform (all Move objects), so there is no special empty / start board object type.
 
-* **LEGACY Remapping** (two paths, NO LONGER NEEDED now that ParseNode no longer exists.):
+* **LEGACY Remapping** (two paths, NO LONGER NEEDED now that ParseNode no longer exists, but remapper and the callback are still wired up in the code.):
 
   1. **LEGACY Proactive**: `Game` calls `onParsedNodeReified(parsed, move)`. The UI deletes the `parsed` key, adds `move` key, and sets `node.node = move`.  
   2. **Lazy**: UI lookups use `lookupOrRemap(key)`; if `move` isn’t found but `move.parsedNode` is, UI swaps on the spot (C# parity).
@@ -513,7 +513,7 @@ It is React-first UI, and there are no imperative element cleanups.  It renders 
 
    * **Move**: filled circle (`#000` black or `#fff` white).
    * **Start**: **letter “S”** centered; **no circle**.
-   * **EditNode**: **letter "E"** centered; **no circle**.
+   * **Move is isEditNode**: **letter "E"** centered; **no circle**.
 3. **Label**:
 
    * **Move number**: `Move.number` when available.
@@ -587,13 +587,13 @@ It is React-first UI, and there are no imperative element cleanups.  It renders 
 
 ---
 
-## 999) Hotkeys, focus, and command routing
+## 11) Hotkeys, focus, and command routing
 
-### 9.1 Global key policy
+### 11.1 Global key policy
 
 Provider key handler routes commands; browser-host fallback bindings are used for browser-hijacked keys.
 
-### 9.2 Focus policy
+### 11.2 Focus policy
 
 * modal open -> disable global key routes
 * editable text target -> do not consume navigation keys
@@ -602,27 +602,27 @@ Provider key handler routes commands; browser-host fallback bindings are used fo
 * Avoid `aria-hidden` on focused ancestors; use `inert` where appropriate to prevent background focus when modal is up.
 
 
-### 9.3 Edit mode policy
+### 13.3 Edit mode policy
 
 Most commands, especially those that change position/tree/file/game, call `exitEditMode()` first to avoid it being sticky.
 
 ---
 
-## 10) UI behavior summary
+## 14) UI behavior summary
 
-### 10.1 Go board
+### 14.1 Go board
 
 * responsive SVG board
 * clicks route to move/adornment/edit handlers based on modifiers and mode
 * board is always square and as large as possible within the left pane, while the right pane uses flex with a fixed min width and max width,and the board expands to fill 
 
-### 10.2 Tree view
+### 14.2 Tree view
 
 * renders start node, move nodes, edit nodes, line bends
 * current/next/comment highlights
 * scroll-to-visibility behavior for current selection
 
-### 10.3 Dialogs
+### 14.3 Dialogs
 
 * message/confirm dialog, new-game, game-info, help
 * dialog focus trap and ESC behavior
@@ -646,7 +646,7 @@ Most commands, especially those that change position/tree/file/game, call `exitE
 * **Electron**: main process requests a final save; renderer performs it and signals completion.
 
 
-### 10.4 Buttons
+### 14.4 Buttons
 
 Buttons (Prev/Next/Home/End) reflect enablement:
 
@@ -654,7 +654,7 @@ Buttons (Prev/Next/Home/End) reflect enablement:
   * **Next** and **End** enabled if `CurrentMove == null && FirstMove != null` OR `CurrentMove?.Next != null`.
   * **Branches button** shows `Branches: 0` (no highlight) or `Branches: n/m` with soft highlight when branching exists (n is current branch number, m is branches count).
 
-### 10.5 Messaging & Queries
+### 14.5 Messaging & Queries
 
 **MessageOrQuery** interface:
 
@@ -669,19 +669,19 @@ Buttons (Prev/Next/Home/End) reflect enablement:
 
 ---
 
-## 11) File I/O, dirty state, autosave
+## 15) File I/O, dirty state, autosave
 
-### 11.1 Dirty model
+### 15.1 Dirty model
 
 Dirty includes structural edits, metadata changes, and comment edits.  The provider owns the dirty flag.
 
-### 11.2 Open/save flow
+### 15.2 Open/save flow
 
 * open: dirty check with user -> read file -> parse -> instantiate game
 * save: serialize current game model -> write through bridge
 * save-as: force destination selection through bridge
 
-### 11.3 Autosave behavior
+### 15.3 Autosave behavior
 
 Provider orchestrates autosave with host storage bridge, including cleanup policy after successful
 save:
@@ -710,7 +710,7 @@ Save game/file flow:
 
 ---
 
-## 12) Ownership matrix (practical)
+## 16) Ownership matrix (practical)
 
 * **App shell**: top-level UI composition + dialog visibility, focus root (`#app-focus-root`), overlay wiring (for example, `openNewGameDialog`).  Calls GameProvider commands via context provider.
 * **Provider/AppGlobals**: command orchestration (`openSgf`, `saveSgf`, `saveSgfAs`, `newGame`), host bridges, context / reactive snapshots, `gameRef` (live pointer), `version/bumpVersion`, MRU helpers, global keybindings routing, dirty-check + autosave prechecks.  Calls bridges (`FileBridge`, `AppStorageBridge`, `KeyBindingBridge`), model methods via `gameRef.current`, `MessageOrQuery`.  Does not touch DOM or call UI components directly (only via callbacks).
@@ -720,16 +720,16 @@ Save game/file flow:
 
 ---
 
-## 13) Coding style and working constraints
+## 17) Coding style and working constraints
 
-### 13.1 TypeScript/React style
+### 17.1 TypeScript/React style
 
 * strict typing preferred; avoid `any` in model paths.
 * explicit null and undefined checks over implicit assumptions.
 * preserve existing local style/comments when making targeted fixes.
 * avoid broad renames/rewrites unless correctness requires it.
 
-### 13.2 Working style
+### 17.2 Working style
 
 * prefer tight, behavior-focused diffs.
 * make invariants explicit (comments/assertions/tests).
@@ -737,30 +737,33 @@ Save game/file flow:
 
 ---
 
-## 14) Accuracy notes and legacy cleanup policy
+## 18) Accuracy notes and legacy cleanup policy
 
-### 14.1 Legacy notes
+### 18.1 Legacy notes
 
 Historical references to "setup node converted to pass + adornments" are legacy implementation
 notes and should not define current behavior.
 
 checkDirtySave no longer relies on `lastCommand` to skip dirty save prompt in order to keep user-initiation context to show open dialog.
 
-Tree view no longer needs a registered remapper because we erased ParseNode from the code and no longer hot swap a Move for a ParseNode in the game tree.
+Tree view no longer needs a registered remapper because we erased ParseNode from the code and no longer hot swap a Move for a ParseNode in the game tree.  The remapper and callback are still wired up in the code but not called.
 
-### 14.2 ParsedNode terminology
+`parsedBadNodeMessage` has a conflated purpose.  Originally, it marked an SGF parsed node as having no move info (that is, no "B" or "W" attribute), and the parser still does that.  Game replay used `parsedBadNodeMessage` to propagate more detailed info from called functions, such as listPropertiesToMove, to callers who message to users.  We don't need to taint parse nodes now that edit / setup nodes are implemented, but the code still uses this parse-time taint to indicate the SGF node is an EditNode before rendering.  We could change the code to set isEditNode in the parser and investigate if propagating error info up from called functions is no longer needed in game.ts.
+
+
+### 18.2 ParsedNode terminology
 
 If older comments/docs mention `ParsedNode`, treat that as legacy language. Current runtime model
 uses `Move` + `parsedProperties` and `ParsedGame` root properties.
 
-### 14.3 Documentation policy
+### 18.3 Documentation policy
 
 When behavior changes, update this spec first-class sections and keep legacy notes quarantined to
 avoid mixed models in active guidance.
 
 ---
 
-## 15) Validation checklist for edit-node changes
+## 19) Validation checklist for edit-node changes
 
 1. Parse SGF with mid-tree AB/AW/AE -> node appears as edit node (`E`) and replays correctly.
 2. Replay edit node applies delete-first/add-second ordering.
@@ -772,7 +775,7 @@ avoid mixed models in active guidance.
 
 ---
 
-## 16) Future cleanup backlog (non-blocking)
+## 20) Future cleanup backlog (non-blocking)
 
 * Add focused regression tests.
 * Consider marking isEditNode in parser and discontinuing `parserSignalBadMsg` and cleaning up current references to sentinel value.

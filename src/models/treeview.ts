@@ -22,7 +22,7 @@
 ///   enum TreeViewNodeKind
 ///
 import { StoneColors, type StoneColor } from "./Board";
-import { Move, type IMoveNext } from "./Board";
+import { Move } from "./Board";
 import type { ParsedGame } from "./sgfparser";
 import { debugAssert } from "../debug-assert";
 
@@ -42,7 +42,7 @@ export type TreeViewNode = {
   // NoColor for StartBoard node, for which we render a letter "S"
   color: StoneColor;
   // Node is the underlying Move model object
-  node: IMoveNext;
+  node: Move;
   // Row has nothing to do with node's coordinates. It is about where this node appears
   // in the grid displaying the entire game tree.
   row: number;
@@ -83,13 +83,13 @@ export function getTreeViewModelColumnsSize () {return treeViewModelColumns;}
 ///
 export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: ParsedGame | null;
                                          branches: Move[] | null;}): (TreeViewNode | null)[][] {
-  let start: IMoveNext | null = null;
+  let start: Move | null = null;
   // Get start node, mock a move for empty board state.
   const m = new Move(-1, -1, StoneColors.NoColor);
   m.next = game.firstMove;
   m.branches = game.branches;
   m.rendered = false;
-  start = m as IMoveNext;
+  start = m;
   // Get layout
   const layoutData = new TreeViewLayoutData();
   layoutGameTreeFromRoot(start, layoutData);
@@ -98,7 +98,7 @@ export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: Pa
 
 /// newTreeModelStart creates the sentinel root cell at [0,0].
 ///
-function newTreeModelStart(pn: IMoveNext, layoutData: TreeViewLayoutData): TreeViewNode {
+function newTreeModelStart(pn: Move, layoutData: TreeViewLayoutData): TreeViewNode {
   const model: TreeViewNode = {
     kind: TreeViewNodeKinds.StartBoard,
     node: pn,
@@ -117,7 +117,7 @@ function newTreeModelStart(pn: IMoveNext, layoutData: TreeViewLayoutData): TreeV
 /// It returns the model for the start (empty board) node, after laying out the rest of the
 /// tree.
 ///
-export function layoutGameTreeFromRoot (pn: IMoveNext, layoutData: TreeViewLayoutData): TreeViewNode {
+export function layoutGameTreeFromRoot (pn: Move, layoutData: TreeViewLayoutData): TreeViewNode {
   // Vars to make arguments to calls below more readable.
   let tree_depth = 0;
   let new_branch_depth = 0;
@@ -132,7 +132,7 @@ export function layoutGameTreeFromRoot (pn: IMoveNext, layoutData: TreeViewLayou
     return model;
   }
   else {
-    next_model = layoutGameTree(getLayoutGameTreeNext(pn) as IMoveNext, layoutData, model.row,
+    next_model = layoutGameTree(getLayoutGameTreeNext(pn)!, layoutData, model.row,
                                 tree_depth + 1, new_branch_depth, branch_root_row);
     model.next = next_model;
   }
@@ -146,12 +146,12 @@ export function layoutGameTreeFromRoot (pn: IMoveNext, layoutData: TreeViewLayou
 /// getLayoutGameTreeNext returns branches[0] if there are branches, else next. Moves chain next to
 /// the branch that is selected, but when laying out the game tree, we always want to first branch.
 ///
-function getLayoutGameTreeNext (pn: IMoveNext): IMoveNext | null {
+function getLayoutGameTreeNext (pn: Move): Move | null {
   // Debug.Assert(pn.GetType() !== typeof(Game));
-  if (pn.IMNBranches !== null)
-    return pn.IMNBranches[0];
+  if (pn.branches !== null)
+    return pn.branches[0];
   else
-    return pn.IMNNext;
+    return pn.next;
 }
 
 // layoutGameTree recurses through the moves assigning them to a location in the display grid.
@@ -162,7 +162,7 @@ function getLayoutGameTreeNext (pn: IMoveNext): IMoveNext | null {
 // tree_depth is just that, and branch_depth is the heigh to the closest root node of a
 // branch, where its immediate siblings branch too.
 //
-export function layoutGameTree (pn: IMoveNext, layoutData: TreeViewLayoutData, cum_max_row: number,
+export function layoutGameTree (pn: Move, layoutData: TreeViewLayoutData, cum_max_row: number,
                                 tree_depth: number, branch_depth: number, branch_root_row: number
                                ): TreeViewNode {
   // Create and init model, set
@@ -197,14 +197,14 @@ export function layoutGameTree (pn: IMoveNext, layoutData: TreeViewLayoutData, c
   return bend;
 } //layoutGameTree()
 
-function layoutGameTreeBranches(pn: IMoveNext, layoutData: TreeViewLayoutData, tree_depth: number,
+function layoutGameTreeBranches(pn: Move, layoutData: TreeViewLayoutData, tree_depth: number,
                                 model: TreeViewNode, next_model: TreeViewNode): void {
-  if (pn.IMNBranches !== null) {
+  if (pn.branches !== null) {
     model.branches = [next_model];
     // Skip branches[0] since caller already did branch zero as pn's next move, but note, when
     // pn is a Move (that is, not a ParsedNode), then branches[0] may not equal pn.Next.
-    for (let i = 1; i < pn.IMNBranches.length; i++) {
-      const branch_model = layoutGameTree(pn.IMNBranches[i], layoutData, model.row,
+    for (let i = 1; i < pn.branches.length; i++) {
+      const branch_model = layoutGameTree(pn.branches[i], layoutData, model.row,
                                           tree_depth + 1, 1, model.row);
       model.branches.push(branch_model);
     }
@@ -214,14 +214,14 @@ function layoutGameTreeBranches(pn: IMoveNext, layoutData: TreeViewLayoutData, t
 // setup_layout_model initializes the current node model for the display, with row, column,
 // color, etc.  This returns the new model element.
 //
-function setupTreeLayoutModel (pn: IMoveNext, layoutData: TreeViewLayoutData, cum_max_row: number,
+function setupTreeLayoutModel (pn: Move, layoutData: TreeViewLayoutData, cum_max_row: number,
                               tree_depth: number): TreeViewNode {
   const model: TreeViewNode = {
     kind: TreeViewNodeKinds.Move,
     node: pn,
     row: 0,
     column: tree_depth,
-    color: pn.IMNColor,
+    color: pn.colorMaybeUnrendered(),
     next: null,
     branches: null,
   };

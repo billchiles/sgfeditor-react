@@ -1,5 +1,5 @@
 import { debugAssert } from "../debug-assert";
-
+import { parserSignalBadMsg } from "./Game";
 
 export const StoneColors = {
   Black: "black",
@@ -138,13 +138,18 @@ export class Board {
 /// Moves (and IMoveNext for Adornments too)
 ///
 
-export interface IMoveNext {
-     readonly IMNColor: StoneColor;
-     readonly IMNNext: IMoveNext | null;
-     readonly IMNBranches: IMoveNext[] | null;
-   }
+// LEGACY type due to having to abandon C# dynamic when .NET broke the dynamic support and inline
+// caching so that the language feature was unusably slow, and we had to add another first class
+// named type for a few places in the code.  In Typescript we could return to structural types, but
+// the need for this is totally gone now that we removed the old parser output type.
+//
+// export interface IMoveNext {
+//      readonly IMNColor: StoneColor;
+//      readonly IMNNext: IMoveNext | null;
+//      readonly IMNBranches: IMoveNext[] | null;
+//    }
 
-export class Move implements IMoveNext {
+export class Move { //implements IMoveNext {
   row: number; // not set when Move.rendered is false, representing nodes parsed in a file
   column: number; // not set when Move.rendered is false, representing nodes parsed in a file
   color: StoneColor; // not set when Move.rendered is false, representing nodes parsed in a file
@@ -161,9 +166,15 @@ export class Move implements IMoveNext {
   rendered: boolean;
   // raw SGF properties from a file, lifted to move when they are readied for rendering
   parsedProperties: Record<string, string[]> | null;
-  // parse-time taint that something's wrong with the SGF info for this node, or we don't handle it
+  // parsedBadNodeMessage has a conflated purpose.  Originally, it marked an SGF node as having
+  // no move info (that is, no "B" or "W" attribute), and it still does that.  We also used it to 
+  // propagate more detailed info from called functions, such as listPropertiesToMove, to callers 
+  // who message to users.  We don't need to do this now that EditNodes are implemented, but we
+  // continue to use this parse-time taint to indicate the SGF node is an EditNode before rendering.
   parsedBadNodeMessage: string | null;
-  isEditNode: boolean; // True when this Move represents an SGF node with AB/AW/AE properties (no B/W)
+  // True when this Move represents an SGF node with AB/AW/AE properties (no B/W).
+  // Can only test this if liftPropertiesToMove has been called on Move.
+  isEditNode: boolean; 
   // EditNodes have three lists of stones for AB, AW, and AE.
   addedBlackStones: Move[]; // never null
   addedWhiteStones: Move[]; // never null
@@ -208,18 +219,12 @@ export class Move implements IMoveNext {
     }
   }
 
-  // addBranch (m: Move) {
-  //   if (this.branches === null) this.branches = [];
-  //   this.branches.push(m);
-  // }
-
-  addAdornment (a: Adornment) {
-    this.adornments.push(a);
-  }
-
-  // IMoveNext:
-  //
-  get IMNColor (): StoneColor {
+  /// colorMaybeUnrendered returns a color for move when it is possible it is not a rendered move.
+  /// Other code in the move and board classes mostly operate on board-placed stones, which are
+  /// rendered if they are there.  TreeView and things that iterate Moves beyond replayed moves need
+  /// this access.
+  ///
+  colorMaybeUnrendered (): StoneColor {
     if (this.rendered)
       return this.color;
     else {
@@ -230,15 +235,49 @@ export class Move implements IMoveNext {
       else
         return StoneColors.NoColor;
     }
-  }
+  } // colorMaybeUnrendered()
+
+  /// isEditNodeMaybeUnrendered returns if move is an Editnode when it is possible it is not a 
+  /// rendered move.  Technically, if liftPropertiesToMove has been called on this Move, then its
+  /// isEditNode property is valid.  Most code operates on rendered or lifted Move objects.
+  /// TreeView and things that iterate Moves beyond replayed moves (renumberMoves()) need this
+  /// access.
   ///
-  get IMNNext (): IMoveNext | null {
-    return this.next;
+  isEditNodeMaybeUnrendered (): boolean {
+    return this.isEditNode ||
+           (! this.rendered && this.parsedBadNodeMessage === parserSignalBadMsg);
+    // if (this.rendered)
+    //   return this.isEditNode;
+    // else 
+    //   return ! (("B" in this.parsedProperties!) || ("W" in this.parsedProperties!))
+  } // isEditNodeMaybeUnrendered()
+
+  addAdornment (a: Adornment) {
+    this.adornments.push(a);
   }
-  ///
-  get IMNBranches (): IMoveNext[] | null {
-    return (this.branches === null) ? null : this.branches;
-  }
+
+  // IMoveNext:
+  //
+  // get IMNColor (): StoneColor {
+  //   if (this.rendered)
+  //     return this.color;
+  //   else {
+  //     if ("B" in this.parsedProperties!)
+  //       return StoneColors.Black;
+  //     else if ("W" in this.parsedProperties!)
+  //       return StoneColors.White;
+  //     else
+  //       return StoneColors.NoColor;
+  //   }
+  // }
+  // ///
+  // get IMNNext (): IMoveNext | null {
+  //   return this.next;
+  // }
+  // ///
+  // get IMNBranches (): IMoveNext[] | null {
+  //   return (this.branches === null) ? null : this.branches;
+  // }
 } // Move class
 
 ///

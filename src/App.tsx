@@ -17,7 +17,6 @@ import { GameProvider, GameContext, addOrGotoGame } from "./models/AppGlobals";
 import NewGameDialog from "./components/NewGameDialog";
 import MessageDialog, { type MessageRequest, type ConfirmOptions }  from "./components/MessageDialog";
 import { Game } from "./models/Game";
-//import type { IMoveNext } from "./models/Board";
 import HelpDialog from "./components/HelpDialog";
 import { HELP_TEXT } from "./components/helpText";
 import GameInfoDialog from "./components/GameInfoDialog";
@@ -95,7 +94,6 @@ function AppContent({
   const g = appGlobals?.game;
   const treeViewLayout: (TreeViewNode | null)[][] =
     useMemo(() => getGameTreeModel(g as Game), [g, appGlobals!.treeLayoutVersion]);
-  //let index: Map<IMoveNext | "start", TreeViewNode>;
   // useMemo's run on first render and when dependencies change.
   const statusTop = 
     useMemo(() => {
@@ -408,16 +406,6 @@ function MoveNavCommandButtons() {
       >
         {branchesLabel}
       </button>
-      {/* <button
-        className={`${styles.btn} ${game && game.editMode ? styles.btnBranchActive : ""}`}
-        title="Toggle edit move mode (F2)"
-        onClick={() => {
-          if (! game) return;
-          game.toggleEditMode();
-        }}
-      >
-        foo
-      </button> */}
     </>
   );
 }

@@ -13,17 +13,15 @@
 /// - Node visuals are minimal for now (colored discs + small labels).
 ///
 /// NOTE: This component expects the caller to provide { grid, index } from getGameTreeModel() and
-///       a currentNode pointer (IMoveNext | "start") to drive highlight & scrolling.
+///       a currentNode pointer (Move | "start") to drive highlight & scrolling.
 
 import React from "react";
 import { Move, StoneColors } from "../models/Board";
-import type { IMoveNext } from "../models/Board";
 import type { TreeViewNode } from "../models/treeview";
 import { TreeViewNodeKinds, getTreeViewModelRowsSize, 
          getTreeViewModelColumnsSize } from "../models/treeview";
 import { debugAssert } from "../debug-assert";
 import { GameContext } from "../models/AppGlobals";
-import { parserSignalBadMsg } from "../models/Game";
 
 
 type Props = {
@@ -79,7 +77,7 @@ const TARGET_BOTTOM_MARGIN = 32; // for below case
 export default function TreeView ({ treeViewModel, current, className }: Props) {
   // Build mapping from Move to TreeViewNodes when treeViewModel changes
   const treeViewMoveMap = React.useMemo(() => {
-    const treeViewMoveMap = new Map<IMoveNext | "start", TreeViewNode>();
+    const treeViewMoveMap = new Map<Move | "start", TreeViewNode>();
     for (let row = 0; row < getTreeViewModelRowsSize(); row++) {
       for (let col = 0; col < getTreeViewModelColumnsSize(); col++) {
         const node = treeViewModel[row][col];
@@ -99,7 +97,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
   const app = React.useContext(GameContext)!;
   React.useEffect(() => {
     if (!app?.setTreeRemapper) return;
-    const remap = (oldKey: IMoveNext, newMove: IMoveNext) => {
+    const remap = (oldKey: Move, newMove: Move) => {
       // oldkey was a ParsedNode before erasing them as AST, so NOW NEVER CALL THIS VIA GAME
       const node = treeViewMoveMap.get(oldKey); 
       if (!node) return;
@@ -113,8 +111,8 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     app.setTreeRemapper(remap);
     return () => app.setTreeRemapper?.(null);
   }, [app, treeViewMoveMap]);
-  // UI-side “TreeNodeForMove”: Given a Move (or any IMoveNext), return its TreeViewNode.
-  const lookupMoveOrRemap = React.useCallback((key: IMoveNext): TreeViewNode | null => {
+  // UI-side “TreeNodeForMove”: Given a Move, return its TreeViewNode.
+  const lookupMoveOrRemap = React.useCallback((key: Move): TreeViewNode | null => {
     let n = treeViewMoveMap.get(key) ?? null;
     if (n) return n;
     debugAssert(true, "lookupMoveOrRemap should always find Move in the map")
@@ -368,9 +366,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               )}
 
               {/* main disc */}
-              {cell.kind === TreeViewNodeKinds.Move && cell.node instanceof Move && 
-               ! (cell.node.isEditNode || 
-                  (! cell.node.rendered && cell.node.parsedBadNodeMessage === parserSignalBadMsg)) && 
+              {cell.kind === TreeViewNodeKinds.Move && ! cell.node.isEditNodeMaybeUnrendered() && 
                 (
                   <circle
                     cx={cx}
@@ -385,9 +381,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               {/* This test doesn't confirm anything at runtime since the as operator in typescript
                   is a no-op except to squelch compiler warnings, but the test used for main disc
                   confirms Move kind cells only have Move node objects and silences the compiler.*/}
-              {cell.kind === TreeViewNodeKinds.Move && cell.node instanceof Move && 
-                (cell.node.isEditNode || 
-                  (! cell.node.rendered && cell.node.parsedBadNodeMessage === parserSignalBadMsg)) && 
+              {cell.kind === TreeViewNodeKinds.Move && cell.node.isEditNodeMaybeUnrendered() && 
                 (
                 <text
                   x={cx}
@@ -424,7 +418,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
                 let num = typeof n?.number === "number" ? n.number : null;
                 // unrendered moves have a number that is zero, all actual moves have number > 0
                 // if (num === null || num === 0) num = cell.column;
-                if (n.isEditNode || (! n.rendered && n.parsedBadNodeMessage === parserSignalBadMsg)) 
+                if (n.isEditNodeMaybeUnrendered()) 
                   return null; 
                 // Moves come out of the parser numbered, so this should never fire.
                 if (num === null || num === 0) return null;

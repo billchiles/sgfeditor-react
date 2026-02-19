@@ -759,7 +759,7 @@ gotoStart (): void {
   ///
   private readyForRendering (move: Move): [Move | null, boolean] {
     debugAssert(move.parsedProperties !== null, "Only call readyForRendering on moves made from parsed nodes.");
-    if (move.isEditNode) {
+    if (move.isEditNode) { // isEditNode has been lifted from properties though move is unrendered
       // Initialize edit node stone lists from parsed properties.
       // IMPORTANT: make AB/AW Move objects, but don't add them to the board before doing deletions.
       this.readyUnrenderedEditNode(move);
@@ -2485,7 +2485,7 @@ function renumberMoves (move: Move, countOverride: number | null = null): void {
    move = move.next!;
    while (move !== null) {
     // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
-     if (move.isEditNode || (! move.rendered && move.parsedBadNodeMessage === parserSignalBadMsg)) {
+     if (move.isEditNodeMaybeUnrendered()) {
        move.number = 0;
      } else {
        move.number = count + 1;
@@ -2501,7 +2501,7 @@ function renumberMoves (move: Move, countOverride: number | null = null): void {
   if (move !== null)
     for (const m of move.branches!) {
       // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
-      if (m.isEditNode || (! m.rendered && m.parsedBadNodeMessage === parserSignalBadMsg)) {
+      if (m.isEditNodeMaybeUnrendered()) {
         m.number = 0;
         renumberMoves(m, count);
       } else {
@@ -2600,7 +2600,7 @@ function genParserOutputMove (move: Move, size: number): Move {
     // Adornments
     genAdornmentProps(move.adornments, props, false, size); // false flipped
   }
-  // Produce a parser-style Move (row/col don’t matter when rendered=false; IMN uses parsedProperties)
+  // Produce a parser-style Move (row/col don’t matter when rendered=false; parsedProperties rule)
   const m = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
   m.isPass = false;
   m.rendered = false;
