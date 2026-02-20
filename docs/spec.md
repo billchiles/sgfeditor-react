@@ -177,7 +177,7 @@ Avoid state mutation in place:
 * **Board coords**: Model uses **1-based** row/col for Go vernacular; board’s underlying array is **0-based**. Helpers convert.
 * **Row labels**: UI displays rows **bottom (1) → top (19)**; internal math accounts for display orientation when needed.
 * **Column labels**: UI skips the letter "I" for column labels, common in Go game move coordinates to avoid confusion with "L".
-* **Move**: linked nodes (1-based row/col); `Next`, optional `Branches`, `DeadStones`, `Comments`, `Rendered`.
+* **Move**: linked nodes; `Next`, optional `Branches`, `DeadStones`, `Comments`, `Rendered`.
 * **SGF Parser** (`sgfparser.ts`): returns `ParsedGame / Move` trees; helpers to lift parse properties to `Move`s.
 
 ### 4.2 `Move`
@@ -206,17 +206,25 @@ Important fields:
 
 ### 4.4 Numbering invariants
 
-* Normal moves are numbered from 1 along depth.
-* Sibling variations share the same move number for that depth.
+* Normal moves are numbered from 1 along depth in the game tree.
+* Sibling variations (branches) share the same move number for that depth.
 * Edit/setup nodes use sentinel `number = 0`.
 * Parsed move numbering is established during parse bootstrap (`setupFirstParsedMove` + renumber).
-* Replay readiness should verify parity rather than silently rewriting expected numbering.
+* `readyForRendering` verifies numbering.
 
-### 4.5 isEditNode invariant
+### 4.5 isEditNode Invariant
 
 move.isEditNode is only valid to test after calling liftPropertiesToMove or testing that move.rendered is true.  Code that traverses the game tree beyond rendered moves (tree view node display, renumberMoves(), etc.) should call move.isEditNodeMaybeUnrendered().  A couple places that advance through moves call liftPropertiesToMove and then test move.isEditNode.
 
-### 4.6 StoneColor
+### 4.6 color Invariant
+
+move.color is only valid to test after calling liftPropertiesToMove or testing that move.rendered is true.  Code that traverses the game tree beyond rendered moves (tree view node display) should call move.colorMaybeUnrendered().
+
+### 4.7 row and column Invariant
+
+move.row and move.column have 1-based indexes while the board class uses 0-based behind its interface.  Move model numbers reflect how users talk about moves, such as "a move at the 3,4" or "a move at the 3,3".  Pass moves and edit node moves have indexes of board.NoIndex because they don't occur on the board.  The TreeViewNode model has a sentinel faux Move object for the start or empty board, and its indexes are -1 and -1 to distinguish from board.NoIndex.
+
+### 4.8 StoneColor
 
   ```ts
   // We keep a sentinel for “no color” to represent start/pass/edit/bad nodes in

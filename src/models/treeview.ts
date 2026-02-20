@@ -84,7 +84,7 @@ export function getTreeViewModelColumnsSize () {return treeViewModelColumns;}
 export function getGameTreeModel (game: { firstMove: Move | null; parsedGame: ParsedGame | null;
                                          branches: Move[] | null;}): (TreeViewNode | null)[][] {
   let start: Move | null = null;
-  // Get start node, mock a move for empty board state.
+  // Get start node mock move for empty board state.  Do not use board.NoIndex, need distinct index.
   const m = new Move(-1, -1, StoneColors.NoColor);
   m.next = game.firstMove;
   m.branches = game.branches;

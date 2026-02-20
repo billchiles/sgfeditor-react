@@ -304,7 +304,9 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
           // const isCurrent = current ? (current === m) ||
           //                             (current.row === m.row && current.column === m.column)
           //                           : false;
-          if (current === m && current.isEditNode === false) {
+          if (current === m || 
+              (current !== null && current.row === m.row && current.column === m.column)) { 
+            //&& current.isEditNode === false) {
             const ringColor = m.color === StoneColors.Black ? "#fff" : "#000";
             circles.push(
               <circle key={`curmark-${x}-${y}`} cx={cx} cy={cy} r={markRadius} fill="none"

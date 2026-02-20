@@ -163,7 +163,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
       "You are replaying moves from a pasted branch that has conflicts with stones on the " +
       "board, or replaying moves with bad properties from an SGF file.  If you clicked in " +
       "the tree view, try clicking an earlier node and using arrows to advance to the move.";
-    if (node!.node instanceof Move) {
+    if (node!.node instanceof Move) { // It is always a Move now.
       const move = node!.node as Move;
       if (move.row !== -1 && move.column !== -1 && ! gotoGameTreeMove(move)) {
         // move is NOT dummy move for start node of game tree view, so advance to it.

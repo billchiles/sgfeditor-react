@@ -1532,23 +1532,22 @@ readyUnrenderedAdornments (move: Move): void {
 
   public TheEmptyMovePath: Array<[number, number]> = [[0, -1]];
 
-  /// getPathToMove returns a list of tuples, the first int of which is a move
-  /// number to move to paired with what branch to take at that move.  The last
-  /// move (the argument) has a sentinel -1 branch int.  Only moves that take
-  /// an alternative branch (not branch zero) are in the result.  This assumes
-  /// move is in the game and on the board, asserting if not.  The 0,-1 tuple
-  /// indicates the empty initial board state, or the empty path.
+  /// getPathToMove returns a list of tuples, the first int of which is a move's tree depth
+  /// to advance to, and the second int for what branch to take at that depth.  The last
+  /// move (the argument) has a sentinel -1 branch int.  Only moves that take a branch that is 
+  /// not branch zero are in the result path.  This assumes move is in the game and on the board. 
+  /// The 0,-1 tuple indicates the empty initial board state, or the empty path.
   ///
   public getPathToMove (move: Move): Array<[number, number]> {
-    if (! move.rendered) return this.getPathToUnnumberedMove(move); 
+    // if (! move.rendered) return this.getPathToUnnumberedMove(move); 
     debugAssert(move !== null, "Must call with non-null move.");
     let parent = move.previous;
-    const res: Array<[number, number]> = [[move.number, -1]];
+    const res: Array<[number, number]> = [[move.treeDepth, -1]];
     while (parent !== null) {
       if (parent.branches !== null && parent.branches[0] !== move) {
         const loc = parent.branches.indexOf(move);
         debugAssert(loc !== -1, "Move must be in game.");
-        res.push([parent.number, loc]);
+        res.push([parent.treeDepth, loc]);
       }
       move = parent;
       parent = move.previous;
@@ -1564,35 +1563,35 @@ readyUnrenderedAdornments (move: Move): void {
   /// getPathToUnnumberedMove is nearly identical to getPathToMove, but unrendered moves don't have
   /// move numbers.  We have to compute the move number as we walk back to the start.
   ///
-  public getPathToUnnumberedMove (move: Move): Array<[number, number]> {
-    debugAssert(move !== null, "Must call with non-null parsed node.");
-    let parent = move.previous;
-    // if (parent === null)
-    //   return this.TheEmptyMovePath;
-    // No move nums in unrendered move nodes, so count down, then fix numbers at end.
-    let moveNum = 1000000;
-    const res: Array<[number, number]> = [[moveNum, -1]];
-    while (parent !== null) {
-      moveNum -= 1;
-      if (parent.branches !== null && parent.branches[0] !== move) {
-        const loc = parent.branches.indexOf(move);
-        debugAssert(loc !== -1, "Move must be in game.");
-        res.push([moveNum, loc]);
-      }
-      move = parent;
-      parent = move.previous;
-    }
-    moveNum -= 1;
-    // Add tuple for move zero if we need to select a branch from the empty board state.
-    if (this.branches !== null && this.branches[0] !== move) {
-      const loc = this.branches.indexOf(move);
-      debugAssert(loc !== -1, "Move must be in game.");
-      res.push([moveNum, loc]); // moveNum becomes a zero when we fix numbers below.
-    }
-    // Fix up numbers to match move numbers.
-    const final = res.map(pair => [pair[0] - moveNum, pair[1]] as [number, number]);
-    return final.reverse();
-  }
+  // public getPathToUnnumberedMove (move: Move): Array<[number, number]> {
+  //   debugAssert(move !== null, "Must call with non-null parsed node.");
+  //   let parent = move.previous;
+  //   // if (parent === null)
+  //   //   return this.TheEmptyMovePath;
+  //   // No move nums in unrendered move nodes, so count down, then fix numbers at end.
+  //   let moveNum = 1000000;
+  //   const res: Array<[number, number]> = [[moveNum, -1]];
+  //   while (parent !== null) {
+  //     moveNum -= 1;
+  //     if (parent.branches !== null && parent.branches[0] !== move) {
+  //       const loc = parent.branches.indexOf(move);
+  //       debugAssert(loc !== -1, "Move must be in game.");
+  //       res.push([moveNum, loc]);
+  //     }
+  //     move = parent;
+  //     parent = move.previous;
+  //   }
+  //   moveNum -= 1;
+  //   // Add tuple for move zero if we need to select a branch from the empty board state.
+  //   if (this.branches !== null && this.branches[0] !== move) {
+  //     const loc = this.branches.indexOf(move);
+  //     debugAssert(loc !== -1, "Move must be in game.");
+  //     res.push([moveNum, loc]); // moveNum becomes a zero when we fix numbers below.
+  //   }
+  //   // Fix up numbers to match move numbers.
+  //   const final = res.map(pair => [pair[0] - moveNum, pair[1]] as [number, number]);
+  //   return final.reverse();
+  // }
 
   /// advanceToMovePath takes a path, where each tuple is a move number and the
   /// branch index to take at that move.  The branch is -1 for the last move.
@@ -1622,9 +1621,6 @@ readyUnrenderedAdornments (move: Move): void {
       // undoing game creation as a cleanup), we stop propagating the difference of no possible move
       // vs. a move that works while a sibling move has a parsed node issue.  Users can use arrows
       // after the ffwd op to see the error display.
-      // BUG: If user clicks on treeview nodes representing bad parsed nodes, the code will try to
-      // advance to it, users gets an err display, but you cannot then arrow around even when if you
-      // had only arrowed around to begin with, you could arrow all around the tree's good nodes.
       return false;
     }
     let next = curMove.next;
@@ -1632,7 +1628,7 @@ readyUnrenderedAdornments (move: Move): void {
     for (const n of path) {
       const target = n[0];
       // Play moves with no branches or all taking default zero branch ...
-      while (curMove.number !== target) {
+      while (curMove.treeDepth !== target) {
         if (curMove.branches !== null && curMove.branches[0] !== next) {
           this.currentMove = curMove; // Must set this before calling SetCurrentBranch.
           this.setCurrentBranch(0);
@@ -1761,7 +1757,7 @@ readyUnrenderedAdornments (move: Move): void {
   public async pasteMove (): Promise<void> {
     const cutmove = this._cutMove;
     debugAssert(cutmove !== null, "There is no cut sub tree to paste.");
-    if (cutmove.color !== this.nextColor) {
+    if (! cutmove.isEditNode && cutmove.color !== this.nextColor) {
       await this.message?.message("Cannot paste cut move that is same color as current move.");
       return;
     }
@@ -1806,7 +1802,7 @@ readyUnrenderedAdornments (move: Move): void {
 
   /// PasteMoveInsert take a move representing a cut move and does the work of inserting the move
   /// into the game model.  This assumes new_move is not in conflict with a move on the board, which
-  /// is necessary; otherwise, CheckSelfCaptureNoKill throws.
+  /// is necessary; otherwise, CheckSelfCaptureNoKill throws.  new_move must be readyForRendering.
   ///
   private async pasteMoveInsert (new_move: Move): Promise<void> {
     // If CheckSelfCaptureNoKill returns false, then it updates cutMove to have dead
@@ -1825,17 +1821,19 @@ readyUnrenderedAdornments (move: Move): void {
       else
         this.branches.push(new_move);
       this.firstMove = new_move;
-      this.firstMove.number = 1;
+      new_move.number = new_move.isEditNode ? 0 : 1;
+      new_move.treeDepth = 1;
     } else {
       // If we had a move to cut, then clearly there are moves in the game.  If there is no first
-      // move, then user must have cut the only first move there was and is not pasting it back.
+      // move, then user must have cut the only first move there was and is now pasting it back.
       // There is no branching initial board state if there was no first move.
       this.firstMove = new_move;
-      this.firstMove.number = 1;
+      new_move.number = new_move.isEditNode ? 0 : 1;
+      new_move.treeDepth = 1;
     }
     new_move.previous = cur_move;  // stores null appropriately when no current
     this.isDirty = true;
-    renumberMoves(new_move);
+    renumberMoves(new_move, new_move.isEditNode ? this.moveCount : null);
     // If pasting this game's cut move, then set to null so that UI disables pasting.
     if (this._cutMove === new_move) this._cutMove = null;
     await this.replayMove();
@@ -1850,7 +1848,7 @@ readyUnrenderedAdornments (move: Move): void {
   ///
   public async pasteMoveOtherGame (other: Game): Promise<void> {
     const cutmove = other._cutMove!; // Must be called on game with cut move.
-    if (cutmove.color !== this.nextColor) {
+    if (! cutmove.isEditNode && cutmove.color !== this.nextColor) {
       await this.message?.message("Cannot paste cut move that is same color as current move.");
       return;
     }
@@ -1879,16 +1877,26 @@ readyUnrenderedAdornments (move: Move): void {
       await nextMoveDisplayError(other.message!.message, head);
       return null;
     }
-    this.board.addStone(head); // Must add before calling readyForRendering which calls checkForKill
+    if (! head.isEditNodeMaybeUnrendered()) head.number = this.moveCount + 1;
+    head.treeDepth = this.currentMove === null ? 1 : this.currentMove.treeDepth + 1;
+    renumberMoves(head, head.isEditNodeMaybeUnrendered() ? this.moveCount : null);
+    if (! head.isEditNodeMaybeUnrendered() && ! head.isPass) {
+      this.board.addStone(head); // Must add before calling readyForRendering which calls checkForKill
+    }
     const [resmove, err] = this.readyForRendering(head);
     if (resmove === null || err) { // Issue with parsed properties, cannot go forward.
       const msg = resmove !== null ? nextMoveGetMessage(resmove as Move) : "";
       await this.message?.message?.(
         "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
         "in the SGF file.\nYou cannot play further down that branch... " + msg );
+      if (! head.isEditNodeMaybeUnrendered() && ! head.isPass) {
+        this.board.removeStone(head); // Gets added by pasteMoveOtherGame via pasteMoveInsert
+      }
       if (resmove === null) return null;
     }
-    this.board.removeStone(head); // Gets added by pasteMoveOtherGame via pasteMoveInsert
+    if (! head.isEditNodeMaybeUnrendered() && ! head.isPass) {
+      this.board.removeStone(head); // Gets added by pasteMoveOtherGame via pasteMoveInsert
+    }
     return head;
   }
 
@@ -2190,7 +2198,7 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
       // Note, do not incr g.move_count since first move has not been rendered,
       // so if user clicks on the board, that should be number 1 too.
       if (! mv.isEditNode) mv.number = g.moveCount + 1;
-      renumberMoves(mv);
+      renumberMoves(mv, mv.isEditNode ? g.moveCount + 1 : null);
       // Don't set previous point because these are first moves, so prev is null.
     }
     g.branches = g.parsedGame!.branches;
@@ -2205,7 +2213,7 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
       // Note, do not incr g.move_count since first move has not been rendered,
       // so if user clicks, that should be number 1 too.
       if (! move.isEditNode) move.number = g.moveCount + 1;
-      renumberMoves(move);
+      renumberMoves(move, move.isEditNode ? g.moveCount + 1 : null);
     }
   }
   g.firstMove = move;
@@ -2466,40 +2474,54 @@ function pasteNextMove (move: Move, cutMove: Move): void {
     } else {
       move.branches.push(cutMove);
     }
-    move.next = cutMove;
+    move.next = cutMove; // make cutMove the active branch
   } else {
     move.next = cutMove;
   }
   cutMove.previous = move;
-  move.next.number = move.number + 1; // moves further out are renumbered by pastMoveInsert
+  // moves further out are renumbered by pastMoveInsert
+  cutMove.number = move.isEditNode ? 0 : move.number + 1; 
+  cutMove.treeDepth = move.treeDepth + 1;
 }
 
-/// renumberMoves takes a move with the correct number assignment (or an override number) and walks
-/// the sub tree of moves to reassign new numbers to Moves.  setupFirstParsedMove calls this after
-/// so that parsed-state Move objects have a number for tree view display.  game.pasteMoveInsert 
-/// also calls this to fix move numbers to their new locations.
+/// renumberMoves takes a move with the correct number assignment (or an countOverride number 
+/// because move is an edit node with number === 0).  The move must have a correct treeDepth
+/// property.  This function walks the sub tree of moves to reassign new numbers and treeDepths
+/// to Moves.  setupFirstParsedMove calls this so that parsed-state Move objects have a number 
+/// for tree view display and clicking in the tree view.  game.pasteMoveInsert also calls this 
+/// to fix move numbers and treeDepths to their new locations.
 ///
 function renumberMoves (move: Move, countOverride: number | null = null): void {
- let count = (countOverride !== null) ? countOverride : move.number;
- if (move.branches === null) {
-   move = move.next!;
-   while (move !== null) {
-    // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
-     if (move.isEditNodeMaybeUnrendered()) {
-       move.number = 0;
-     } else {
-       move.number = count + 1;
-       count += 1;
-     }
-     if (move.branches === null)
-       move = move.next!;
-     else
-       break;
-   }
+  let count = (countOverride !== null) ? countOverride : move.number;
+  let depth = move.treeDepth;
+  // I use this recursing pattern elsewhere, but here I start iterating on move.next.
+  // If move arg is already branching, need to jump past the while loop for move, not curmove.
+  let branchNode: Move | null = (move.branches !== null) ? move : null;
+  let curmove: Move | null = move.next;
+  if (branchNode === null) {
+    while (curmove !== null) {
+      depth += 1;
+      curmove.treeDepth = depth;
+      // If curmove is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
+      if (curmove.isEditNodeMaybeUnrendered()) {
+        curmove.number = 0;
+      } else {
+        curmove.number = count + 1;
+        count += 1;
+      }
+      if (curmove.branches === null)
+        curmove = curmove.next;
+      else {
+        branchNode = curmove;
+        break;
+      }
+    }
   }
-  // Only get here when move is None, or we're recursing on branches.
-  if (move !== null)
-    for (const m of move.branches!) {
+  // Only get here when curmove is null after while loop, or we're recursing on branches.
+  if (branchNode !== null) {
+    depth += 1; //const childDepth = branchNode.treeDepth + 1;
+    for (const m of branchNode.branches!) {
+      m.treeDepth = depth;
       // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
       if (m.isEditNodeMaybeUnrendered()) {
         m.number = 0;
@@ -2509,35 +2531,9 @@ function renumberMoves (move: Move, countOverride: number | null = null): void {
         renumberMoves(m);
       }
     }
+  }
 } // renumberMoves()
 
-// function renumberMoves (move: Move, countOverride: number | null = null): void {
-//   let count = (countOverride !== null) ? countOverride : move.number;
-//   let cur: Move | null = move.next;
-//   while (cur !== null) {
-//     // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
-//     if (cur.isEditNode || (! cur.rendered && cur.parsedBadNodeMessage === parserSignalBadMsg)) {
-//       cur.number = 0;
-//     } else {
-//       cur.number = count + 1;
-//       count += 1;
-//     }
-//     if (cur.branches !== null) {
-//       for (const m of cur.branches) {
-//         // If move is not rendered, then sentinel value marks an AB/AW/AE node for old design reasons.
-//         if (m.isEditNode || (! m.rendered && m.parsedBadNodeMessage === parserSignalBadMsg)) {
-//           m.number = 0;
-//           renumberMoves(m, count);
-//         } else {
-//           m.number = count + 1;
-//           renumberMoves(m);
-//         }
-//       }
-//       break;
-//     }
-//     cur = cur.next;
-//   }
-// } // renumberMoves()
 
 ///
 //// Generating Print and Parser-mimicking Moves
@@ -2587,14 +2583,37 @@ function genParserOutputMove (move: Move, size: number): Move {
                                           ? copyProperties(move.parsedProperties) : {};
   // if rendered, move could be modified.  If not rendered, just use parsed data.
   if (move.rendered) {
-    // Color 
-    if (move.color === StoneColors.Black) {
-      props["B"] = [getParsedCoordinates(move, false, size)]; // false flipped
-    } else if (move.color === StoneColors.White) {
-      props["W"] = [getParsedCoordinates(move, false, size)]; // false flipped
-    } else {
+    if (move.isEditNode) {
       delete props["B"]; delete props["W"];
-    }
+      move.parsedBadNodeMessage = parserSignalBadMsg; // Parser does this, still used as flag
+      if (move.addedBlackStones.length > 0) {
+        // false flipped on all calls
+        props["AB"] = move.addedBlackStones.map((m) => getParsedCoordinates(m, false, size));
+      } else {
+        delete props["AB"];
+      }
+      if (move.addedWhiteStones.length > 0) {
+        props["AW"] = move.addedWhiteStones.map((m) => getParsedCoordinates(m, false, size));
+      } else {
+        delete props["AW"];
+      }
+      if (move.editDeletedStones.length > 0) {
+        props["AE"] = move.editDeletedStones.map((m) => getParsedCoordinates(m, false, size));
+      } else {
+        delete props["AE"];
+      }
+    } else {
+      // Normal stone move
+      if (move.color === StoneColors.Black) {
+        props["B"] = [getParsedCoordinates(move, false, size)]; // false flipped
+      } else if (move.color === StoneColors.White) {
+        props["W"] = [getParsedCoordinates(move, false, size)]; // false flipped
+      } else {
+        delete props["B"]; delete props["W"];
+      }
+    } // if iseditnode else
+    // Color 
+
     // Comments
     if (move.comments !== "") props["C"] = [move.comments]; else delete props["C"];
     // Adornments
@@ -2602,7 +2621,7 @@ function genParserOutputMove (move: Move, size: number): Move {
   }
   // Produce a parser-style Move (row/col don’t matter when rendered=false; parsedProperties rule)
   const m = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
-  m.isPass = false;
+  // m.isPass = false;  WHY DID I EVER SET THIS????
   m.rendered = false;
   m.parsedProperties = props;
   m.parsedBadNodeMessage = null; //move.parsedBadNodeMessage ??????????????

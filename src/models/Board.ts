@@ -23,6 +23,7 @@ export class Board {
     this.moves = Array.from({ length: size }, () => Array<Move | null>(size).fill(null));
   }
 
+  // NOTE: The faux start Move in the TreeView model has indexes -1,-1.
   static readonly NoIndex = -100;
 
   static readonly MaxSize = 19;
@@ -155,7 +156,8 @@ export class Move { //implements IMoveNext {
   color: StoneColor; // not set when Move.rendered is false, representing nodes parsed in a file
   number: number; // move count, from 1.  All alternate moves in variation tree have the same number.
   // HACK: set isPass on new Move() if indexes are NoIndex, but can set isPass directly to false
-  // while indexes remain NoIndex.  If move.rendered is false, this is the case.
+  // while indexes remain NoIndex.  If move.rendered is false or move.isEditNode is true, this is 
+  // the case.
   _isPass: boolean; // True when row, col are both Board.NoIndex
   previous: Move | null;
   next: Move | null; // null when no next move (same if start node of empty board)
@@ -183,6 +185,9 @@ export class Move { //implements IMoveNext {
   isEditNodeStone: boolean;
   // If iseditNodeStone is true, editParent points at the EditNode that added this stone.
   editParent: Move | null;
+  // tree view depth needed now that the game tree has edit moves with move.number === 0.
+  treeDepth: number; 
+ 
 
 
   constructor(row: number, column: number, color: StoneColor) {
@@ -206,6 +211,7 @@ export class Move { //implements IMoveNext {
     this.editDeletedStones = [];
     this.isEditNodeStone = false;
     this.editParent = null;
+    this.treeDepth = 0;
   }
 
   get isPass(): boolean {
@@ -244,12 +250,16 @@ export class Move { //implements IMoveNext {
   /// access.
   ///
   isEditNodeMaybeUnrendered (): boolean {
-    return this.isEditNode ||
-           (! this.rendered && this.parsedBadNodeMessage === parserSignalBadMsg);
-    // if (this.rendered)
-    //   return this.isEditNode;
-    // else 
-    //   return ! (("B" in this.parsedProperties!) || ("W" in this.parsedProperties!))
+    // return this.isEditNode ||
+    //        (! this.rendered && this.parsedBadNodeMessage === parserSignalBadMsg);
+    if (this.isEditNode) return true;
+    if (this.rendered) return false;
+    if (this.parsedBadNodeMessage === parserSignalBadMsg) return true; // Parser output node flag
+    // Could be cross game paste of parser-like generated nodes, so dig for AB/AW/AE in props.
+    const p = this.parsedProperties;
+    if (p !== null && (("AB" in p) || ("AW" in p) || ("AE" in p))) return true;
+    // Legacy sentinel used by older flows
+    // return this.parsedBadNodeMessage === parserSignalBadMsg;
   } // isEditNodeMaybeUnrendered()
 
   addAdornment (a: Adornment) {
