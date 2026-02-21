@@ -38,12 +38,15 @@ export const fileBridgeElectron: FileBridge = {
 
   async pickOpenFile () {
     const path = await window.electron?.pickOpenFile();
-    return path ? { cookie: path, fileName: baseName(path) } : null;
+    // In Electron, fileName is the full path (used as the stable game identity).
+    return path ? { cookie: path, fileName: path } : null;
+
   },
 
   async pickSaveFile (suggestedName) {
     const path = await window.electron?.pickSaveFile(suggestedName);
-    return path ? { cookie: path, fileName: baseName(path) } : null;
+    // In Electron, fileName is the full path (used as the stable game identity).
+    return path ? { cookie: path, fileName: path } : null;
   },
 
   async readText (cookie) {
@@ -67,10 +70,10 @@ export const fileBridgeElectron: FileBridge = {
 ///
 export const keyBindingBridgeElectron: KeyBindingBridge = {
   on(handler: (e: KeyboardEvent) => void) {
-    document.addEventListener('keydown', handler, { passive: true });
+    document.addEventListener('keydown', handler, { capture: true, passive: false });
   },
   off(handler: (e: KeyboardEvent) => void) {
-    document.removeEventListener('keydown', handler);
+    document.removeEventListener('keydown', handler, { capture: true });
   },
   commonKeyBindingsHijacked: false,
 };

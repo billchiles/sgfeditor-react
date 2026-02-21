@@ -21,6 +21,7 @@ import { fileURLToPath } from "url";
 import * as fs from "node:fs"; // for existsSync, createReadStream, etc. (sync/callback API)
 import { promises as fsp } from "node:fs"; // // for async readFile/writeFile/stat (promise API)
 
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -30,9 +31,105 @@ const preloadAbs = path.join(__dirname, preloadRel);
 
 const devUrl = process.env.ELECTRON_START_URL || process.env.VITE_DEV_SERVER_URL;
 
+/// Main window singleton for file-activation (single instance) and focus behavior.
+let mainWindow: BrowserWindow | null = null;
+
+/// If we receive a file-open request before the renderer is ready, stash it here.
+let pendingOpenPath: string | null = null;
+
+/// Extract an SGF file path from argv (Windows/Linux) or from any caller-provided list.
+/// Notes:
+/// - In Windows dev, argv includes electron.exe + app path + args.
+/// - We only accept existing files to avoid treating flags as paths.
+function extractSgfPathFromArgv (argv: string[]): string | null {
+  for (const raw of argv) {
+    if (! raw) continue;
+
+    // Trim whitespace
+    let s = raw.trim();
+
+    // Strip surrounding quotes (Windows sometimes passes quoted paths)
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+      s = s.slice(1, -1).trim();
+    }
+
+    // Strip common trailing punctuation that can sneak into argv (copy/paste, wrappers).
+    while (s.endsWith(".") || s.endsWith(",") || s.endsWith(";")) {
+      s = s.slice(0, -1);
+    }
+
+    if (! s.toLowerCase().endsWith(".sgf")) continue;
+    try {
+      if (fs.existsSync(s) && fs.statSync(s).isFile()) return s;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+function focusMainWindow () {
+  if (! mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/// sendOpenFileToRenderer handles stashing path until we can reliably send it to renderer, or
+/// sending it if renderer is ready.
+///
+function sendOpenFileToRenderer (filePath: string) {
+  if (! mainWindow) {
+    pendingOpenPath = filePath;
+    return;
+  }
+  // If the renderer hasn't finished loading, stash and send after did-finish-load.
+  if (mainWindow.webContents.isLoadingMainFrame()) {
+    pendingOpenPath = filePath;
+    return;
+  }
+  mainWindow.webContents.send("app:open-file", filePath);
+}
+
+/// requestOpenFile is used by second app instance detection to stash the file path, ensure main
+/// window is active, and try to send the file to the renderer.  Mac-OS uses this by default.
+///
+function requestOpenFile (filePath: string) {
+  pendingOpenPath = filePath;
+  focusMainWindow();
+  sendOpenFileToRenderer(filePath);
+}
+
+/// Single-instance behavior:
+/// - Windows/Linux: activation file arrives on argv, and a second activation starts a second
+///   process unless we take the lock.
+/// - macOS: open-file is delivered to the existing instance, but the lock is harmless.
+const gotLock = app.requestSingleInstanceLock();
+if (! gotLock) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on("second-instance", (_event, argv) => {
+  const p = extractSgfPathFromArgv(argv);
+  if (p) requestOpenFile(p);
+  else focusMainWindow();
+});
+
+/// macOS file activation (Finder double-click)
+app.on("open-file", (event, p) => {
+  event.preventDefault();
+  if (p) requestOpenFile(p);
+});
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null); // remove default app menus (Win/Linux; also fine on macOS)
   createWindow();
+
+  // Windows/Linux initial activation (argv on first launch)
+  const initial = extractSgfPathFromArgv(process.argv);
+  if (initial) pendingOpenPath = initial;
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -41,6 +138,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 ///
 //// IPC for app to get system services from Electron.
@@ -111,6 +209,19 @@ function createWindow () {
       sandbox: true,
     }
   });
+  mainWindow = win;
+  // Flush any pending file open once the renderer is ready.
+  win.webContents.on("did-finish-load", () => {
+    if (pendingOpenPath) {
+      const p = pendingOpenPath;
+      pendingOpenPath = null;
+      win.webContents.send("app:open-file", p);
+    }
+  });
+  // Cleanup on close
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
   // Setup for UI/rendering code to auto save if app is shutting down
   let isClosing = false;
   // Hook window's onclose event and make sure or done/timeout closures execute
@@ -146,5 +257,6 @@ function createWindow () {
     // console.log("[main] loading:", indexHtml, "exists:", fs.existsSync(indexHtml));
     win.loadFile(indexHtml);
   }
+
 
 } // createWindow()

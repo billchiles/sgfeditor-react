@@ -17,6 +17,7 @@ declare global { // doesn't pollute global scope due to export {}
       readText (path: string): Promise<string>;
       writeText (path: string, data: string): Promise<boolean>;
       timestamp (path: string): Promise<number>;
+      onOpenFile? (handler: (path: string) => void): () => void;
       onFinalSaveRequest? (handler: () => Promise<void> | void): () => void;
     };
   }

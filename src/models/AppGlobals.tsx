@@ -272,6 +272,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   const lastCreatedRef = useRef<Game | null>(null); 
   const getLastCreatedGame = () => lastCreatedRef.current;
   const setLastCreatedGame = (g: Game | null) => { lastCreatedRef.current = g; };
+  // Set to true when the app receives an OS file-activation (double-click .sgf).
+  // We use this to suppress the unnamed autosave prompt on launch; file activation is user intent.
+  const fileActivationHappenedRef = useRef<boolean>(false);
   //
   // PLATFORM BRIDGES
   //const isElectron = !!(window as any)?.process?.versions?.electron;
@@ -302,14 +305,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   //
   // START NEW GAME FLOW command helper
   //
-  // One place to kick off the New Game flow (pre-check dirty, ask UI to open modal)
-  // My first solution to avoid browser losing user activation state and failing file prompt...
-  // const startNewGameFlow = useCallback(async () => {
-  //   const lastCmd = getLastCommand();
-  //   setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
-  //   await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand);
-  //   openNewGameDialog?.();
-  // }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand]);
+  // One place to kick off the New (cmd) Game flow (pre-check dirty, ask UI to open modal)
   const startNewGameFlow = useCallback(async () => {
     const lastCmd = getLastCommand();
     setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
@@ -317,6 +313,44 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
                          getDefaultGame, setDefaultGame,
                          openMessageDialog!, async () => { openNewGameDialog?.(); });
   }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand,appStorageBridge]);
+  //
+  // Electron file activation (by absolute path).  Same dirty-check flow as Open Cmd, but skips file
+  // picking.
+  const openFileFromActivationPath = useCallback(async (filePath: string) => {
+    fileActivationHappenedRef.current = true;
+    const lastCmd = getLastCommand();
+    setLastCommand({ type: CommandTypes.NoMatter });
+    // Continuation to pass to checkDirtySave to maintain user activation (which doesn't matter here)
+    const doOpenContinuation = async () => {
+      const games: Game[] = getGames();
+      const openidx = games.findIndex(g => g.filename === filePath);
+      if (openidx !== -1) {
+        addOrGotoGame({ idx: openidx }, gameRef.current, games, setGame, setGames,
+                      getDefaultGame, setDefaultGame);
+      } else {
+        await doOpenGetFileGame(filePath, filePath, "", fileBridge, gameRef, appStorageBridge,
+                                openMessageDialog!,
+                                { getLastCreatedGame, setLastCreatedGame, setGame, getGames,
+                                  setGames, getDefaultGame, setDefaultGame, setLastCommand });
+        bumpVersion();
+        bumpTreeLayoutVersion();
+      }
+      focusOnRoot();
+    };
+    // Maybe save current dirty game, continue to open file game
+    await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
+                         getDefaultGame, setDefaultGame, openMessageDialog!, doOpenContinuation);
+  }, [getLastCommand, setLastCommand, getGames, setGames, setGame, fileBridge, appStorageBridge,
+      openMessageDialog, getLastCreatedGame, setLastCreatedGame,
+      getDefaultGame, setDefaultGame, bumpVersion, bumpTreeLayoutVersion]);
+  //
+  // Wire Electron main-process file activation into the renderer.  Returns the unsubscribe or
+  // delete function returned from onOpenFile.
+  useEffect(() => {
+    if (! window.electron?.onOpenFile) return;
+    const off = window.electron.onOpenFile((p) => { void openFileFromActivationPath(p); });
+    return off;
+  }, [openFileFromActivationPath]);
   //
   // SETUP INITIAL STATE FOR GAME -- this runs once after initial render due to useEffect.
   // useEffect's run after the DOM has rendered.  useState runs first, when GameProvider runs.
@@ -350,6 +384,9 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     // synchronously with the code around it.
     (async () => { 
       try {
+        // If we're here due to file activation, ignore any unnamed autosave.
+        if (fileActivationHappenedRef.current) return;
+        // If the user noodled on the defaut board, maybe they want to get that back.
         if (! await appStorageBridge.exists(UNNAMED_AUTOSAVE)) return;
         const autoSaveTime = await appStorageBridge.timestamp(UNNAMED_AUTOSAVE);
         const autosaveAge = autoSaveTime !== null ? (Date.now() - autoSaveTime) 
@@ -365,6 +402,8 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
         // Check if something intervened and aborted UI render or useEffect execution.  This is set
         // in the returned cleanup lambda below.
         if (cancelled) return;
+        // check abort flag on emore time due to await's above, maybe user activated a file quickly
+        if (fileActivationHappenedRef.current) return;
         if (useAutoSave) {
           const data = await appStorageBridge.readText(UNNAMED_AUTOSAVE);
           if (data) {

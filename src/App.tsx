@@ -187,7 +187,7 @@ function AppContent({
                 if (! g) return;
                 g.toggleEditMode();
               }}>
-              AB/AW/AE
+              AB/AW
             </button>
           </div>
           <div className={styles.buttonRow}>
