@@ -166,8 +166,8 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     if (node!.node instanceof Move) { // It is always a Move now.
       const move = node!.node as Move;
       if (move.row !== -1 && move.column !== -1 && ! gotoGameTreeMove(move)) {
-        // move is NOT dummy move for start node of game tree view, so advance to it.
-        // Hit conflicting move location due to pasted node or rendering bad parsed node
+        // move is NOT dummy move for start node (-1,-1) of game tree view, so advance to it.
+        // IF hit conflicting move location due to pasted node or rendering bad parsed node
         // Do not go back to start, then user sees where the issue is.
         await g.message?.message(oopsmsg);
       }

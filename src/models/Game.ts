@@ -225,6 +225,7 @@ export class Game {
     if (!move.isPass) this.board.addStone(move);
     this.currentMove = move;
     move.number = this.moveCount + 1;
+    move.treeDepth = curMove === null ? 1 : curMove.treeDepth + 1;
     this.moveCount++;
     this.nextColor = oppositeColor(this.nextColor);
     // Captures: CheckSelfCaptureNoKill already computed move.deadStones for move.
@@ -2180,6 +2181,7 @@ function createGameFromParsedAW(props: Record<string, string[]>): Move[] {
 /// setupFirstParsedMove ensures the parsed game's first move (and all first moves of any branches)
 /// is ready for readyForRendering to be called on it.  move is the first move of the game
 /// (or first branch's first move), not a fake first parsed artifact to hold game properties.
+/// 
 ///
 function setupFirstParsedMove (g : Game, move : Move) : Move | null {
   if ("B" in g.parsedGame!.properties || "W" in g.parsedGame!.properties)
@@ -2198,6 +2200,7 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
       // Note, do not incr g.move_count since first move has not been rendered,
       // so if user clicks on the board, that should be number 1 too.
       if (! mv.isEditNode) mv.number = g.moveCount + 1;
+      mv.treeDepth = 1;
       renumberMoves(mv, mv.isEditNode ? g.moveCount + 1 : null);
       // Don't set previous point because these are first moves, so prev is null.
     }
@@ -2213,6 +2216,7 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
       // Note, do not incr g.move_count since first move has not been rendered,
       // so if user clicks, that should be number 1 too.
       if (! move.isEditNode) move.number = g.moveCount + 1;
+      move.treeDepth = 1;
       renumberMoves(move, move.isEditNode ? g.moveCount + 1 : null);
     }
   }

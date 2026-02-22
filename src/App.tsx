@@ -264,7 +264,7 @@ function NewGameOverlay ({ open, onClose, message, }:
         onClose();
       }}
       defaults={{
-        handicap: appGlobals.getGame().handicap ?? 0,
+        handicap: 0, //appGlobals.getGame().handicap ?? 0,
         komi: appGlobals.getGame().komi ?? "6.5",
       }}
       message={message}

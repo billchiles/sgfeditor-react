@@ -254,12 +254,12 @@ export class Move { //implements IMoveNext {
     //        (! this.rendered && this.parsedBadNodeMessage === parserSignalBadMsg);
     if (this.isEditNode) return true;
     if (this.rendered) return false;
+    // Legacy sentinel used by older flows === no "B" and no "W"
     if (this.parsedBadNodeMessage === parserSignalBadMsg) return true; // Parser output node flag
     // Could be cross game paste of parser-like generated nodes, so dig for AB/AW/AE in props.
     const p = this.parsedProperties;
     if (p !== null && (("AB" in p) || ("AW" in p) || ("AE" in p))) return true;
-    // Legacy sentinel used by older flows
-    // return this.parsedBadNodeMessage === parserSignalBadMsg;
+    return false;
   } // isEditNodeMaybeUnrendered()
 
   addAdornment (a: Adornment) {

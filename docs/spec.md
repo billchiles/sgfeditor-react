@@ -9,7 +9,7 @@
 * Edit and review SGF game records for Go with board markup and move comments.
 * Support fast board-first workflows with keyboard navigation.
 * Preserve SGF fidelity where practical, including unknown SGF properties.
-* Run in the browser now; ultimately move to Electron later with minimal changes (via bridge abstractions) to support file activation and double-clicking SGF files
+* Run in the browser now; also run in an Electron desktop shell (via bridge abstractions) to support file activation and double-clicking SGF files
 * Maintain deterministic model behavior across replay/unwind/branching/edit-mode actions.
 
 ### Out of scope (current)
@@ -44,8 +44,6 @@ Directional invariant:
 ### 2.3 Host bridge abstraction
 
 Provider-level bridge interfaces isolate host/platform behavior:
-
-* Electron later: swap bridge implementations (same API), keep UI/model unchanged.
 
 * **FileBridge (browser implementation)**
 
@@ -82,11 +80,45 @@ Provider-level bridge interfaces isolate host/platform behavior:
 * Buttons have `aria-label`s mirroring visible text; keyboard access for all commands.
 * Board has descriptive `aria-label` (e.g., “Go board 19 by 19; Black to play; move 48”).
 
-### 2.6 Electron Compatibility Matrix (future)
+### 2.6 Electron host integration (current)
 
-* Same bridge interfaces; `KeyBindingBridge` sets `commonKeyBindingsHijacked = false`.
-* Menu accelerators route directly to provider commands.
-* File activation events reuse browser open flow; writer/reader identical.
+Electron runs the same React renderer bundle, but adds:
+
+* **Main process** (`electron/main.ts`): creates the window, enforces single-instance behavior,
+  receives OS “open this file” events, and forwards them to the renderer.
+* **Preload** (`electron/preload.ts`): a small `contextBridge` API surface exposed as `window.electron`,
+  plus buffering so activation events that arrive early are not lost.
+* **Renderer** (`src/models/AppGlobals.tsx`): subscribes to `window.electron.onOpenFile(...)` (preload exposes window.electron.onOpenFile(handler)) and
+  routes activation into the normal dirty-check + open flow.
+
+Key points / invariants:
+
+* **Single-instance**: subsequent launches should focus the existing window and deliver the file path
+  (Windows/Linux via `second-instance`; macOS via `open-file`).
+* **Activation is by absolute path**: Electron provides an on-disk path; the renderer opens it without
+  showing a file picker.
+* **Bridge parity**: `FileBridge`, `AppStorageBridge`, and hotkey routing keep the UI/model code
+  mostly host-agnostic (browser vs Electron).
+
+IPC messages used today:
+
+* `app:open-file` (main -> renderer): `{ path: string }` file activation request.
+* `app:final-autosave` / `app:flush-done` (main <-> renderer): shutdown handshake so the renderer can
+  finish a final autosave/write before the app exits.
+
+Packaging / installer:
+
+* Packaging uses **electron-builder**.
+* Windows builds use **NSIS** so the installer can register the `.sgf` file association.
+* The app identity is distinct from the legacy C# app (`SGFEditor`) to avoid Start Menu / uninstall / association conflicts:
+  * `build.productName = "SGFEditorR"`
+  * `build.appId` is unique (reverse-DNS style)
+  * `build.executableName = "SGFEditorR"`
+* Build commands (see `package.json` scripts):
+  * `npm run dist:win` builds a Windows NSIS installer.
+  * Output artifacts are written under `dist/` (e.g. `dist/SGFEditorR-setup-<version>.exe`).
+* Icons:
+  * Windows app/installer/association icons use a multi-size `.ico` file (PNG is not sufficient for Windows associations).
 
 ---
 
@@ -715,6 +747,79 @@ Save game/file flow:
   * `fileBridge.save(handle?, () => serialize(game))`; if no handle, run `saveAs`.
   * On success: clear dirty, cleanup autosave.
   * Save **Flipped**: build SGF with diagonally flipped coordinates (moves & adornments) and force a **Save As** path.
+
+
+### 15.4 Electron file activation (open on launch / double-click)
+
+Electron “file activation” means the OS tells the app “open this SGF file path”, typically from:
+
+* Windows: double-click `.sgf` in Explorer
+* macOS: Finder double-click / “Open With…”
+* Linux: desktop environment file association
+
+Flow (current implementation):
+
+1. **Main process receives the activation path (OS → main)**  
+   The operating system initiates file activation.  
+   Main is the only layer that talks directly to the OS.
+
+   **Initial launch (Windows/Linux)**  
+   * OS launches the app with a file path in `process.argv`.  
+   * `main.ts` calls `extractSgfPathFromArgv(process.argv)` during startup.  
+   * If a valid `.sgf` path is found, it becomes `pendingOpenPath`.
+
+   **Subsequent launch (Windows/Linux)**  
+   * If the app is already running, Electron emits `app.on("second-instance", (event, argv))`.  
+   * The new instance immediately exits (single-instance lock).  
+   * The existing instance parses `argv` and extracts the SGF path.  
+   * If found:
+     * focus/restore the main window
+     * set `pendingOpenPath` to the path
+
+   At this stage **main owns the activation path**, but the renderer may not yet exist
+   or be ready to receive IPC.
+
+2. **Main → renderer handoff timing (main → renderer IPC)**  
+   Main is responsible for delivering activation only when the renderer can receive it.
+
+   Implementation pattern:
+   * Main waits for `BrowserWindow` creation.
+   * Main waits for `webContents.did-finish-load`.
+   * Once ready:
+     * if `pendingOpenPath` is non-null  
+       → send IPC: `webContents.send("app:open-file", { path })`
+     * clear `pendingOpenPath`.
+
+   If activation arrives *after* renderer load:
+   * Main immediately sends `app:open-file`.
+
+   **Invariant:**  
+   Main never assumes renderer listeners are attached yet — it simply emits IPC when ready.
+
+3. **Preload buffering and API surface (IPC → preload → renderer)**  
+   Preload acts as a stability layer between Electron IPC and React.
+
+   Preload responsibilities:
+   * Subscribes to `ipcRenderer.on("app:open-file")` -- preload calls ipcRenderer.on to supply a callback or hook for the IPC message, so that when main calls win.webContents.send("app:open-file", filePath), the preload callback does the next two things.
+   * If renderer has already registered a handler:
+     * immediately forward path to renderer handler
+   * If renderer has NOT yet registered:
+     * store path in `pendingOpenFile` buffer
+
+   Preload exposes:
+   ```ts
+   window.electron.onOpenFile(handler)
+
+   Behavior:
+   * If `app:open-file` arrives before the renderer subscribes, preload buffers the path.
+   * When the renderer later calls `onOpenFile(handler)`, preload immediately delivers the buffered path once.
+
+Renderer policy:
+
+* Activation should behave like “Open…” command, except it never shows a file picker.
+* If a dirty game is open, the user gets the same Save/Discard/Cancel choice before switching files.
+
+
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "main": "electron/dist/main.js",
-  "name": "sgfeditor",
+  "name": "sgfeditorr",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -14,7 +14,10 @@
     "dev:electron": "concurrently -k -r \"vite\" \"tsc -p electron/tsconfig.main.json -w\" \"tsc -p electron/tsconfig.preload.json -w\" \"wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 ELECTRON_PRELOAD_PATH=preload.js electron .\"",
     "build:electron": "tsc -p electron/tsconfig.main.json && tsc -p electron/tsconfig.preload.json",
     "start:electron": "cross-env ELECTRON_PRELOAD_PATH=preload.js electron .",
-    "app:prod": "npm run build && npm run build:electron && npm run start:electron"
+    "app:prod": "npm run build && npm run build:electron && npm run start:electron",
+    "dist": "npm run build && npm run build:electron && electron-builder",
+    "dist:win": "npm run build && npm run build:electron && electron-builder --win nsis",
+    "dist:dir": "npm run build && npm run build:electron && electron-builder --dir"
   },
   "dependencies": {
     "react": "^19.1.1",
@@ -38,5 +41,38 @@
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2",
     "wait-on": "^9.0.1"
+    ,
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "artifactName": "SGFEditorR-setup-${version}.${ext}",
+    "productName": "SGFEditorR",
+    "appId": "com.billchiles.sgfeditorr",
+    "executableName": "SGFEditorR",
+    "asar": true,
+    "files": [
+      "dist/**",
+      "electron/dist/**",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/filelogo50.ico",
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "perMachine": true,
+      "createDesktopShortcut": false,
+      "installerIcon": "assets/filelogo50.ico",
+      "uninstallerIcon": "assets/filelogo50.ico"
+    },
+    "fileAssociations": [
+      {
+        "ext": "sgf",
+        "name": "SGFEditorR",
+        "description": "SGF files (Smart Go Format)",
+        "role": "Editor",
+        "icon": "assets/filelogo50.ico"
+      }
+    ]    
   }
 }
