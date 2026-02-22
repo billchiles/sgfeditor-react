@@ -93,8 +93,7 @@ export class Game {
 
   /// initHandicapNextColor sets the next color to play and sets up any handicap state.
   /// If there is a handicap, the moves may be specified in a parsed game; otherwise, this
-  /// fills in traditional locations. If there is a handicap and stones are supplied, then
-  /// their number must agree. This sets nextColor based on handicap since sgfeditor ignores
+  /// fills in traditional locations. This sets nextColor based on handicap since sgfeditor ignores
   /// the PL property in root node.
   ///
   private initHandicapNextColor (handicap: number, handicapStones: Move[] | null,
@@ -104,46 +103,47 @@ export class Game {
       // Even if no handicap, could have All Black (AB) property in game root, which we model as handicap.
       if (handicapStones && handicapStones.length > 0) {
         for (const m of handicapStones) this.board.addStone(m);
-        this.nextColor = "white";
+        this.nextColor = StoneColors.White;
       } else {
-        this.nextColor = "black";
+        this.nextColor = StoneColors.Black;
       }
-      this.handicapMoves = handicapStones ?? null;
+      this.handicapMoves = handicapStones;
+      this.nextColor = (allWhite !== null) ? StoneColors.Black : 
+                                             StoneColors.White; // AW trumps next color
       return;
     }
     // handicap > 0
-    this.nextColor = (allWhite !== null) ? "black" : "white"; // if AW, ignore handicap to set color
-    this.handicapMoves = handicapStones;
-    if (handicapStones === null) {
-      this.handicapMoves = [];
-      const makeMove = (row: number, col: number) => {
-        const m = new Move(row, col, "black");
-        this.handicapMoves!.push(m);
+    this.nextColor = StoneColors.White;
+    this.nextColor = (allWhite !== null) ? StoneColors.Black : 
+                                           StoneColors.White; // if AW, ignore handicap to set color
+    this.handicapMoves = [];
+    // Make all the standard handicap stones based on count
+    const makeMove = (row: number, col: number) => {
+      const m = new Move(row, col, "black");
+      this.handicapMoves!.push(m);
+      this.board.addStone(m);
+    };
+    // Handicap stones accumulate from two in opposing corners, to a third in a third corner,
+    // to four corners, then a fifth in the center. Six handicap stones is three along two
+    // sides, and seven has one in the center. Eight handicaps is one in each corner and one
+    // in the middle of each side. Nine has adds one in the center.
+    if (handicap >= 2) { makeMove(4,16); makeMove(16,4); }
+    if (handicap >= 3) { makeMove(16,16); }
+    if (handicap >= 4) { makeMove(4,4); }
+    // There is only a center stone for 5, 7, and 9 handicaps.
+    if (handicap === 5) { makeMove(10,10); }
+    if (handicap >= 6) { makeMove(10,4); makeMove(10,16); }
+    if (handicap === 7) { makeMove(10,10); }
+    if (handicap >= 8) { makeMove(4,10); makeMove(16,10); }
+    if (handicap === 9) { makeMove(10,10); }
+    // After complying with the handicap number, see if any other AB stones were added to the board.
+    if (handicapStones !== null)
+      for (const m of handicapStones) {
+        if (this.board.moveAt(m.row, m.column)) continue;
+        this.handicapMoves.push(m);
         this.board.addStone(m);
-      };
-      // Handicap stones accumulate from two in opposing corners, to a third in a third corner,
-      // to four corners, then a fifth in the center. Six handicap stones is three along two
-      // sides, and seven has one in the center. Eight handicaps is one in each corner and one
-      // in the middle of each side. Nine has adds one in the center.
-      if (handicap >= 2) { makeMove(4,16); makeMove(16,4); }
-      if (handicap >= 3) { makeMove(16,16); }
-      if (handicap >= 4) { makeMove(4,4); }
-      // There is only a center stone for 5, 7, and 9 handicaps.
-      if (handicap === 5) { makeMove(10,10); }
-      if (handicap >= 6) { makeMove(10,4); makeMove(10,16); }
-      if (handicap === 7) { makeMove(10,10); }
-      if (handicap >= 8) { makeMove(4,10); makeMove(16,10); }
-      if (handicap === 9) { makeMove(10,10); }
-    } else {
-    debugAssert(handicapStones.length === handicap, 
-                "Handicap number is not equal to all black stones in parsed root node.");
-    // TODO BUG -- Do not add moves to this.HandicapMoves, and do not add AB in GotoStart or
-    // GotoSTartForGameSwap, which means these moves never get added back if hit Home key,
-    // click in tree view, and things like checking for dead stones won't know they are there.
-    // However, in 14 years never encountered a game with AB at start and no HA.
-      for (const m of handicapStones) this.board.addStone(m);
     }
-  }
+  } // initHandicapNextColor
 
   ///
   //// Making Moves
@@ -2054,29 +2054,17 @@ export async function createGameFromParsedGame
      setDefaultGame: (g: Game | null) => void):
     Promise<Game> {
   const props = pgame.properties; 
-  // Handicap and empty board handicap / all black stones.
-  let handicap = 0;
-  let allBlack: Move[] | null = null;
-  if ("HA" in props) {
-    ({handicap, allBlack} = createGameFromParsedHandicap(props));
-  } else if ("AB" in props) {
-    // There may be all black stone placements even if there is no handicap property since some programs
-    // allow explicit stone placements of black stones that get written to the initial board properties.
-    allBlack = createGameFromParsedAB(props);
-  }
+  // Handicap and empty board handicap / all black stones.  Technically, and to be defensive, HA and
+  // AB do not need to agree, and they don't if a user edited the empty board with AB/AW.
+  const handicap = ("HA" in props) ? parseInt(props["HA"][0], 10) : 0;
+  const allBlack: Move[] | null = ("AB" in props) ? createGameFromParsedAB(props) : null;
   // Get root AW
-  let allWhite: Move[] | null = null;
-  if ("AW" in props) {
-    allWhite = createGameFromParsedAW(props);
-  }
+  const allWhite: Move[] | null = ("AW" in props) ? createGameFromParsedAW(props) : null;
   // Board size (default 19 with info message; enforce only 19)
-  let size = Board.MaxSize;
-  if ("SZ" in props) {
-    size = parseInt(props["SZ"][0], 10);
-  } else {
-    await curGame.message!.message(`"No SZ, size, property in .sgf.  Default is 19x19"`);
-  }
+  let size = ("SZ" in props) ? parseInt(props["SZ"][0], 10) : Board.MaxSize;
+    // await curGame.message!.message(`"No SZ, size, property in .sgf.  Default is 19x19"`);
   if (size !== Board.MaxSize) {
+    // TODO: should be user msg and cleanup, this isn't programming error, so no throw
     throw new SGFError(`Only work with size 19 currently, got ${size}.`);
   }
   // Komi
@@ -2137,26 +2125,6 @@ export async function createGameFromParsedGame
 //   }
 // }
 
-
-/// createParsedGameHandicap helps create a Game from a ParsedGame by processing the handicap (HA)
-/// and all black (AB) properties.  It returns the handicap number and the Moves for the stones.
-/// This assumes there is an HA property, so check before calling.
-///
-function createGameFromParsedHandicap(props: Record<string, string[]>):
-    { handicap: number; allBlack: Move[] | null } {
-  const handicap = parseInt(props["HA"][0], 10);
-  if (handicap === 0) {
-    return { handicap, allBlack: null };
-  }
-  // KGS saves HA[6] and then AB[]...
-  if (!("AB" in props)) {
-    throw new SGFError("If parsed game has handicap (HA), then need handicap stones (AB).");
-  }
-  if (props["AB"].length !== handicap) {
-    throw new SGFError("Parsed game's handicap count (HA) does not match stones (AB).");
-  }
-  return { handicap, allBlack: createGameFromParsedAB(props) };
-}
 
 /// Assumes "AB" exists.
 function createGameFromParsedAB(props: Record<string, string[]>): Move[] {
