@@ -5,48 +5,45 @@ import type { StoneColor, Adornment } from "../models/Board";
 import { DEFAULT_BOARD_SIZE } from "../models/Game";
 import { CommandTypes, GameContext } from "../models/AppGlobals";
 import { debugAssert } from "../debug-assert";
-//import type { CommandType, LastCommand } from "../models/AppGlobals";
 
+/// Stone art (bundled by Vite). These are used as textures for <image/> in the SVG for white stones.
+/// CIRCLESvsSTONES
+import blackStoneImg from "../../assets/black-stone.png";
+import whiteStone0 from "../../assets/white-stone-1.png";
+import whiteStone1 from "../../assets/white-stone-2.png";
+import whiteStone2 from "../../assets/white-stone-3.png";
+import whiteStone3 from "../../assets/white-stone-4.png";
+import whiteStone4 from "../../assets/white-stone-5.png";
+///
+const WHITE_STONE_IMAGES = [whiteStone0, whiteStone1, whiteStone2, whiteStone3, whiteStone4];
 
 /// GoBoardProps is bogus param list from UI elements to setting up GoBoard component, but it is
 /// meaningless to pass these in, even 19x19 size should be defaulted for a default lanunch board.
 ///
 export interface GoBoardProps {
-  // Number of lines (and intersections) along one edge (default 19)
-  // boardSize?: number;
-  // Distance in pixels between adjacent intersections (default 32)
-  cellSize?: number;
-  // Extra padding around the grid for labels (default 24)
-  padding?: number;
-  // Auto-fit and keep square using ResizeObserver (default true)
+  useStonesAndGrain?: boolean; // CIRCLESvsSTONES
   responsive?: boolean;  
 }
 
 const LINE_THICKNESS = 1.5;
 const HOSHI_RADIUS = 3;
-const STONE_OUTLINE = 0.75; // stroke width around stones so they appear crisp
+const STONE_OUTLINE = 0.75; // CIRCLESvsSTONES: stroke width around circles so they appear crisp
 
 // Coordinate letters skip "I" for readabily and usability on the Go board.
 const LABEL_LETTERS = "ABCDEFGHJKLMNOPQRSTUVWXYZ".split("");
 
-// This used to be used to render stones when computing the pixel center from board coordinates.
-//const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
-// ...
-    // for (const [k, color] of stones) {
-    //   const [sx, sy] = k.split(",").map((n) => parseInt(n, 10));
-    //   const cx = coords.xs[clamp(sx, 0, boardSize - 1)];
-    //   const cy = coords.ys[clamp(sy, 0, boardSize - 1)];
-    //   circles.push(
-// Object ID's for UIElt lookup were formed as follows, hence the unpacking in the snippet above
-//const keyFor = (x: number, y: number) => `${x},${y}`;
-
 // GPT5 generated this, not sure why not use #000000 and #FFFFFF, so will keep for a while.
+// CIRCLESvsSTONES
 const stoneFill = (c: StoneColor) => (c === StoneColors.Black ? "#111" : "#f2f2f2");
 
 
 /// GoBoard -- Big Entry Point to render board
+/// responsive is explicitly supplied as true and is always true.  Can set to false if need fixed
+/// display and no resizing or whatnot while testing or debugging.
+/// CIRCLESvsSTONES: useStonesAndGrain is explicitly supplied as true, but we can flip back to
+/// simple circles if we need to for some testing or debugging.
 ///
-export default function GoBoard({ responsive = true, }: GoBoardProps) {
+export default function GoBoard({ responsive = true, useStonesAndGrain = true}: GoBoardProps) {
   const boardSize = DEFAULT_BOARD_SIZE;
   // Measure the available space of the wrapper and keep a square side = min(width, height)
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -90,7 +87,9 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
     const sizePx = side;
     const inner = Math.max(0, sizePx - padding * 2);
     const effCell = inner / (boardSize - 1);
-    const radius = effCell / 2 - STONE_OUTLINE; // tangential adjacency
+    let radius = effCell / 2; // CIRCLESvsSTONES
+    if (! useStonesAndGrain) radius = effCell / 2 - STONE_OUTLINE; // tagential adjacency
+    // const radius = effCell / 2; // - STONE_OUTLINE; // tangential adjacency
     // end responsive and square new code
     const gridStart = padding;
     const gridEnd = padding + inner;
@@ -293,20 +292,50 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
         const col = x + 1;
         const m = curBoard.moveAt(row, col);
         if (m !== null) {
-          // Board/Move model is rows go down, columns go across, but graphics is X goes across, Y goes down.
+          // Board/Move model is rows go down, columns go across, 
+          // but graphics is X goes across, Y goes down.
           const cx = boardToPx.xs[x]; 
           const cy = boardToPx.ys[y];
-          circles.push(
-            <circle key={`stone-${row}-${col}`} cx={cx} cy={cy} r={geom.radius} fill={stoneFill(m.color)} 
-                    stroke="#000" strokeWidth={STONE_OUTLINE} />
-          );
+          if (! useStonesAndGrain) { // CIRCLESvsSTONES
+          // Simple black and white cirlces for stones...
+            circles.push(
+              <circle key={`stone-${row}-${col}`} cx={cx} cy={cy} r={geom.radius} 
+                      fill={stoneFill(m.color)} stroke="#000" strokeWidth={STONE_OUTLINE} />
+            );
+          } else {
+            // Render clam shell looking and slate with light source images for stones
+            // scale values to tweak stones appear tangentially adjacent, and the .png files for the
+            // black and white stones have different transparent padding or space not filling the
+            // image rectangle.  White tends to overlap, black tends to not touch at all.
+            const WHITE_STONE_SCALE = 1.01; // try 1.04–1.10
+            const BLACK_STONE_SCALE = 1.10;
+            const isblack = (m.color === StoneColors.Black);
+            const d = Math.round(geom.radius * 2 * (isblack ? BLACK_STONE_SCALE : 
+                                                              WHITE_STONE_SCALE));
+            const x0 = Math.round(cx - d / 2);
+            const y0 = Math.round(cy - d / 2);
+            debugAssert(isblack || m.whiteIndex !== -1, "EH?! white stone has no image index!!");
+            const href = (m.color === StoneColors.Black)
+              ? blackStoneImg
+              : WHITE_STONE_IMAGES[Math.max(0, Math.min(WHITE_STONE_IMAGES.length - 1, 
+                                   m.whiteIndex))];
+            circles.push(
+              <image
+                key={`stone-${row}-${col}`}
+                href={href}
+                // x={cx - geom.radius}
+                // y={cy - geom.radius}
+                x={x0} y={y0}
+                width={d}
+                height={d}
+                preserveAspectRatio="xMidYMid meet"
+              />
+            );
+          }
           // Concentric ring for the current move: white on black, black on white
-          // const isCurrent = current ? (current === m) ||
-          //                             (current.row === m.row && current.column === m.column)
-          //                           : false;
+          // No need test for isEditNode because m comes from the board model
           if (current === m || 
               (current !== null && current.row === m.row && current.column === m.column)) { 
-            //&& current.isEditNode === false) {
             const ringColor = m.color === StoneColors.Black ? "#fff" : "#000";
             circles.push(
               <circle key={`curmark-${x}-${y}`} cx={cx} cy={cy} r={markRadius} fill="none"
@@ -319,7 +348,7 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
     };
     return <g>{circles}</g>;
     // redraw when global version changes, or things that change on resize
-  }, [appGlobals, appGlobals?.version, boardToPx, geom.radius] );
+  }, [appGlobals, appGlobals?.version, boardToPx, geom.radius, useStonesAndGrain] );
 
 
 
@@ -460,6 +489,9 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
   // Now render ...
   return (
     <div className={styles.boardWrap} ref={wrapRef}>
+      {/* <div className={styles.boardSurface}> CIRCLESvsSTONES */}
+      <div className={`${styles.boardSurface} 
+                       ${useStonesAndGrain ? styles.boardSurfaceWood : styles.boardSurfacePlain}`}>
       <svg
         className={styles.boardSvg}
         width={geom.sizePx}
@@ -471,15 +503,17 @@ export default function GoBoard({ responsive = true, }: GoBoardProps) {
         aria-label="Go board"
       >
         {/* Wooden background */}
-        <rect x={0} y={0} width={geom.sizePx} height={geom.sizePx} fill="#D8B384" />
+        {/* <rect x={0} y={0} width={geom.sizePx} height={geom.sizePx} fill="#D8B384" /> */}
+        {/* CIRCLESvsSTONES commented out previous line, added next, later added switch in css*/}
+        <rect x={0} y={0} width={geom.sizePx} height={geom.sizePx} fill="transparent" />
         {renderGrid()}
         {renderHoshi()}
         {renderCoords()}
-        // because renderstones is defined with useMemo, it's code is data, don't call it here
-        // can change this to call syntax and remove usememo, gpt5 sys 361 circles is cheap
+        {/* // because renderstones is defined with useMemo, it's code is data, don't call it here */}
+        {/* // can change this to call syntax and remove usememo, gpt5 sys 361 circles is cheap */}
         {renderStones} 
         {renderAdornments}
-      </svg>
+      </svg> </div>
     </div>
     ); // renderstones
 

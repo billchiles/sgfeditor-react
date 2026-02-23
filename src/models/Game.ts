@@ -42,7 +42,10 @@ export class Game {
   miscGameInfo: Record<string, string[]> | null;
   private _cutMove: Move | null = null;
   editMode: boolean; // global edit move mode (F2) for placing/removing setup stones (AB/AW/AE)
+  // This starts at a random 32-bit seed and increments every time we make a white Move.
+  randomSeedCounter: number;
   
+
 
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion(), keeping model / UI isolation.
@@ -86,6 +89,9 @@ export class Game {
     this.startAdornments = [];
     this.miscGameInfo = null; // Invariant: only set if showing info dialog, then supercedes parsed
     this.editMode = false;
+    // Seed per game instance so each game gets different stone-variant patterns.
+    this.randomSeedCounter = makeSeed32();
+
   }
 
   static readonly DefaultKomi = "6.5";
@@ -186,6 +192,11 @@ export class Game {
       await this.message?.message("KO !!  Can't take back the ko.");
       return null;
     }
+    // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
+    if (move.color === StoneColors.White && ! move.isPass) {
+      move.whiteIndex = this.nextWhiteIndex();
+    }
+
     // Now check if we really are branching, choosing a branch already existing, or had an issue.
     // If we're branching, makeBranchingMove handles empty board branches, first move, next/prev, etc.
     if (maybeBranching) {
@@ -446,7 +457,6 @@ export class Game {
       this.whitePrisoners += count;
   }
 
-
   ///
   //// Unwinding Moves and Goign to Start
   ///
@@ -529,6 +539,11 @@ gotoStart (): void {
   this.onChange!(); // Signal re-render
   this.onTreeHighlightChange!();
 }
+
+  ///
+  //// Replaying Moves, Goto Last, readyForRendering, Applying Edit Nodes
+  ///
+
 
   /// replayMove -- command entry point.
   /// Adds the next move that follows the current move.  Move made (see make_move).
@@ -690,6 +705,10 @@ gotoStart (): void {
       }
       hadParseErr = err;
     }
+    // Ensure parsed (or legacy) white moves get a variant when first displayed.
+    if (move.whiteIndex < 0 && move.color === StoneColors.White && ! move.isPass) {
+      move.whiteIndex = this.nextWhiteIndex();
+    }
     this.moveCount += 1;
     // Apply captures unless we did not actually place the move stone due to an edit-node conflict.
     if (! conflictWithEditStone) {
@@ -698,6 +717,21 @@ gotoStart (): void {
     }
     return [move, hadParseErr];
   } //replayMoveUpdateModel()
+
+  private static readonly WHITE_STONE_PNG_COUNT = 5; // any given build has a fixed number of white .png files
+  previousWhiteIndex = -1;
+  /// nextWhiteIndex returns a deterministic pseudo-random index in [0, count).
+  /// This uses randomSeedCounter as a monotonic counter seeded randomly per game.
+  /// Public because called by Game helpers not in class.
+  ///
+  nextWhiteIndex () : number { 
+    this.randomSeedCounter = (this.randomSeedCounter + 1) >>> 0; //>>> 0 idiom forces unsigned 32bit
+    const mixed = mix32(this.randomSeedCounter);
+    let res = mixed % Game.WHITE_STONE_PNG_COUNT
+    if (res === this.previousWhiteIndex) res += 1;
+    this.previousWhiteIndex = res;
+    return res;
+  }
 
 
   /// applyEditNodeToBoard applies an edit/setup node's stone changes to the board model.
@@ -852,6 +886,8 @@ gotoStart (): void {
           const s = new Move(r, c, StoneColors.White);
           s.isEditNodeStone = true;
           s.editParent = move;
+          // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
+          move.whiteIndex = this.nextWhiteIndex();
           move.addedWhiteStones.push(s);
         }
         else {
@@ -900,7 +936,6 @@ readyUnrenderedAdornments (move: Move): void {
       }
     }
   }
-
   
   ///
   //// Edit Move Mode (setup/edit nodes for AB/AW/AE)
@@ -972,6 +1007,8 @@ readyUnrenderedAdornments (move: Move): void {
       this.handicapMoves.push(m);
     } else {
       if (this.allWhiteMoves === null) this.allWhiteMoves = [];
+        // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
+        m.whiteIndex = this.nextWhiteIndex();
       this.allWhiteMoves.push(m);
     }
     // Remove "captured stones" appropriately.
@@ -1037,6 +1074,10 @@ readyUnrenderedAdornments (move: Move): void {
     const match = editMove.editDeletedStones.find(
                     (m) => m.row === row && m.column === col && m.color === color);
     const stone = (match !== undefined) ? match : new Move(row, col, color);
+    if (stone !== match && color === StoneColors.White) {
+      // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
+      stone.whiteIndex = this.nextWhiteIndex();
+    }
     if (match !== undefined) {
       editMove.editDeletedStones = editMove.editDeletedStones.filter((m) => m !== match);
     } else {
@@ -1905,6 +1946,10 @@ readyUnrenderedAdornments (move: Move): void {
 
 
 ///
+//// Game Class Ends
+///
+
+///
 //// Enable model to signal UI to interact with user
 ///
 
@@ -2058,7 +2103,7 @@ export async function createGameFromParsedGame
   // AB do not need to agree, and they don't if a user edited the empty board with AB/AW.
   const handicap = ("HA" in props) ? parseInt(props["HA"][0], 10) : 0;
   const allBlack: Move[] | null = ("AB" in props) ? createGameFromParsedAB(props) : null;
-  // Get root AW
+  // Get root AW -- NOTE, must set move.whiteIndex after making game object below
   const allWhite: Move[] | null = ("AW" in props) ? createGameFromParsedAW(props) : null;
   // Board size (default 19 with info message; enforce only 19)
   let size = ("SZ" in props) ? parseInt(props["SZ"][0], 10) : Board.MaxSize;
@@ -2073,6 +2118,11 @@ export async function createGameFromParsedGame
   // Create new game and clean up current game (throws after this point require model cleanup)
   const g = createGame(size, handicap, komi, allBlack, allWhite, 
                        {curGame, setGame, getGames, setGames, getDefaultGame, setDefaultGame});
+  // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
+  if (allWhite !== null)
+    for (const m of allWhite) {
+      m.whiteIndex = g.nextWhiteIndex();
+  }
   setLastCreatedGame(g); // for catch in doOpenGetFile
   // Players
   if ("PB" in props) g.playerBlack = props["PB"][0];
@@ -2135,7 +2185,9 @@ function createGameFromParsedAB(props: Record<string, string[]>): Move[] {
     return m;
   });
 }
-/// Assume "AW" exists.
+/// Assume "AW" exists.  Does not set m.whiteIndex because no game access, caller sets after making
+/// the game object.
+///
 function createGameFromParsedAW(props: Record<string, string[]>): Move[] {
   return props["AW"].map((coords) => {
     const [row, col] = parsedToModelCoordinates(coords);
@@ -2261,7 +2313,7 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
 } //liftPropertiesToMove()
 
 ///
-//// LEGACY Setup Node to Pass Move AND Next Move Error Display
+//// LEGACY Setup Node to Pass Move
 ///
 
 // const SetupNodeCommentStart = "Detected setup node in middle of move nodes.\n" +
@@ -2373,6 +2425,10 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
 //   return newComment;
 // }
 
+///
+//// Next Move Error Display (somewhat LEGACY after Edit Node Implementation)
+///
+
 /// With support for AB/AW/AE nodes, we should never encounter the parserSignalBadMsg.  Now we check
 /// in nextMoveDisplayError if we got back the signal bad msg, ignore it if we do, and emit the msg
 /// users used to get because they probably pasted a move that conflicts with the board.
@@ -2429,6 +2485,42 @@ export function nextMoveGetMessage (move: Move): string | null {
   }
 
   return null;
+}
+
+///
+//// Random Numbers for Choosing White Stone Images
+///
+
+// --- Deterministic per-game pseudo-random helpers (no SGF persistence) ---
+/// makeSeed32 generates a random number seed randomly within 32 bits.  readyForRendering bumps this
+/// each time we make a white Move and calls mix32 to get an index into one of the white stone .png
+/// files.
+///
+function makeSeed32(): number {
+  try {
+    const a = new Uint32Array(1);
+    // Works in browser/Electron renderer.  If unavailable, fall back below.
+    (globalThis as any).crypto?.getRandomValues?.(a);
+    const v = a[0] >>> 0;
+    // Avoid the (rare) zero seed just to keep patterns from being too boring.
+    return v === 0 ? 0x6d2b79f5 : v;
+  } catch {
+    // Fallback (less ideal, but fine for visual-only randomness).
+    return ((Math.random() * 0x100000000) >>> 0) || 0x6d2b79f5;
+  }
+}
+/// 32-bit mixing function (hash finalizer). Good distribution for seed/counter pseudo-random.
+/// This is a SplitMix32-style finalizer (32-bit bit mixer) / MurmurHash3 finalizers.  Common public
+/// domain from Steele et al splitmix64 paper, and MurmurHash3 finalizer by Austin Appleby.
+///
+function mix32(x: number): number {
+  x >>>= 0; // forces to be unsigned 32 bits (aleady comes in this way, so defensive)
+  x ^= x >>> 16;
+  x = Math.imul(x, 0x7feb352d);
+  x ^= x >>> 15;
+  x = Math.imul(x, 0x846ca68b);
+  x ^= x >>> 16;
+  return x >>> 0;
 }
 
 ///

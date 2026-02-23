@@ -129,7 +129,7 @@ function AppContent({
       />
       {/* Go Board */}
       <div className={styles.leftPane}>
-        <GoBoard responsive/>
+        <GoBoard responsive useStonesAndGrain /> {/* CIRCLESvsSTONES */}
       </div>
 
       {/* RIGHT: Sidebar */}

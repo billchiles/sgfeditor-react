@@ -187,8 +187,9 @@ export class Move { //implements IMoveNext {
   editParent: Move | null;
   // tree view depth needed now that the game tree has edit moves with move.number === 0.
   treeDepth: number; 
+  // white stone image variant index for rendering, 0..4, and -1 not set value if needed debugging.
+  whiteIndex: number;
  
-
 
   constructor(row: number, column: number, color: StoneColor) {
     this.row = row;
@@ -212,6 +213,7 @@ export class Move { //implements IMoveNext {
     this.isEditNodeStone = false;
     this.editParent = null;
     this.treeDepth = 0;
+    this.whiteIndex = -1; // valid values 0-4, -1 ensures bugs pop out
   }
 
   get isPass(): boolean {

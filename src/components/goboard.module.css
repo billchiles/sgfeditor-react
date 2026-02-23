@@ -6,6 +6,25 @@
   justify-content: flex-start; /* board on the left */
 }
 
+/* this bounds the texture to the board’s pixel rectangle to not fill left pane */
+.boardSurface {
+  /* shrink-wrap around the SVG */
+  display: inline-block;
+}
+
+/* used with .boardSurface: faux wood grain background (default) */
+.boardSurfaceWood {
+  background-image: url("../assets/wood-grain.png");
+  background-repeat: repeat;
+  background-size: 100px 100px;
+}
+
+/* used with .boardSurface: plain color background (no texture) */
+.boardSurfacePlain {
+  background: #D8B384;
+}
+
+
 .boardSvg {
   display: block;
   /* border-radius: 4px; */
