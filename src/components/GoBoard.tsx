@@ -8,12 +8,12 @@ import { debugAssert } from "../debug-assert";
 
 /// Stone art (bundled by Vite). These are used as textures for <image/> in the SVG for white stones.
 /// CIRCLESvsSTONES
-import blackStoneImg from "../../assets/black-stone.png";
-import whiteStone0 from "../../assets/white-stone-1.png";
-import whiteStone1 from "../../assets/white-stone-2.png";
-import whiteStone2 from "../../assets/white-stone-3.png";
-import whiteStone3 from "../../assets/white-stone-4.png";
-import whiteStone4 from "../../assets/white-stone-5.png";
+import blackStoneImg from "../assets/black-stone.png";
+import whiteStone0 from "../assets/white-stone-1.png";
+import whiteStone1 from "../assets/white-stone-2.png";
+import whiteStone2 from "../assets/white-stone-3.png";
+import whiteStone3 from "../assets/white-stone-4.png";
+import whiteStone4 from "../assets/white-stone-5.png";
 ///
 const WHITE_STONE_IMAGES = [whiteStone0, whiteStone1, whiteStone2, whiteStone3, whiteStone4];
 

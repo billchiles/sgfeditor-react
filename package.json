@@ -56,14 +56,14 @@
       "package.json"
     ],
     "win": {
-      "icon": "assets/filelogo50.ico",
+      "icon": "src/assets/filelogo50.ico",
       "target": ["nsis"]
     },
     "nsis": {
       "perMachine": true,
       "createDesktopShortcut": false,
-      "installerIcon": "assets/filelogo50.ico",
-      "uninstallerIcon": "assets/filelogo50.ico"
+      "installerIcon": "src/assets/filelogo50.ico",
+      "uninstallerIcon": "src/assets/filelogo50.ico"
     },
     "fileAssociations": [
       {
@@ -71,7 +71,7 @@
         "name": "SGFEditorR",
         "description": "SGF files (Smart Go Format)",
         "role": "Editor",
-        "icon": "assets/filelogo50.ico"
+        "icon": "src/assets/filelogo50.ico"
       }
     ]    
   }
