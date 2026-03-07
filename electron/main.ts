@@ -201,6 +201,7 @@ function createWindow () {
   const win = new BrowserWindow({
     x: 140, y: 40, width: 1025, height: 600,
     title: "SGF Editor",
+    icon: path.join(process.cwd(), "src", "assets", "filelogo50.ico"),
     autoHideMenuBar: true,
     webPreferences: {
       preload: preloadAbs, // path.join(__dirname, process.env.ELECTRON_PRELOAD_PATH || "preload.js"),

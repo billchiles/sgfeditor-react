@@ -2,17 +2,43 @@
 ///
 
 export const HELP_TEXT = 
-    `SGFEditor can read and write .sgf files, edit game trees, etc.
+    `SGF Editor reads and writes .sgf files and supports editing game trees, 
+annotating board positions, commenting on moves, etc.  It has several useful 
+commands for reviewing games, including saving in reverse view to give a copy 
+to your opponent.  You can also just use it as a Go board to play a game.
 
-The following describes command and key bindings, but you can use commands
-from buttons in the upper right of the display and from the app bar (right
-click on the game board or drag up from the bottom of the display).
+The following describes commands and key bindings, but you can use commands
+from buttons in the upper right panel.
+
+QUICK REF KEYBINDINGS
+ * esc -- should always put focus so that global keybindings work
+ * Open Game -- c-o
+ * New Game -- alt-n (browser), c-n (electron)
+ * Save As -- c-a-s (browser), c-s-s (electron)
+ * Save Flipped View -- c-s-a-f
+ * Copy File Path -- c-c
+ * Rotate Game List MRU -- shift-w
+ * AB/AW/AE Edit Mode Toggle -- F2
+ * Close Game -- c-a-F4 (browser), c-F4 (electron)
+ * Cut Move -- c-x, del
+ * Paste Move, Paste from MRU Game -- c-v, c-shift-v
+ * Undo Last Move -- click current move if last in branch
+ * Move Navigation -- home, left arrow, right arrow, end
+ * Go Back Branch Start -- c-leftarrow
+ * Select Branch Up/Down -- uparrow, downarrow
+ * Move Branch Up/Down -- c-uparrow, c-downarrow
+ * Game Info -- c-i
 
 PLACING STONES AND ANNOTATIONS:
-Click on board location to place alternating colored stones.  You can click the
-last move in a series of moves to undo or delete it.  Shift click to place square 
-annotations, ctrl click for triangles, and alt click to place letter annotations.  
+Click on a board location to place alternating colored stones.  You can click the
+last move in a series of moves to undo or delete it.  Shift click places a square 
+annotations, ctrl click places triangles, and alt click to place letter annotations.  
 If you click on an adornment location twice, it toggles whether there is an adornment.
+
+AB/AW/AE EDIT MODE:
+F2 toggles Edit Mode (shift-F2 exits) in which left click places black stones or removes existing
+stones, and right click places white stones or removes existing stones.  This creates setup nodes
+in the middle of the game.
 
 KEEPING FOCUS ON BOARD FOR KEY BINDINGS
 Escape will always return focus to the board so that the arrow keys work
@@ -42,14 +68,12 @@ MULTIPLE OPEN FILES
 You can open multiple games.  Shift-w rotates through games (can't stop chrome
 from stealing ctrl-w).  When creating or opening games, SgfEditor closes the 
 default game if it is unused.  Ctrl-alt-f4 closes the current game in the browser,
-and ctrl-f4 closes in epsilon.
+and ctrl-f4 closes in electron.
 
 SAVING FILES, SAVE AS
 The save button (or ctrl-s) saves to the associated file name if there is one;
-otherwise it prompts for a filename.  If there is a filename, but the game state
-is not dirty, then it prompts to save to a different filename (and tracks to the
-new name).  To explicitly get save-as behavior, use ctrl-alt-s (browser) or 
-ctrl-shift-s (electron).  Ctrl-c copies filepath to clipboard.
+otherwise it prompts for a filename.  To explicitly get save-as behavior, 
+use ctrl-alt-s (browser) or ctrl-shift-s (electron).  Ctrl-c copies filepath to clipboard.
 
 SAVING REVERSE VIEW
 To save the game so that your opponent can review it from their point of view, use
@@ -68,14 +92,9 @@ You must be on the first move of a branch, and then you can use ctrl-uparrow or
 ctrl-downarrow to move the branch up or down to change the order of branches.
 
 PASSING
-The Pass button or c-p will make a pass move.
+c-p will make a pass move.
 
-SETTINGS
-C-u brings up a dumb settings dialog where you can change some font sizes and sizes
-of UI elements.  There currently is not a lot of rigor and checking of input values.
-
-MISCELLANEOUS
-   F1 produces this help.
+MISCELLANEOUS -- NOT PORTED YET
    Ctrl-k clears the current node's comment and puts text on system clipboard.
    Ctrl-1, ..., ctrl-5 deletes the first, ..., fifth line of node's comment and
       puts entire comment's text on clipboard.

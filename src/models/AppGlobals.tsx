@@ -650,7 +650,8 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     gameInfoCmd(curgame, deps.showGameInfo!);
     return;
   // New Game -- browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
-  } else if (! e.ctrlKey && ! e.shiftKey && ! e.metaKey && e.altKey && lower === "n") {
+  } else if ((browser && ! e.ctrlKey && ! e.shiftKey && ! e.metaKey && e.altKey && lower === "n") ||
+             (! browser && e.ctrlKey && lower === "n")) {
     //deps.setLastCommand( {type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
@@ -690,6 +691,14 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.exitEditMode();
     await closeGameCmd(curgame, deps);
     return;
+  } else if (control && lower === "p") {
+    const m = await curgame.makeMove(Board.NoIndex, Board.NoIndex);
+    if (m !== null) {
+      deps.bumpVersion();
+      deps.bumpTreeLayoutVersion();
+      deps.bumpTreeHighlightVersion();
+    }
+
   }
   //
   // ********** The following depend on what other UI has focus ... **********

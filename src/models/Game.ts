@@ -19,13 +19,13 @@ export class Game {
   currentMove: Move | null; // this is null when at the game start or empty board
   size: number;
   board: Board;
-  nextColor!: StoneColor;
+  nextColor!: StoneColor; // bang because constructor -> initHandicapNextColor
   moveCount: number; // starts at zero, add one when making new moves
   branches: Move[] | null; // null if only one next move
   komi: string;
-  handicap!: number;
-  handicapMoves!: Move[] | null; // applied ! to say I know it is initialized.
-  allWhiteMoves: Move[] | null;
+  handicap!: number; // bang because constructor -> initHandicapNextColor
+  handicapMoves!: Move[] | null; // bang because constructor -> initHandicapNextColor
+  allWhiteMoves!: Move[] | null; // bang because constructor -> initHandicapNextColor 
   filename: string | null; // fullpath if platform provides it
   filebase: string | null; // <name>.<ext>
   saveCookie: unknown | null; // fileHandle if platforms supports it, otherwise string token
@@ -68,10 +68,11 @@ export class Game {
     this.currentMove = null;
     this.moveCount = 0;
     this.initHandicapNextColor(handicap, handicapStones, allWhite);
+    this.allWhiteMoves = null;
     if (allWhite !== null)
-      allWhite.forEach(m => {this.board.addStone(m)});
-    // todo AB/AW if allwhite not null also set next color to black, override handicap setting
-    this.allWhiteMoves = allWhite
+      // Don't set this.allWhiteMoves = allWhite because makeWhiteEditStone pushes the stone again
+      allWhite.forEach(m => {this.board.addStone(m); this.makeWhiteEditStone(m, null);});
+    // this.allWhiteMoves = allWhite
     this.filename = null;
     this.filebase = null;
     this.saveCookie = null;
@@ -114,16 +115,19 @@ export class Game {
         this.nextColor = StoneColors.Black;
       }
       this.handicapMoves = handicapStones;
-      this.nextColor = (allWhite !== null) ? StoneColors.Black : 
-                                             StoneColors.White; // AW trumps next color
+      if (allWhite !== null) this.nextColor = StoneColors.Black;
+      // this.nextColor = (allWhite !== null) ? StoneColors.Black : 
+      //                                        StoneColors.White; // AW trumps next color
       return;
     }
     // handicap > 0
     this.nextColor = StoneColors.White;
-    this.nextColor = (allWhite !== null) ? StoneColors.Black : 
-                                           StoneColors.White; // if AW, ignore handicap to set color
+    if (allWhite !== null) this.nextColor = StoneColors.Black;
+    // this.nextColor = (allWhite !== null) ? StoneColors.Black : 
+    //                                        StoneColors.White; // if AW, ignore handicap to set color
     this.handicapMoves = [];
     // Make all the standard handicap stones based on count
+    // Do not mark as isEditStone, we should get conflict dialogs if replaying a conflicting move
     const makeMove = (row: number, col: number) => {
       const m = new Move(row, col, "black");
       this.handicapMoves!.push(m);
@@ -143,6 +147,10 @@ export class Game {
     if (handicap >= 8) { makeMove(4,10); makeMove(16,10); }
     if (handicap === 9) { makeMove(10,10); }
     // After complying with the handicap number, see if any other AB stones were added to the board.
+    // NOTE: If user edited root to remove handicap stones, SGF Editor still makes the number of
+    // handicap stones.  Even if user edited the HA number in the SGF, we make them by pattern of
+    // count.  Really we should check if AB exists, and if it does, don't add standard handicap loc
+    // stones if their indexes are not in the array of indexes for AB.
     if (handicapStones !== null)
       for (const m of handicapStones) {
         if (this.board.moveAt(m.row, m.column)) continue;
@@ -718,6 +726,19 @@ gotoStart (): void {
     return [move, hadParseErr];
   } //replayMoveUpdateModel()
 
+  makeWhiteEditStone (stone: Move, parent: Move | null): Move {
+    stone.isEditNodeStone = true;
+    stone.editParent = parent;
+    // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
+    stone.whiteIndex = this.nextWhiteIndex();
+    if (parent === null) {
+      if (this.allWhiteMoves === null) this.allWhiteMoves = [];
+      this.allWhiteMoves.push(stone);
+    }
+    else parent.addedWhiteStones.push(stone);
+    return stone;
+  }
+
   private static readonly WHITE_STONE_PNG_COUNT = 5; // any given build has a fixed number of white .png files
   previousWhiteIndex = -1;
   /// nextWhiteIndex returns a deterministic pseudo-random index in [0, count).
@@ -884,11 +905,7 @@ gotoStart (): void {
         const existing = this.board.moveAt(r, c);
         if (existing === null) {
           const s = new Move(r, c, StoneColors.White);
-          s.isEditNodeStone = true;
-          s.editParent = move;
-          // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
-          move.whiteIndex = this.nextWhiteIndex();
-          move.addedWhiteStones.push(s);
+          this.makeWhiteEditStone(s, move);
         }
         else {
           telemetryComment(r, c, "AW", "already a stone");
@@ -986,7 +1003,7 @@ readyUnrenderedAdornments (move: Move): void {
       if (existing.color === StoneColors.Black && this.handicapMoves !== null) {
         this.handicapMoves = this.handicapMoves.filter((m) => !(m.row === row && m.column === col));
       } else if (existing.color === StoneColors.White && this.allWhiteMoves !== null) {
-        this.allWhiteMoves = this.allWhiteMoves.filter((m) => !(m.row === row && m.column === col));
+        this.allWhiteMoves = this.allWhiteMoves.filter((m) => ! (m.row === row && m.column === col));
       }
       return;
     }
@@ -1006,10 +1023,7 @@ readyUnrenderedAdornments (move: Move): void {
       if (this.handicapMoves === null) this.handicapMoves = [];
       this.handicapMoves.push(m);
     } else {
-      if (this.allWhiteMoves === null) this.allWhiteMoves = [];
-        // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
-        m.whiteIndex = this.nextWhiteIndex();
-      this.allWhiteMoves.push(m);
+      this.makeWhiteEditStone(m, null);
     }
     // Remove "captured stones" appropriately.
     for (const c of captured) {
@@ -1074,18 +1088,14 @@ readyUnrenderedAdornments (move: Move): void {
     const match = editMove.editDeletedStones.find(
                     (m) => m.row === row && m.column === col && m.color === color);
     const stone = (match !== undefined) ? match : new Move(row, col, color);
-    if (stone !== match && color === StoneColors.White) {
-      // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
-      stone.whiteIndex = this.nextWhiteIndex();
+    if (stone === match) {
+      editMove.editDeletedStones = editMove.editDeletedStones.filter((m) => m !== match);                    
     }
-    if (match !== undefined) {
-      editMove.editDeletedStones = editMove.editDeletedStones.filter((m) => m !== match);
+    else if (color === StoneColors.White) {
+      // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
+      this.makeWhiteEditStone(stone, editMove);
     } else {
-      // Setup stone as edit node stone and add to appropriate list for writing SGF.
-      stone.isEditNodeStone = true;
-      stone.editParent = editMove;
-      if (stone.color === StoneColors.Black) editMove.addedBlackStones.push(stone);
-      else editMove.addedWhiteStones.push(stone);
+      editMove.addedBlackStones.push(stone);
     }
     // Add stone and apply captures/illegality checks similar to makeMove, but do not update prisoners.
     this.board.addStone(stone);
@@ -1224,6 +1234,9 @@ readyUnrenderedAdornments (move: Move): void {
     return res;
   }
 
+  /// genPrintGameInitialStones handles AB/AW/AE for the root node.  It is always rendered so ignore
+  /// parsed properties and just use internal live movel.
+  ///
   private genPrintGameInitialStones (props: Record<string, string[]>, flipped: boolean): void {
     // HA
     if (this.handicap !== 0) {
@@ -1232,24 +1245,17 @@ readyUnrenderedAdornments (move: Move): void {
       delete props["HA"];
     }
     // AB 
-    if ("AB" in props) {
-      // Prefer to keep what we parsed
-      if (flipped) props["AB"] = props["AB"].map((v) => flipParsedCoordinates(v, this.size));
-    } else if (this.handicapMoves !== null) {
-      props["AB"] = this.handicapMoves
-        .map((m) => getParsedCoordinates(m, flipped, this.size));
+    if (this.handicapMoves !== null && this.handicapMoves.length > 0) {
+      props["AB"] = this.handicapMoves.map((m) => getParsedCoordinates(m, flipped, this.size));
     } else {
       delete props["AB"];
     }
-    // AW — prefer to keep what we parsed
-    if ("AW" in props) {
-      if (flipped) props["AW"] = props["AW"].map((v) => flipParsedCoordinates(v, this.size));
-    } else if (this.allWhiteMoves !== null) {
-      props["AW"] = this.allWhiteMoves
-        .map((m) => getParsedCoordinates(m, flipped, this.size));
+    // AW 
+    if (this.allWhiteMoves !== null && this.allWhiteMoves.length > 0) {
+      props["AW"] = this.allWhiteMoves.map((m) => getParsedCoordinates(m, flipped, this.size));
     } else {
       delete props["AW"];
-    }
+    }    
   } // genPrintGameInitialStones()
 
 
@@ -2119,10 +2125,6 @@ export async function createGameFromParsedGame
   const g = createGame(size, handicap, komi, allBlack, allWhite, 
                        {curGame, setGame, getGames, setGames, getDefaultGame, setDefaultGame});
   // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
-  if (allWhite !== null)
-    for (const m of allWhite) {
-      m.whiteIndex = g.nextWhiteIndex();
-  }
   setLastCreatedGame(g); // for catch in doOpenGetFile
   // Players
   if ("PB" in props) g.playerBlack = props["PB"][0];
@@ -2178,9 +2180,15 @@ export async function createGameFromParsedGame
 
 /// Assumes "AB" exists.
 function createGameFromParsedAB(props: Record<string, string[]>): Move[] {
+  const handicapStandardLocs = ["dd", "jd", "pd", "dj", "jj", "pj", "dp", "jp", "pp"];
   return props["AB"].map((coords) => {
     const [row, col] = parsedToModelCoordinates(coords); 
     const m = new Move(row, col, StoneColors.Black);
+    if (! handicapStandardLocs.includes(coords)) {
+      // If not handicap loc, mark as an AB stone that could (not)conflict with a replayed move.
+      m.isEditNodeStone = true;
+      m.editParent = null;
+    }
     m.rendered = false;
     return m;
   });
@@ -2221,7 +2229,7 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
       // so if user clicks on the board, that should be number 1 too.
       if (! mv.isEditNode) mv.number = g.moveCount + 1;
       mv.treeDepth = 1;
-      renumberMoves(mv, mv.isEditNode ? g.moveCount + 1 : null);
+      renumberMoves(mv, mv.isEditNode ? g.moveCount : null);
       // Don't set previous point because these are first moves, so prev is null.
     }
     g.branches = g.parsedGame!.branches;
@@ -2237,7 +2245,7 @@ function setupFirstParsedMove (g : Game, move : Move) : Move | null {
       // so if user clicks, that should be number 1 too.
       if (! move.isEditNode) move.number = g.moveCount + 1;
       move.treeDepth = 1;
-      renumberMoves(move, move.isEditNode ? g.moveCount + 1 : null);
+      renumberMoves(move, move.isEditNode ? g.moveCount : null);
     }
   }
   g.firstMove = move;
