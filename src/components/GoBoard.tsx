@@ -145,9 +145,9 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
       debugAssert(curGame !== null, "Eh?! How can there be no game, but we're clicking?!");
       const curBoard = curGame.board;
       // Modifier-clicks toggle adornments and black/white stones in edit move mode.
-      const ctrl = e.ctrlKey || e.getModifierState?.("Control");
-      const shift = e.shiftKey || e.getModifierState?.("Shift");
-      const alt = e.altKey || e.getModifierState?.("Alt");
+      const ctrl = e.ctrlKey || e.getModifierState("Control");
+      const shift = e.shiftKey || e.getModifierState("Shift");
+      const alt = e.altKey || e.getModifierState("Alt");
       if (ctrl) { curGame.toggleAdornment(AdornmentKinds.Triangle, row, col); return; }
       if (alt) { curGame.toggleAdornment(AdornmentKinds.Letter, row, col); return; }
       // Edit move mode changes left click (black) and left shift click (white), and clicking on
@@ -167,11 +167,11 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
         if (curMove.next === null)
           curGame.cutMove();
         else
-          void curGame.message!.message!("Tapping last move to undo only works if there is no " +
-                                         "sub tree hanging from it.\nPlease use delete/Cut Move.");
+          void curGame.message.message("Tapping last move to undo only works if there is no " +
+                                       "sub tree hanging from it.\nPlease use delete/Cut Move.");
 
       } else if (curBoard.moveAt(row, col) !== null) {
-        void curGame.message!.message!("You can't play on an occupied point.");
+        void curGame.message.message("You can't play on an occupied point.");
         return;
       } else {
         // Make move in the game model via GameContext/appGlobals, bump version to re-render.
@@ -283,7 +283,7 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
     const curBoard = curGame.board;
     const current = curGame.currentMove ?? null;
     // marker sizes scale with stone radius; keeps ring visible at small sizes
-    const markRadius = Math.max(geom.radius * 0.6, 3);
+    const markRadius = Math.max(geom.radius * 0.5, 3);
     const markStroke = Math.max(geom.radius * 0.2, 1);
     for (let y = 0; y < boardSize; y++) {
       for (let x = 0; x < boardSize; x++) {
@@ -320,15 +320,12 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
               : WHITE_STONE_IMAGES[Math.max(0, Math.min(WHITE_STONE_IMAGES.length - 1, 
                                    m.whiteIndex))];
             circles.push(
-              <image
-                key={`stone-${row}-${col}`}
-                href={href}
-                // x={cx - geom.radius}
-                // y={cy - geom.radius}
+              <image key={`stone-${row}-${col}`} href={href}
+                // x={cx - geom.radius} y={cy - geom.radius}
                 x={x0} y={y0}
-                width={d}
-                height={d}
-                preserveAspectRatio="xMidYMid meet"
+                width={d} height={d} preserveAspectRatio="xMidYMid meet"
+                // style hack to lighten grey shell lines vs. iterating re-gen'ing the .png files
+                style={isblack ? undefined : { filter: "brightness(1.08) contrast(0.85)" }}
               />
             );
           }
@@ -337,8 +334,10 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
           if (current === m || 
               (current !== null && current.row === m.row && current.column === m.column)) { 
             const ringColor = m.color === StoneColors.Black ? "#fff" : "#000";
+            const x0 = Math.round(cx); // Settles mark centered on stone, matches math above
+            const y0 = Math.round(cy);
             circles.push(
-              <circle key={`curmark-${x}-${y}`} cx={cx} cy={cy} r={markRadius} fill="none"
+              <circle key={`curmark-${x}-${y}`} cx={x0} cy={y0} r={markRadius} fill="none"
                       stroke={ringColor} strokeWidth={markStroke}
               />
             );

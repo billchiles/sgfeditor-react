@@ -23,7 +23,7 @@ import { fileBridgeElectron, keyBindingBridgeElectron } from '../platforms/elect
 import type { AppStorageBridge, FileBridge, KeyBindingBridge } from "../platforms/bridges";
 import { SGFError, parseFileToMoves} from "./sgfparser";
 import { debugAssert } from "../debug-assert";
-import { Board, type Move } from "./Board";
+import { Board, AdornmentKinds, modelCoordinateToDisplayLetter, type Move } from "./Board";
 import type { ConfirmOptions } from "../components/MessageDialog";
 
 ///
@@ -56,8 +56,8 @@ export type AppGlobals = {
   setDefaultGame: (g: Game | null) => void;
   getLastCreatedGame: () => Game | null;
   setLastCreatedGame: (g: Game | null) => void;
-  getComment?: () => string;
-  setComment?: (text: string) => void;
+  getComment: () => string;
+  setComment: (text: string) => void;
   // Global render tick that increments whenever the model changes
   version: number;
   // Manually force a redraw from any UI or model code
@@ -68,17 +68,18 @@ export type AppGlobals = {
   bumpTreeLayoutVersion: () => void;
   bumpTreeHighlightVersion: () => void;
   // UI layer (TreeView) can register a remapper to swap a ParsedNode for its new Move during replay
-  setTreeRemapper?: (fn: ((oldKey: /* ParsedNode */ any, newMove: Move) => void) | null) => void;
+  // NO LONGER USED
+  setTreeRemapper: (fn: ((oldKey: /* ParsedNode */ any, newMove: Move) => void) | null) => void;
 
 
   // UI commands exposed to components:
   //
   showHelp: () => void;
-  showGameInfo?: () => void; // ask App.tsx to open the Game Info dialog
+  showGameInfo: () => void; // ask App.tsx to open the Game Info dialog
   // File I/O provided by src/platforms/bridges.ts declarations
   // Promise<void> is style choice because it feels like a command, not a query, and the caller
   // doesn't need the file contents because the openSGF handler creates the new game and model state.
-  showMessage?: ProviderProps["openMessageDialog"];
+  showMessage: ProviderProps["openMessageDialog"];
   openSgf: () => Promise<void>;
   saveSgf: () => Promise<void>;
   saveSgfAs: () => Promise<void>;
@@ -162,9 +163,9 @@ type CmdDependencies = {
   getLastCommand: () => LastCommand;
   setLastCommand: (c: LastCommand) => void;
   startNewGameFlow: () => Promise<void>;
-  showHelp?: () => void;
-  showGameInfo?: () => void;
-  showMessage?: ShowMessageDialogSig;
+  showHelp: () => void;
+  showGameInfo: () => void;
+  showMessage: ShowMessageDialogSig;
 };
 
 /// ProviderProps just describes the args to GameProvider function.
@@ -176,10 +177,10 @@ type ProviderProps = {
   setComment: (text: string) => void;
   // Let the provider ask the shell UI (App) to show the New Game dialog (portal lives in App.tsx)
   // App provides these as callbacks to the provider.
-  openNewGameDialog?: () => void; 
-  openHelpDialog?: () => void;
-  openGameInfoDialog?: () => void;
-  openMessageDialog?: ShowMessageDialogSig;
+  openNewGameDialog: () => void; 
+  openHelpDialog: () => void;
+  openGameInfoDialog: () => void;
+  openMessageDialog: ShowMessageDialogSig;
 };
 
 type ShowMessageDialogSig = (text: string, opts?: ConfirmOptions) => Promise<boolean>;
@@ -311,7 +312,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
     await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
                          getDefaultGame, setDefaultGame,
-                         openMessageDialog!, async () => { openNewGameDialog?.(); });
+                         openMessageDialog!, async () => { openNewGameDialog(); });
   }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand,appStorageBridge]);
   //
   // Electron file activation (by absolute path).  Same dirty-check flow as Open Cmd, but skips file
@@ -395,10 +396,10 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
           await appStorageBridge.delete(UNNAMED_AUTOSAVE); 
           return; 
         }
-        const useAutoSave = await openMessageDialog?.("Found an unnamed auto saved game.",
-                                                      { title: "Open unnamed autosave ?",
-                                                        primary: "Open autosave",
-                                                        secondary: "Start empty board" } );
+        const useAutoSave = await openMessageDialog("Found an unnamed auto saved game.",
+                                                    { title: "Open unnamed autosave ?",
+                                                      primary: "Open autosave",
+                                                      secondary: "Start empty board" } );
         // Check if something intervened and aborted UI render or useEffect execution.  This is set
         // in the returned cleanup lambda below.
         if (cancelled) return;
@@ -504,8 +505,8 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
               getGames, setGames, setGame, getDefaultGame,
               setDefaultGame, getLastCreatedGame, setLastCreatedGame, 
               getLastCommand, setLastCommand, startNewGameFlow,
-              showHelp: () => { openHelpDialog?.(); },
-              showGameInfo: () => { openGameInfoDialog?.(); },
+              showHelp: () => { openHelpDialog(); },
+              showGameInfo: () => { openGameInfoDialog(); },
               showMessage: openMessageDialog,
              }), 
              [gameRef, bumpVersion, bumpTreeLayoutVersion, bumpTreeHighlightVersion,
@@ -547,12 +548,16 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
             version, bumpVersion,
             treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, bumpTreeHighlightVersion,
             setTreeRemapper,
-            showHelp: () => { openHelpDialog?.(); }, showGameInfo: () => { openGameInfoDialog?.(); },
+            showHelp: () => { openHelpDialog(); }, showGameInfo: () => { openGameInfoDialog(); },
+            // Cmd handlers used CmdDependencies.showMessage and didn't need this wired up for
+            // UI code, but after making it non-optional, we needed to supply it.
+            showMessage: openMessageDialog,
             openSgf, saveSgf, saveSgfAs, newGame,
             getLastCommand, setLastCommand,}),
-    [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs,
-     setGames, getGame, setGame, treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, 
-     bumpTreeHighlightVersion, setTreeRemapper]
+    [version, bumpVersion, getComment, setComment, openSgf, saveSgf, saveSgfAs, setGames, getGame, 
+     setGame, treeLayoutVersion, bumpTreeLayoutVersion, treeHighlightVersion, 
+     bumpTreeHighlightVersion, setTreeRemapper, openHelpDialog, openGameInfoDialog, 
+     openMessageDialog]
   );
   // Instead of the following line that requires this file be a .tsx file, I could have used this
   // commented out code:
@@ -672,7 +677,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
     curgame.exitEditMode();
-    deps.showHelp?.();
+    deps.showHelp();
     return;
   // F2: toggle edit move mode (shift+F2 exits)
   } else if (! control && ! alt && (e.code === "F2" || lower === "f2")) {
@@ -698,7 +703,40 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
       deps.bumpTreeLayoutVersion();
       deps.bumpTreeHighlightVersion();
     }
-
+    return;
+  // Common editing command -- delete entire comment.
+  } else if (e.code === "KeyK" && control) {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
+    e.preventDefault();
+    e.stopPropagation();
+    await updateCurrentComment("", curgame);
+    // document.getElementById("app-focus-root")?.focus();
+    return;
+  // Common editing command -- delete line 1 or 2 or .. 5.
+  }
+  else if (control && ! shift && e.key >= "1" && e.key <= "5") {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
+    e.preventDefault();
+    e.stopPropagation();
+    const num = Number(e.key); // "Digit3" -> 3
+    await deleteCommentLine(num, curgame);
+    return;
+  // Common editing command -- replace the current moves indexes in the comment with "this"
+  }
+    else if (control && !shift && !alt && !e.metaKey && e.code === "KeyT") {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
+    e.preventDefault();
+    e.stopPropagation();
+    await replaceIndexedMoveRef(curgame, deps);
+    return;
+  // Common editing command -- replace adornment indexed refs with "marked stone"
+  }
+    else if (control && e.code === "KeyM") {
+    deps.setLastCommand({ type: CommandTypes.NoMatter });
+    e.preventDefault();
+    e.stopPropagation();
+    await replaceIndexedMarkedRef(curgame);
+    return;
   }
   //
   // ********** The following depend on what other UI has focus ... **********
@@ -786,7 +824,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
     if (curgame.canUnwindMove() &&
-        await curgame.message?.confirm?.(
+        await curgame.message.confirm(
           "Cut current move from game tree?  OK, is yes.  Escape/Cancel is no.")) {
       curgame.exitEditMode();
       curgame.cutMove(); // signals UI to update if makes changes
@@ -832,16 +870,16 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     // filename is full path in Electron; filebase in browser
     const text = curgame.filename ?? curgame.filebase ?? ""; 
     if (text === "") {
-      await deps.showMessage?.("No file is associated with the current game.");
+      await deps.showMessage("No file is associated with the current game.");
       return;
     }
     // web clipboard API (works in Electron too)
     try {
       await navigator.clipboard.writeText(text);
-      // await deps.showMessage?.(`Copied: ${text}`);
+      // await deps.showMessage(`Copied: ${text}`);
     } catch {
       // If the browser disallows it (e.g., not a secure context), let the user know.
-      await deps.showMessage?.("Copy failed (clipboard permissions).");
+      await deps.showMessage("Copy failed (clipboard permissions).");
     }
     return;
   } // copy file name
@@ -998,7 +1036,7 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
   newGames = "idx" in arg ? moveGameToMRU(newGames, idx) : [arg.g, ...newGames];
   setGames(newGames); 
   setGame(newGames[0]);
-  newGames[0].setComments!(newGames[0].comments);
+  newGames[0].setComments(newGames[0].comments);
 }
 
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
@@ -1340,6 +1378,132 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
 } // saveAsCommand()
 
 ///
+//// Pet Commands for Common Editing
+///
+
+/// ReplaceIndexedMarkedRef is a common command that replaces an indexed reference to a 
+/// location (d4) with "marked stone" for a triangle adornment at that location or 
+/// "marked square stone".  This confirms index has an adornment marking it.  This also searches
+/// all adornments for the first reference occurring in the comment rather than just take the first
+/// adornment that matches.
+///
+/// For some reason the convention on computer go board displays is to count rows from the bottom
+/// to the top, and SGF for some reason records moves as col,row pairs instead of row,col.
+/// Hence, we build moveRef backwards with column first and flipping row from bottom of board.
+///
+async function replaceIndexedMarkedRef (curgame: Game): Promise<void> {
+  const s = curgame.getComments();
+  const adornments = curgame.currentMove === null ? curgame.startAdornments
+                                                  : curgame.currentMove.adornments;
+  if (adornments.length === 0) {
+    await curgame.message.message("There are no marked stones or points on the current board.");
+    return;
+  }
+  // Don't need to escape board SGF indexes (<letter><digits>).
+  // const escapeRegex = (text: string): string => 
+  //   {return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");}
+  let firstMatchIdx = -1;
+  let firstMatchLen = 0;
+  let firstReplaceText = "";
+  for (const a of adornments) {
+    const moveRef = String(modelCoordinateToDisplayLetter(a.column)) +
+                    String(curgame.board.size + 1 - a.row);
+    const re = new RegExp(`\\b${moveRef}\\b`); // ...`\\b${escapeRegex(moveRef)}\\b`);
+    const relower = new RegExp(`\\b${moveRef.toLowerCase()}\\b`); // escapeRegex(moveRef.tolower...)
+    let m = re.exec(s);
+    if (m === null) {
+      m = relower.exec(s);
+      if (m === null) continue;
+    }
+    let replaceText: string;
+    if (a.kind === AdornmentKinds.Triangle) replaceText = "marked stone";
+    else if (a.kind === AdornmentKinds.Square) replaceText = "square marked stone";
+    else replaceText = a.letter;
+    // We have a match, but because we're looping the adornments and not the comment characters,
+    // see if we found the first such reference so that the comment updates are more obvious.
+    if (firstMatchIdx === -1 || m.index < firstMatchIdx) {
+      firstMatchIdx = m.index;
+      firstMatchLen = m[0].length;
+      firstReplaceText = replaceText;
+    }
+  } // loop adornments
+  if (firstMatchIdx === -1) {
+    await curgame.message.message("There is no marked location reference in the current comment.");
+  } else {
+    await updateCurrentComment(s.substring(0, firstMatchIdx) + firstReplaceText + 
+                               s.substring(firstMatchIdx + firstMatchLen),
+                               curgame);
+  }
+} // replaceIndexedMarkedRef
+
+/// ReplaceIndexedMoveRef is a common editing commant that replaces an indexed reference to a move,
+/// like d4 with the word "this".  This confirms index is for the current move.
+///
+/// For some reason the convention on computer go board displays is to count rows from the bottom
+/// to the top, and SGF for some reason records moves as col,row pairs instead of row,col, and
+/// it counts the rows from the top to the bottom.
+/// Hence, we build moveRef backwards with column first and flipping row from bottom of board.
+///
+async function replaceIndexedMoveRef (curgame: Game, deps: CmdDependencies): Promise<void> {
+  const move = curgame.currentMove;
+  if (move === null) {
+    await curgame.message.message("No current move, no move ref to search for.");
+    return;
+  }
+  const moveRef = String(modelCoordinateToDisplayLetter(move.column)) +
+                  String(curgame.board.size + 1 - move.row);
+  let re = new RegExp(`\\b${moveRef}\\b`);
+  const s = curgame.getComments();
+  let m = re.exec(s);
+  if (m === null) {
+    re = new RegExp(`\\b${moveRef.toLowerCase()}\\b`);
+    m = re.exec(s);
+  }
+  if (m !== null) {
+    const newComment = s.substring(0, m.index) + "this" + s.substring(m.index + moveRef.length);
+    await updateCurrentComment(newComment, curgame);
+  } else {
+    await deps.showMessage(`No reference to ${moveRef} found.`);
+  }
+} // replaceIndexedMoveRef
+
+/// deleteCommentLine is common editing command that deletes the 1-based line in the comment.
+///
+async function deleteCommentLine (num: number, curgame: Game): Promise<void> {
+  debugAssert(num > 0, `Must call deleteCommentLine with num > 0, not ${num}.`)
+  const s = curgame.getComments();
+  const lines = s.split("\n"); // preserves trailing newline with "" last element
+  if (num > lines.length || (lines.length === 1 && lines[0] === "")) {
+    await curgame.message.message(`There is no line number ${num}`);
+    return;
+  }
+  lines.splice(num - 1, 1);
+  await updateCurrentComment(lines.join("\n"), curgame); // \n between every element
+} // deleteCommentLine()
+
+/// updateCurrentComment sets the current comment to the string and pushes the change to the model.
+/// It save the previous comment on the system clipboard.
+///
+async function updateCurrentComment(s: string, curgame: Game): Promise<void> {
+  // Get old for system clipboard.
+  const old = curgame.getComments() ?? "";
+  if (old !== "") { 
+    // Clipboard APIs may throw if unavailable or denied.  Windows/.NET throws null deref if "".
+    try {
+      await navigator.clipboard.writeText(old);
+    } catch { 
+      await curgame.message.message("Storing the deleted comment on the system clipboard failed.");
+    }
+  }
+  curgame.setComments(s); // Update UI
+  curgame.saveCurrentComment(); // Update model
+
+  // Trigger re-render / dirty bit updates.
+  curgame.onChange();
+  curgame.onTreeHighlightChange();
+} // updateCurrentComment()
+
+///
 //// Games and Setup Helpers
 ///
 
@@ -1404,7 +1568,7 @@ function gameInfoCmd (curgame: Game, showGameInfo: () => void) {
   } else if (curgame.miscGameInfo === null)
     curgame.miscGameInfo = {};
   // Launch dialog
-  showGameInfo!();
+  showGameInfo();
 }
 
 /// closeGameCmd handles swapping out current game if necessary, checking dirty save, 
@@ -1614,7 +1778,7 @@ async function gcOldAutoSaves (appStorage: AppStorageBridge): Promise<void> {
 ///
 
 
-//// focusOnRoot called from input handling on esc to make sure all keybindings work.
+/// focusOnRoot called from input handling on esc to make sure all keybindings work.
 /// May need to call this if, for example, user uses c-s in comment box, that is, command impls
 /// may need to call at end to ensure all keys are working.
 ///

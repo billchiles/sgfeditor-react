@@ -49,15 +49,17 @@ export class Game {
 
   // This model code exposes this call back that GameProvider in AppGlobals (React Land / UI) sets
   // to bumpVersion(), keeping model / UI isolation.
-  onChange?: () => void; // GameProvider wires this up to bumpVersion, so model can signal UI
-  onTreeLayoutChange?: () => void; // full re-render, layout/topolgy change
-  onTreeHighlightChange?: () => void; // just highlights or scrolling changes possible
-  message?: MessageOrQuery; // optional sink (alert/confirm etc.)
+  // These all have ! on the name to indicate we know the are definitely assigned before use.
+  //
+  onChange!: () => void; // GameProvider wires this up to bumpVersion, so model can signal UI
+  onTreeLayoutChange!: () => void; // full re-render, layout/topolgy change
+  onTreeHighlightChange!: () => void; // just highlights or scrolling changes possible
+  message!: MessageOrQuery; // optional sink (alert/confirm etc.)
   // NO LONGER USED -- When a move is reified from a ParsedNode during replay/rendering, need to 
   // tell the UI layer the mapping from moves to view models needs updating.
   onParsedNodeReified?: (oldKey: /* ParsedNode */ any, newMove: Move) => void;
-  getComments?: () => string; // read current comment from UI, explicitly controlled element
-  setComments?: (text: string) => void; // set current comment
+  getComments!: () => string; // read current comment from UI, explicitly controlled element
+  setComments!: (text: string) => void; // set current comment
 
 
   constructor (size : number = 19, handicap : number = 0, komi : string = "6.5", 
@@ -513,8 +515,8 @@ export class Game {
     this.saveAndUpdateComments(current, previous);
     this.currentMove = previous;
     debugAssert(this.onChange !== null, "What?! We're running code after startup, how is this nul?!");
-    this.onChange!(); // call this because captured stones changes board.
-    this.onTreeHighlightChange!();
+    this.onChange(); // call this because captured stones changes board.
+    this.onTreeHighlightChange();
     return current;
   }
 
@@ -544,8 +546,8 @@ gotoStart (): void {
   this.moveCount = 0;
   this.blackPrisoners = 0;
   this.whitePrisoners = 0;
-  this.onChange!(); // Signal re-render
-  this.onTreeHighlightChange!();
+  this.onChange(); // Signal re-render
+  this.onTreeHighlightChange();
 }
 
   ///
@@ -651,8 +653,8 @@ gotoStart (): void {
       this.moveCount = current.number;
       this.nextColor = oppositeColor(current.color);
     }
-    this.onChange!(); 
-    this.onTreeHighlightChange!();
+    this.onChange(); 
+    this.onTreeHighlightChange();
   }
 
 
@@ -961,13 +963,13 @@ readyUnrenderedAdornments (move: Move): void {
   toggleEditMode (): void {
     // Do not create an edit node until the user adds/removes a stone.
     this.editMode = ! this.editMode;
-    this.onChange!(); // Need UI to update Edit button highlight
+    this.onChange(); // Need UI to update Edit button highlight
   }
 
   exitEditMode (): void {
     const changed = this.editMode;
     this.editMode = false;
-    if (changed) this.onChange!(); // Need UI to update Edit button highlight if mode changed
+    if (changed) this.onChange(); // Need UI to update Edit button highlight if mode changed
   }
 
   /// editStoneClick -- Entry point used by GoBoard when in edit move mode.
@@ -979,8 +981,8 @@ readyUnrenderedAdornments (move: Move): void {
       // Editing starting board
       await this.editRootStoneClick(row, col, color);
       this.isDirty = true;
-      this.onChange!();
-      //this.onTreeLayoutChange!();
+      this.onChange();
+      //this.onTreeLayoutChange();
       return;
     }
     // Check if we already have an edit node move.
@@ -991,8 +993,8 @@ readyUnrenderedAdornments (move: Move): void {
     }
     await this.applyEditStoneChange(editMove, row, col, color);
     this.isDirty = true;
-    this.onChange!();
-    this.onTreeHighlightChange!();
+    this.onChange();
+    this.onTreeHighlightChange();
   }
 
   private async editRootStoneClick (row: number, col: number, color: StoneColor): Promise<void> {
@@ -1001,7 +1003,7 @@ readyUnrenderedAdornments (move: Move): void {
       // Remove stone from root setup lists.
       this.board.removeStone(existing);
       if (existing.color === StoneColors.Black && this.handicapMoves !== null) {
-        this.handicapMoves = this.handicapMoves.filter((m) => !(m.row === row && m.column === col));
+        this.handicapMoves = this.handicapMoves.filter((m) => ! (m.row === row && m.column === col));
       } else if (existing.color === StoneColors.White && this.allWhiteMoves !== null) {
         this.allWhiteMoves = this.allWhiteMoves.filter((m) => ! (m.row === row && m.column === col));
       }
@@ -1058,7 +1060,7 @@ readyUnrenderedAdornments (move: Move): void {
     curMove.next = editMove;
     this.currentMove = editMove;
     // editStoneClick calls this.onChange() and this.onTreeHighlightChange(), and sets this.isDirty
-    this.onTreeLayoutChange!();
+    this.onTreeLayoutChange();
     return editMove;
   }
 
@@ -1280,11 +1282,10 @@ readyUnrenderedAdornments (move: Move): void {
   ///
   private saveAndUpdateComments (origin: Move | null, dest: Move | null): void {
     this.saveComment(origin);
-    // const txt = this.getComments?.() ?? "";
     if (dest !== null)
-      this.setComments?.(dest.comments);
+      this.setComments(dest.comments);
     else
-      this.setComments?.(this.comments);
+      this.setComments(this.comments);
   }
 
   /// saveComment takes a move to update with the current comment from the UI.
@@ -1293,7 +1294,7 @@ readyUnrenderedAdornments (move: Move): void {
   /// compare them specially.
   ///
   private saveComment (move: Move | null = null): void {
-    const curComment = this.getComments?.() ?? "";
+    const curComment = this.getComments() ?? "";
     if (move !== null) {
       const [same, newStr] = this.compareComments(move.comments, curComment);
       if (! same) {
@@ -1347,8 +1348,8 @@ readyUnrenderedAdornments (move: Move): void {
         curmove.next = branches[idx - 1];
       else
         this.firstMove = branches[idx - 1]
-      this.onChange!();
-      this.onTreeHighlightChange!()
+      this.onChange();
+      this.onTreeHighlightChange()
     } else {
       this.message!.message("Already on highest branch.");
     }
@@ -1377,8 +1378,8 @@ readyUnrenderedAdornments (move: Move): void {
         curmove.next = branches[idx + 1];
       else
         this.firstMove = branches[idx + 1]
-      this.onChange!();
-      this.onTreeHighlightChange!();
+      this.onChange();
+      this.onTreeHighlightChange();
     } else {
       this.message!.message("Already on highest branch.");
     }
@@ -1397,8 +1398,8 @@ readyUnrenderedAdornments (move: Move): void {
     const [branches, curIndex] = res;
     await this.moveBranch(branches, curIndex, -1);
     this.isDirty = true;
-    this.onChange!(); 
-    this.onTreeLayoutChange!();
+    this.onChange(); 
+    this.onTreeLayoutChange();
   }
   ///
   async moveBranchDown (): Promise<void> {
@@ -1407,8 +1408,8 @@ readyUnrenderedAdornments (move: Move): void {
     const [branches, curIndex] = res;
     await this.moveBranch(branches, curIndex, +1);
     this.isDirty = true;
-    this.onChange!();
-    this.onTreeLayoutChange!();
+    this.onChange();
+    this.onTreeLayoutChange();
   }
 
   /// branchesForMoving returns the branches list (from previous move or
@@ -1418,7 +1419,7 @@ readyUnrenderedAdornments (move: Move): void {
   private async branchesForMoving (): Promise<[Move[], number] | null> {
     const current = this.currentMove;
     if (current === null) {
-      await this.message?.message?.("Must be on the first move of a branch to move it.");
+      await this.message?.message("Must be on the first move of a branch to move it.");
       return null;
     }
     // Get appropriate branches
@@ -1431,7 +1432,7 @@ readyUnrenderedAdornments (move: Move): void {
     }
     // Any branches?
     if (branches === null) {
-      await this.message?.message?.("Must be on the first move of a branch to move it.");
+      await this.message?.message("Must be on the first move of a branch to move it.");
       return null;
     }
     // Get index of current move in branches
@@ -1462,17 +1463,17 @@ readyUnrenderedAdornments (move: Move): void {
       // moving up and current is not top ...
       if (curIndex > 0) {
         swap();
-        await this.message?.message?.("Branch moved up.");
+        await this.message?.message("Branch moved up.");
       } else {
-        await this.message?.message?.("This branch is the main branch.");
+        await this.message?.message("This branch is the main branch.");
       }
     } else {
       // moving down and current is not last ...
       if (curIndex < branches.length - 1) {
         swap();
-        await this.message?.message?.("Branch moved down.");
+        await this.message?.message("Branch moved down.");
       } else {
-        await this.message?.message?.("This branch is the last branch.");
+        await this.message?.message("This branch is the last branch.");
       }
     }
   }
@@ -1494,7 +1495,7 @@ readyUnrenderedAdornments (move: Move): void {
       // Remove existing adornment
       arr.splice(i, 1);
       this.isDirty = true;
-      this.onChange?.();
+      this.onChange();
       return;
     }
     // Add (for letters, A..Z with reuse semantics)
@@ -1509,10 +1510,10 @@ readyUnrenderedAdornments (move: Move): void {
       // event handler caller didn't await, and more model state changed after the message box.
       // You can void foo() in typescript to fire and forget, as well as foo().catch(() => {}) in
       // case it could have an error to avoid unhandled rejected promises.
-      void this.message!.message!("All 26 letters (A–Z) are already used on this node.");
+      void this.message.message("All 26 letters (A–Z) are already used on this node.");
     } else {
       this.isDirty = true;
-      this.onChange?.();
+      this.onChange();
     }
   } //toggleAdornment()
 
@@ -1760,9 +1761,9 @@ readyUnrenderedAdornments (move: Move): void {
     if (cut_move!.next !== null) this._cutMove = cut_move!;
     // Mark dirty and signal UI to update
     this.isDirty = true;
-    this.onChange!();
-    this.onTreeLayoutChange!();
-    this.onTreeHighlightChange!(); // not really needed, but for good measure
+    this.onChange();
+    this.onTreeLayoutChange();
+    this.onTreeHighlightChange(); // not really needed, but for good measure
   } // cutMove()
 
   /// cutFirstMove takes a Move that is a first move of the game.  This function cleans up next 
@@ -1817,9 +1818,9 @@ readyUnrenderedAdornments (move: Move): void {
     }
     if (await this.pasteMoveNextConflict(cutmove)) return;
     await this.pasteMoveInsert(cutmove); // Updates model, signals UI, and sets this._cutMove to null.
-    // this.onChange?.();
-    // this.onTreeLayoutChange?.();
-    // this.onTreeHighlightChange?.();
+    // this.onChange();
+    // this.onTreeLayoutChange();
+    // this.onTreeHighlightChange();
   }
 
   /// pasteMoveNextConflict takes a move representing a cut move and checks that it does not 
@@ -1842,7 +1843,7 @@ readyUnrenderedAdornments (move: Move): void {
       error = (this.firstMove !== null && // check if first move is at the same place
                this.firstMove.row === new_move.row && this.firstMove.column === new_move.column);
     if (error) {
-      await this.message?.message?.("You pasted a move that conflicts with a next move of the current move.");
+      await this.message?.message("You pasted a move that conflicts with a next move of the current move.");
       return true;
     }
     return false;
@@ -1856,7 +1857,7 @@ readyUnrenderedAdornments (move: Move): void {
     // If CheckSelfCaptureNoKill returns false, then it updates cutMove to have dead
     // stones hanging from it so that calling DoNextButton below removes them.
     if (! new_move.isPass && this.checkSelfCaptureNoKill(new_move)) {
-      await this.message?.message?.("You cannot make a move that removes a group's last liberty");
+      await this.message?.message("You cannot make a move that removes a group's last liberty");
       return;
     }
     const cur_move = this.currentMove;
@@ -1885,8 +1886,8 @@ readyUnrenderedAdornments (move: Move): void {
     // If pasting this game's cut move, then set to null so that UI disables pasting.
     if (this._cutMove === new_move) this._cutMove = null;
     await this.replayMove();
-    this.onChange!(); // replayMove doesn't signal change, but we know here we've changed things.
-    this.onTreeLayoutChange!();
+    this.onChange(); // replayMove doesn't signal change, but we know here we've changed things.
+    this.onTreeLayoutChange();
   } // pasteMoveInsert()
 
 
@@ -1934,7 +1935,7 @@ readyUnrenderedAdornments (move: Move): void {
     const [resmove, err] = this.readyForRendering(head);
     if (resmove === null || err) { // Issue with parsed properties, cannot go forward.
       const msg = resmove !== null ? nextMoveGetMessage(resmove as Move) : "";
-      await this.message?.message?.(
+      await this.message?.message(
         "You pasted a move that had conflicts in the current game or nodes \nwith bad properties " +
         "in the SGF file.\nYou cannot play further down that branch... " + msg );
       if (! head.isEditNodeMaybeUnrendered() && ! head.isPass) {
@@ -1977,7 +1978,7 @@ readyUnrenderedAdornments (move: Move): void {
 export interface MessageOrQuery {
   message (msg: string): Promise<void>;
   // true if OK, false if Cancel/Escape
-  confirm? (msg: string): Promise<boolean>; 
+  confirm (msg: string): Promise<boolean>; 
 };
 
 
@@ -2131,7 +2132,7 @@ export async function createGameFromParsedGame
   if ("PW" in props) g.playerWhite = props["PW"][0];
   // Root comments: C and GC, some apps use C when they should use GC, just grab both.
   if ("C" in props) g.comments = props["C"][0];
-  if ("GC" in props) g.comments = props["GC"][0] + (g.getComments!() ?? "");
+  if ("GC" in props) g.comments = props["GC"][0] + (g.getComments() ?? "");
   // Initial board adornments (TR/SQ/LB) ...
   if (props["TR"]) for (const coord of props["TR"]) {
     const [r, c] = parsedToModelCoordinates(coord);
@@ -2149,7 +2150,7 @@ export async function createGameFromParsedGame
   g.parsedGame = pgame; 
   if (pgame.moves !== null) setupFirstParsedMove(g, pgame.moves);
   pgame.moves = null; // should never need this pointer again, and encountering it is a bug
-  g.setComments!(g.comments);
+  g.setComments(g.comments);
   return g;
 } //createGameFromParsedGame()
 

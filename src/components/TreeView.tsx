@@ -106,10 +106,10 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
       // Update the node to point at the new Move so subsequent lookups/labels use Move data.
       (node as any).node = newMove;
       // Optional: if you want an immediate repaint here:
-      // app.bumpTreeHighlightVersion?.();
+      // app.bumpTreeHighlightVersion();
     };
     app.setTreeRemapper(remap);
-    return () => app.setTreeRemapper?.(null);
+    return () => app.setTreeRemapper(null);
   }, [app, treeViewMoveMap]);
   // UI-side “TreeNodeForMove”: Given a Move, return its TreeViewNode.
   const lookupMoveOrRemap = React.useCallback((key: Move): TreeViewNode | null => {
@@ -158,7 +158,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
     if (g.currentMove !== null) { 
       g.gotoStart();
     } else
-      g.saveCurrentComment?.(); 
+      g.saveCurrentComment(); 
     const oopsmsg = 
       "You are replaying moves from a pasted branch that has conflicts with stones on the " +
       "board, or replaying moves with bad properties from an SGF file.  If you clicked in " +
@@ -198,11 +198,8 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
       if (! g.advanceToMovePath(path)) res = false; // conflicting stone loc or bad parse node
       // Do not update UI using move, use CurrentMove because we didn't make it to move's position.
       const curmove = g.currentMove;
-      if (curmove !== null) //{
-        app.setComment?.(curmove.comments);
-      // } else {
-      //   app.setComment?.(g.comments);
-      // }
+      if (curmove !== null) // Game comments set above from gotoStart()
+        app.setComment(curmove.comments);
     }
     return res;
   }
@@ -442,10 +439,11 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
 
               {/* Comment highlight (green outline, not filled) */}
               {(() => {
-                const n: any = cell.node;
+                const n = cell.node;
                 const hasComment =
                   (typeof n?.comments === "string" && n.comments.length > 0) ||
-                  (n?.properties?.C && n.properties.C[0] && n.properties.C[0].length > 0);
+                  (n.parsedProperties !== null && 
+                   ("C" in n.parsedProperties || "GC" in n.parsedProperties)) // GC for game start
                 if (! hasComment) return null;
                 return (
                   <rect

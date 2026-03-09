@@ -22,6 +22,7 @@ import { HELP_TEXT } from "./components/helpText";
 import GameInfoDialog from "./components/GameInfoDialog";
 import TreeView from "./components/TreeView";
 import { getGameTreeModel, type TreeViewNode } from "./models/treeview";
+import { debugAssert } from "./debug-assert";
 
 
 /// App function only provides context from GameProvider, and AppContent function spews all the UI
@@ -300,7 +301,7 @@ function GameInfoOverlay({ open, onClose }: { open: boolean; onClose: () => void
         if (uiCRLF !== g.comments) {
           g.comments = uiCRLF;
           g.isDirty = true;
-          if (g.currentMove === null) app!.setComment!(uiCRLF);
+          if (g.currentMove === null) app!.setComment(uiCRLF);
         }
         // Misc SGF props we pass through -- BR/WR/BT/WT/RU/DT/TM/EV/PC/GN/ON/RE
         const props: Record<string, string[]> = g.miscGameInfo!; // Filled in on dialog launch.
@@ -327,7 +328,7 @@ function GameInfoOverlay({ open, onClose }: { open: boolean; onClose: () => void
         saveOrDelete("GN", dlgFields.GN); saveOrDelete("ON", dlgFields.ON); 
         saveOrDelete("RE", dlgFields.RE); // should confirm form is b+2, b+2.5, b+resign, etc. format.
         // Signal UI updates in case some edit is visible, like game comment or future proofing.
-        g.onChange?.();
+        g.onChange();
         onClose();
         // Return focus to app root (same pattern as NewGameDialog)
         requestAnimationFrame(() => document.getElementById("app-focus-root")?.focus());
@@ -342,29 +343,30 @@ function MoveNavCommandButtons() {
   // change, so they won't become stale closures binding to an inactive game.  If they might become
   // stale relative to the active game, we can close over gameref whose contents/current get updated
   // with game changes.
-  const game = app?.game; 
-  const bumpVersion = app?.bumpVersion;
+  debugAssert(app !== null, "Anytime MoveNavCommandButtons() runs, GameContext is initialized?!!");
+  const game = app.game; 
+  const bumpVersion = app.bumpVersion;
   // Guards if context not ready -- not-not if undefined flows out of no game first render.
-  const canPrev = !!game?.canUnwindMove?.(); 
-  const canNext = !!game?.canReplayMove?.();
+  const canPrev = game.canUnwindMove(); // !!game?.canUnwindMove(); -> excessively defensive gpt5
+  const canNext = game.canReplayMove();
   // home, prev, next, end buttons
   const onHome = useCallback(async () => {
-    if (!game?.gotoStart || !bumpVersion) return;
+    if (! game.gotoStart || !bumpVersion) return;
     if (game.editMode) game.exitEditMode();
     game.gotoStart(); // signals onchange
     // bumpVersion();
   }, [game, bumpVersion]);
   const onPrev = useCallback(async () => {
-    if (!game?.unwindMove || !bumpVersion) return;
-    if (!game.canUnwindMove?.()) return;
+    if (! game.unwindMove || !bumpVersion) return;
+    if (!game.canUnwindMove()) return;
     if (game.editMode) game.exitEditMode();
     game.unwindMove(); // unwindmove call onchange and always returns a move
   }, [game, bumpVersion]);
   const onNext = useCallback(async () => {
     // apparently need tests like these for first renders that just punt, but not sure if this ever
     // fires what the UI would look like.  Can't invoke this command until all UI and game is loaded.
-    if (!game?.replayMove || !bumpVersion) return; 
-    if (!game.canReplayMove?.()) return;
+    if (! game.replayMove || !bumpVersion) return; 
+    if (! game.canReplayMove()) return;
     if (game.editMode) game.exitEditMode();
     const m = await game.replayMove();
     if (m !== null) {
@@ -373,8 +375,8 @@ function MoveNavCommandButtons() {
     }
   }, [game, bumpVersion]);
   const onEnd = useCallback(async () => {
-    if (!game?.gotoLastMove || !bumpVersion) return;
-    if (!game.canReplayMove?.()) return;
+    if (! game.gotoLastMove || !bumpVersion) return;
+    if (! game.canReplayMove()) return;
     if (game.editMode) game.exitEditMode();
     await game.gotoLastMove(); // signals onchange
   }, [game, bumpVersion]);

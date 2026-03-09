@@ -15,8 +15,10 @@
 /* used with .boardSurface: faux wood grain background (default) */
 .boardSurfaceWood {
   background-image: url("../assets/wood-grain.png");
+  /* gpt5 suggested this to lighten the contrast on the board lines, but it really just
+     dimmed all contrast like lines and labels, making the wood color feel thinner. */
   background-repeat: repeat;
-  background-size: 100px 100px;
+  background-size: 100px 100px; 
 }
 
 /* used with .boardSurface: plain color background (no texture) */

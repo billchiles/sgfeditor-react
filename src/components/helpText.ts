@@ -94,12 +94,12 @@ ctrl-downarrow to move the branch up or down to change the order of branches.
 PASSING
 c-p will make a pass move.
 
-MISCELLANEOUS -- NOT PORTED YET
+MISCELLANEOUS
    Ctrl-k clears the current node's comment and puts text on system clipboard.
    Ctrl-1, ..., ctrl-5 deletes the first, ..., fifth line of node's comment and
       puts entire comment's text on clipboard.
-   Ctrl-t changes the first occurrence of the move's board coordinates in the comment
+   Ctrl-t changes the first occurrence of the current move's board coordinates in the comment
       to 'this'; for example, 'd6 is strong cut' changes to 'this is strong cut'.
    Ctrl-m changes the first occurrence of board coordinates to 'marked stone',
-      'square-marked stone', or a letter depending on what adornment is at that location.
+      'square marked stone', or a letter depending on what adornment is at that location.
 `;
