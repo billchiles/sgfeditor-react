@@ -20,9 +20,9 @@ annotations, ctrl click places triangles, and alt click to place letter annotati
 If you click on an adornment location twice, it toggles whether there is an adornment.
 
 AB/AW/AE EDIT MODE:
-F2 toggles Edit Mode (shift-F2 exits) in which left click places black stones or removes existing
-stones, and right click places white stones or removes existing stones.  This creates setup nodes
-in the middle of the game.
+F2 toggles Edit Mode (shift-F2 exits) in which left click places black stones or 
+removes existing stones, and right click places white stones or removes existing stones.
+This creates setup nodes in the middle of the game.
 
 KEEPING FOCUS ON BOARD FOR KEY BINDINGS
 Escape will always return focus to the board so that the arrow keys work
@@ -78,17 +78,19 @@ ctrl-downarrow to move the branch up or down to change the order of branches.
 PASSING
 c-p will make a pass move.
 
-MISCELLANEOUS -- NOT PORTED YET
- * Ctrl-k clears the current node's comment and puts text on system clipboard.
- * Ctrl-1, ..., ctrl-5 deletes the first, ..., fifth line of node's comment and
+MISCELLANEOUS
+ * Ctrl-k clears the current comment and puts text on system clipboard.
+ * Ctrl-1, ..., ctrl-5 delete the first, ..., fifth line of the current comment and
       puts entire comment's text on clipboard.
- * Ctrl-t changes the first occurrence of the move's board coordinates in the comment
+ * Ctrl-t changes the first occurrence of the current move's board coordinates in the comment
       to 'this'; for example, 'd6 is strong cut' changes to 'this is strong cut'.
  * Ctrl-m changes the first occurrence of board coordinates to 'marked stone',
       'square-marked stone', or a letter depending on what adornment is at that location.
 
 F1 produces this help.
 
-There is an auto save feature if Windows suspends the app and also every 30s.
-Opening a file that has a newer auto save file prompts for which to open.  Launching
-the app checks for an unnamed auto save file less than 12 hours old.
+There is an auto save feature if something resets the app.  It also autosaves every 30s
+and a few seconds after the last activity that modifies the game.  Opening a file that 
+has a newer auto save file prompts for which to open.  Launching the app checks for an 
+unnamed auto save file less than 12 hours old in case you were noodling on the default
+board.
