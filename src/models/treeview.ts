@@ -41,8 +41,8 @@ export type TreeViewNode = {
   kind: TreeViewNodeKind;
   // NoColor for StartBoard node, for which we render a letter "S"
   color: StoneColor;
-  // Node is the underlying Move model object
-  node: Move;
+  // Node is the underlying Move model object, or null for kind: LineBend
+  node: Move | null;
   // Row has nothing to do with node's coordinates. It is about where this node appears
   // in the grid displaying the entire game tree.
   row: number;
@@ -292,7 +292,7 @@ function maybeAddBendNode(layoutData: TreeViewLayoutData, row: number, tree_dept
       (layoutData.treeGrid[row - 1]?.[tree_depth - 1] === null)) {
     const bend: TreeViewNode = {
       kind: TreeViewNodeKinds.LineBend,
-      node: curNode.node,
+      node: null,
       row: row - 1,
       column: tree_depth - 1,
       color: StoneColors.NoColor,

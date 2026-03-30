@@ -82,13 +82,14 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
       for (let col = 0; col < getTreeViewModelColumnsSize(); col++) {
         const node = treeViewModel[row][col];
         if (node !== null && node.kind !== TreeViewNodeKinds.LineBend) 
-          treeViewMoveMap.set(node.node, node);
+          treeViewMoveMap.set(node.node!, node); // bang, if not LineBend -> node is Move
       }
     }
     // make convenient start key, other code won't have the fake Move we used when building the model
     const startCell = treeViewModel[0][0];
-    treeViewMoveMap.delete(startCell?.node!);
-    treeViewMoveMap.set("start", startCell!);
+    debugAssert(startCell !== null && startCell.node !== null, "Start cell has no faux Move?!.");
+    treeViewMoveMap.delete(startCell.node);
+    treeViewMoveMap.set("start", startCell);
     return treeViewMoveMap;
   }, [treeViewModel]);
   // Register remapper so Game can swap a new Move for its parsednode during replay without
@@ -164,7 +165,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
       "board, or replaying moves with bad properties from an SGF file.  If you clicked in " +
       "the tree view, try clicking an earlier node and using arrows to advance to the move.";
     if (node!.node instanceof Move) { // It is always a Move now.
-      const move = node!.node as Move;
+      const move = node!.node;
       if (move.row !== -1 && move.column !== -1 && ! gotoGameTreeMove(move)) {
         // move is NOT dummy move for start node (-1,-1) of game tree view, so advance to it.
         // IF hit conflicting move location due to pasted node or rendering bad parsed node
@@ -363,7 +364,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               )}
 
               {/* main disc */}
-              {cell.kind === TreeViewNodeKinds.Move && ! cell.node.isEditNodeMaybeUnrendered() && 
+              {cell.kind === TreeViewNodeKinds.Move && ! cell.node!.isEditNodeMaybeUnrendered() && 
                 (
                   <circle
                     cx={cx}
@@ -378,7 +379,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               {/* This test doesn't confirm anything at runtime since the as operator in typescript
                   is a no-op except to squelch compiler warnings, but the test used for main disc
                   confirms Move kind cells only have Move node objects and silences the compiler.*/}
-              {cell.kind === TreeViewNodeKinds.Move && cell.node.isEditNodeMaybeUnrendered() && 
+              {cell.kind === TreeViewNodeKinds.Move && cell.node!.isEditNodeMaybeUnrendered() && 
                 (
                 <text
                   x={cx}
@@ -412,7 +413,7 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               {cell.kind === TreeViewNodeKinds.Move && (() => {
                 const n = cell.node;
                 debugAssert(n instanceof Move, "Node kind of Move must have a Move object.");
-                let num = typeof n?.number === "number" ? n.number : null;
+                let num = typeof n.number === "number" ? n.number : null;
                 // unrendered moves have a number that is zero, all actual moves have number > 0
                 // if (num === null || num === 0) num = cell.column;
                 if (n.isEditNodeMaybeUnrendered()) 
@@ -440,8 +441,9 @@ export default function TreeView ({ treeViewModel, current, className }: Props) 
               {/* Comment highlight (green outline, not filled) */}
               {(() => {
                 const n = cell.node;
+                if (n === null) return null; // LineBend
                 const hasComment =
-                  (typeof n?.comments === "string" && n.comments.length > 0) ||
+                  (typeof n.comments === "string" && n.comments.length > 0) ||
                   (n.parsedProperties !== null && 
                    ("C" in n.parsedProperties || "GC" in n.parsedProperties)) // GC for game start
                 if (! hasComment) return null;

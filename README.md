@@ -11,6 +11,9 @@ _This version uses typescript/react/vite/electron, and legacy python and a few C
 ![](src/assets/readme-screenshot1.png)
 
 
+For notes on how to try out the app, see below the list of commands.
+
+
 ## From the Help command ... 
 
 PLACING STONES AND ANNOTATIONS:
@@ -94,3 +97,84 @@ and a few seconds after the last activity that modifies the game.  Opening a fil
 has a newer auto save file prompts for which to open.  Launching the app checks for an 
 unnamed auto save file less than 12 hours old in case you were noodling on the default
 board.
+
+
+## How to try it out
+There are two easy paths to try it out, but to do anything you do need to install Node.js + npm.  You can get by without installing git by using github's feature to download a zip file of the sources.  These instruction focus on Windows, but Mac folks can "brew npm" and follow most of the instructions below to try out the app (the path that builds the installer doesn't work on Macs).
+
+Optionally install git (source code revision control system)
+
+The recommended way to get Node.js + npm is to use the NVM for Windows Node.js version manager.  Download nvm-setup.zip from https://github.com/coreybutler/nvm-windows and run the nvm-setup.exe. Then execute the command:
+
+```
+nvm install lts
+```
+
+That installs the latest stable Node.js + npm.  Alternatively, you can install Node.js directly from https://nodejs.org.
+
+Then get the sources with (if you have git installed):
+```
+git clone https://github.com/billchiles/sgfeditor-react.git
+```
+Otherwise, you can go to https://github.com/billchiles/sgfeditor-react and click the green button "<> Code", which drops down to show a link to download a zip file.
+
+Change into the folder git or you created and execute the command:
+
+```
+npm install
+```
+
+This installs all dependencies needed to run and build the app. It installs many modules, but this is normal and only the necessary code is included in builds.
+
+Two easy ways to try the app (first in a cmd.exe window, cd to the app directory):
+
+- Execute:
+
+```
+npm run dev
+```
+
+This starts the Vite dev server hosting the app and prints a URL (typically http://localhost:5173). Open a browser and navigate to this URL to see the app.
+
+- Execute:
+
+```
+npm run app:prod
+```
+
+This builds and runs the app's exe in an Electron window.  This is the closest experience to using the installed app.  The "app:prod" command is a shortcut for the following:
+
+```
+npm run build
+npm run build:electron
+npm run start:electron
+```
+
+## How to build and install
+On Windows you can build an installer and install the app to get file activation (double click .sgf files to launch the app), start menu invocation, normal file access, etc.
+
+Execute:
+
+```
+npm run dist:win
+```
+
+This produces an installer at:
+
+```
+...\dist\SGFEditorR-setup-<version>.exe
+```
+
+Execute the installer to fully eanble the app on Windows.
+
+## One more way to run the app
+You can use the "npm run dev:electron" command to launch the electron shell hosting the app talking to the app's vite host server.  This also launches a debug tools window that you can close.  The live app updates if you modify sources due to vite watching sources and rebuilding.
+
+You can also execute:
+
+```
+npm run dev:electron
+```
+
+This launches the Electron shell connected to the Vite dev server.  A developer tools window may open (you can close it).  The app will live-update as you modify source files.
+
