@@ -3,7 +3,7 @@ import styles from "./goboard.module.css";
 import  { StoneColors, AdornmentKinds } from "../models/Board";
 import type { StoneColor, Adornment } from "../models/Board";
 import { DEFAULT_BOARD_SIZE } from "../models/Game";
-import { CommandTypes, GameContext } from "../models/AppGlobals";
+import { CommandTypes, GameContext, focusOnRoot } from "../models/AppGlobals";
 import { debugAssert } from "../debug-assert";
 
 /// Stone art (bundled by Vite). These are used as textures for <image/> in the SVG for white stones.
@@ -148,6 +148,7 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
       const ctrl = e.ctrlKey || e.getModifierState("Control");
       const shift = e.shiftKey || e.getModifierState("Shift");
       const alt = e.altKey || e.getModifierState("Alt");
+      focusOnRoot(); // Put focus back on root before returning in case it is in the comment box
       if (ctrl) { curGame.toggleAdornment(AdornmentKinds.Triangle, row, col); return; }
       if (alt) { curGame.toggleAdornment(AdornmentKinds.Letter, row, col); return; }
       // Edit move mode changes left click (black) and left shift click (white), and clicking on

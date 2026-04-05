@@ -1782,7 +1782,7 @@ async function gcOldAutoSaves (appStorage: AppStorageBridge): Promise<void> {
 /// May need to call this if, for example, user uses c-s in comment box, that is, command impls
 /// may need to call at end to ensure all keys are working.
 ///
-function focusOnRoot () {
+export function focusOnRoot () {
   const root = document.getElementById("app-focus-root");
   root?.focus();
 }
