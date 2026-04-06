@@ -235,15 +235,26 @@ export class Move { //implements IMoveNext {
   colorMaybeUnrendered (): StoneColor {
     if (this.rendered)
       return this.color;
-    else {
-      if ("B" in this.parsedProperties!)
-        return StoneColors.Black;
-      else if ("W" in this.parsedProperties!)
-        return StoneColors.White;
-      else
-        return StoneColors.NoColor;
-    }
-  } // colorMaybeUnrendered()
+    // else {
+    //   if ("B" in this.parsedProperties!)
+    //     return StoneColors.Black;
+    //   else if ("W" in this.parsedProperties!)
+    //     return StoneColors.White;
+    //   else
+    //     return StoneColors.NoColor;
+    // }
+    const props = this.parsedProperties;
+    if (props === null)
+      return this.color;
+    if ("B" in props)
+      return StoneColors.Black;
+    else if ("W" in props)
+      return StoneColors.White;
+    else
+      // Do not return NoColor, move object has correct color property by liftPropertiesToMove or
+      // by being created as tree view's start node or as an edit node.
+      return this.color; 
+} // colorMaybeUnrendered()
 
   /// isEditNodeMaybeUnrendered returns if move is an Editnode when it is possible it is not a 
   /// rendered move.  Technically, if liftPropertiesToMove has been called on this Move, then its

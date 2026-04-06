@@ -616,7 +616,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     focusOnRoot();
     // Don't exit edit move mode because esc useful to exit comment box, don't need more convenience
     return;
-  // Save As 
+  // SAVE AS 
   } else if (browser && control && alt && e.code === "KeyS" || //lower === "s") ||
              ! browser && control && shift && e.code === "KeyS") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
@@ -626,19 +626,20 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.exitEditMode();
     void saveAsCommand(deps);
     return;
-  // Save File
+  // SAVE FILE
   } else if (control && ! shift && e.code === "KeyS") { //lower === "s"
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     curgame.exitEditMode();
     void doWriteGameCmd(deps);
     return;
+  // WRITE FLIPPED
   } else if (control && shift && alt && e.code === "KeyF") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     curgame.exitEditMode();
     void doWriteGameCmd(deps, true); // true = flipped
-  // Open File
+  // OPEN FILE
   } else if (e.ctrlKey && !e.shiftKey && lower === "o") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
@@ -646,7 +647,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.exitEditMode();
     void doOpenButtonCmd(deps); // do not await inside keydown
     return;
-  // Game Info
+  // GAME INFO
   } else if ( control && lower === "i") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
@@ -654,7 +655,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.exitEditMode();
     gameInfoCmd(curgame, deps.showGameInfo!);
     return;
-  // New Game -- browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
+  // NEW GAME -- browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
   } else if ((browser && ! e.ctrlKey && ! e.shiftKey && ! e.metaKey && e.altKey && lower === "n") ||
              (! browser && e.ctrlKey && lower === "n")) {
     //deps.setLastCommand( {type: CommandTypes.NoMatter });
@@ -664,14 +665,14 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     // startNewGameFlow sets last command type to NoMatter, but checkDirtySave() may change it
     void deps.startNewGameFlow(); // void explicitly ignores result
     return;
-  // Rotate games MRU
+  // ROTATE GAMES MRU
   } else if (! e.ctrlKey && e.shiftKey && ! e.altKey && lower === "w") {
     e.preventDefault();
     //e.stopPropagation(); Can't stop chrome from taking c-w, so using s-w
     curgame.exitEditMode();
     gotoNextGameCmd(deps,deps.getLastCommand()); // sets last command type
     return;
-  // F1: show Help dialog
+  // F1: HELP
   } else if (! control && ! shift && ! alt && (e.code === "F1" || lower === "f1")) {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
@@ -679,7 +680,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.exitEditMode();
     deps.showHelp();
     return;
-  // F2: toggle edit move mode (shift+F2 exits)
+  // F2: TOGGLE EDIT MODE (shift+F2 exits)
   } else if (! control && ! alt && (e.code === "F2" || lower === "f2")) {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
@@ -687,7 +688,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     if (shift) curgame.exitEditMode();
     else curgame.toggleEditMode();
     return;
-  // c-F4: Close Game
+  // c-F4: CLOSE GAME
   } else if ((control && (e.code === "F4" || lower === "f4")) ||
              (browser && control && alt && (e.code === "F4" || lower === "f4"))) {
     //deps.setLastCommand({ type: CommandTypes.NoMatter }); set in closeGameCmd
@@ -696,6 +697,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.exitEditMode();
     await closeGameCmd(curgame, deps);
     return;
+  // PASS MOVE
   } else if (control && lower === "p") {
     const m = await curgame.makeMove(Board.NoIndex, Board.NoIndex);
     if (m !== null) {
@@ -818,7 +820,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.gotoLastMove(); // signals onchange, and don't await in handleKeyDown says gpt5
     return;
   }
-  // Cut Move
+  // CUT MOVE
   if ((control && e.code === "KeyX") || (e.code === "Delete")) {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
@@ -831,7 +833,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     }
     return;
   }
-  // Paste Move
+  // PASTE MOVE
   if (control && !shift && e.code === "KeyV") { // "v"
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
@@ -844,7 +846,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
       await curgame.message?.message("No cut move to paste at this time.");
     return;
   }
-  // Paste Move from Another Game
+  // PASTE MOVE ANOTHER GAME
   if (control && shift && e.code === "KeyV") {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
@@ -862,7 +864,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
         await curgame.message?.message("No other game has a cut move at this time.");
     return;
   }
-  // copy pathname to clipboard
+  // COPY PATHNAME
   else if (! shift && ! alt && control && e.code === "KeyC") {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();

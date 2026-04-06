@@ -1,4 +1,4 @@
-import { debugAssert } from '../debug-assert';
+  import { debugAssert } from '../debug-assert';
 import { addOrGotoGame } from './AppGlobals';
 import { Board, Move, StoneColors, oppositeColor, parsedToModelCoordinates,
          parsedLabelModelCoordinates, modelCoordinateToDisplayLetter,
@@ -816,7 +816,10 @@ gotoStart (): void {
   /// callers must add move to the board and handle cleaning it up if this returns null.
   ///
   private readyForRendering (move: Move): [Move | null, boolean] {
-    debugAssert(move.parsedProperties !== null, "Only call readyForRendering on moves made from parsed nodes.");
+    // debugAssert(move.parsedProperties !== null, 
+    //             "Only call readyForRendering on moves made from parsed nodes.");
+    debugAssert(! move.rendered, 
+                "Only call readyForRendering on unrendered moves after liftPropetiesToMove().");
     if (move.isEditNode) { // isEditNode has been lifted from properties though move is unrendered
       // Initialize edit node stone lists from parsed properties.
       // IMPORTANT: make AB/AW Move objects, but don't add them to the board before doing deletions.
@@ -877,6 +880,8 @@ gotoStart (): void {
   /// lists with Move object so later we can replayMove(move).
   ///
   private readyUnrenderedEditNode(move: Move) {
+    debugAssert(move.parsedProperties !== null, 
+                "liftPropertiesToMove set as edit node, but there are no parsedProperties!!");
     const props = move.parsedProperties!;
     const telemetryComment = (r: number, c: number, sgf: string, msg: string) => {
       // Capture some telemetry for debugging or discovering bad SGF writers.
@@ -928,6 +933,11 @@ gotoStart (): void {
         }
       }
     }
+    // Remove for general hygiene, but nothing should look at these now.
+    delete props["AB"];
+    delete props["AW"];
+    delete props["AE"];
+    if (Object.keys(props).length === 0) move.parsedProperties = null;
   }
 
 /// readyUnrenderedAdornments is just a helper for _replay_move_update_model.  This does not 
@@ -935,7 +945,8 @@ gotoStart (): void {
 /// or it doesn't matter if there are dup'ed letters.  Move must have parsedProperties non-null.
 ///
 readyUnrenderedAdornments (move: Move): void {
-    const props = move.parsedProperties!;
+    const props = move.parsedProperties;
+    if (props === null) return; // liftPropertiesToMove found no more properties and set to null.
     if (props["TR"]) { // Triangles: TR[aa][bb]...
       for (const coord of props["TR"]) {
         const [row, col] = parsedToModelCoordinates(coord);
@@ -954,6 +965,11 @@ readyUnrenderedAdornments (move: Move): void {
         move.addAdornment({ kind: AdornmentKinds.Letter, row, column: col, letter: char });
       }
     }
+    // Remove for general hygiene, but nothing should look at these now.
+    delete props["TR"];
+    delete props["SQ"];
+    delete props["LB"];
+    if (Object.keys(props).length === 0) move.parsedProperties = null;
   }
   
   ///
@@ -1236,8 +1252,9 @@ readyUnrenderedAdornments (move: Move): void {
     return res;
   }
 
-  /// genPrintGameInitialStones handles AB/AW/AE for the root node.  It is always rendered so ignore
-  /// parsed properties and just use internal live movel.
+  /// genPrintGameInitialStones handles AB/AW for the root node.  It is always rendered so ignore
+  /// parsed properties and just use internal live movel.  AE is not a thing on the root because
+  /// there are no prior stones to remove; if stones are removed, then remove them from AB/AW.
   ///
   private genPrintGameInitialStones (props: Record<string, string[]>, flipped: boolean): void {
     // HA
@@ -2126,13 +2143,19 @@ export async function createGameFromParsedGame
   const g = createGame(size, handicap, komi, allBlack, allWhite, 
                        {curGame, setGame, getGames, setGames, getDefaultGame, setDefaultGame});
   // CIRCLESvsSTONES: Assign white stone display variant for newly created user moves.
+  // general hygiene, delete stuff, shouldn't look here again
+  delete props["HA"];
+  delete props["AB"];
+  delete props["AW"];
+  delete props["SZ"];
+  delete props["KM"];
   setLastCreatedGame(g); // for catch in doOpenGetFile
   // Players
   if ("PB" in props) g.playerBlack = props["PB"][0];
   if ("PW" in props) g.playerWhite = props["PW"][0];
   // Root comments: C and GC, some apps use C when they should use GC, just grab both.
   if ("C" in props) g.comments = props["C"][0];
-  if ("GC" in props) g.comments = props["GC"][0] + (g.getComments() ?? "");
+  if ("GC" in props) g.comments = props["GC"][0] + g.comments;
   // Initial board adornments (TR/SQ/LB) ...
   if (props["TR"]) for (const coord of props["TR"]) {
     const [r, c] = parsedToModelCoordinates(coord);
@@ -2145,7 +2168,15 @@ export async function createGameFromParsedGame
   if (props["LB"]) for (const token of props["LB"]) {
     const [r, c, ch] = parsedLabelModelCoordinates(token);
     g.startAdornments.push({ kind: AdornmentKinds.Letter, row: r, column: c, letter: ch });
-  }  
+  }
+  // general hygiene, delete stuff, shouldn't look here again
+  delete props["PB"];
+  delete props["PW"];
+  delete props["C"];
+  delete props["GC"];
+  delete props["TR"];
+  delete props["SQ"];
+  delete props["LB"];
   // Setup remaining model for first moves, comment, etc.
   g.parsedGame = pgame; 
   if (pgame.moves !== null) setupFirstParsedMove(g, pgame.moves);
@@ -2153,30 +2184,6 @@ export async function createGameFromParsedGame
   g.setComments(g.comments);
   return g;
 } //createGameFromParsedGame()
-
-
-// Version used when testing parse to Moves, erasing ParsedNodes
-// function consoleWritePGMoves (nodes: Move | null, indent: string = "") {
-//   if (nodes === null) return;
-//   const writeNode = (n: Move) => {
-//     console.log(indent + `Move ${nodes.row},${nodes.column}`);
-//     // if ("B" in n.parsedProperties!) {
-//     //   console.log(indent + `Move ${parsedToModelCoordinates(n.parsedProperties["B"][0])}`);
-//     // }
-//     // else if ("W" in n.parsedProperties!) {
-//     //   console.log(indent + `Move ${parsedToModelCoordinates(n.parsedProperties["W"][0])}`);
-//     // }
-//     // else console.log("empty board");
-//   }
-//   if (nodes.branches !== null) {
-//     writeNode(nodes);
-//     nodes.branches.forEach((pn, idx) => {console.log(indent + `Branch ${idx}`);
-//                                          consoleWritePGMoves(pn, indent + "   ");})
-//   } else {
-//     writeNode(nodes);
-//     consoleWritePGMoves(nodes.next, indent);
-//   }
-// }
 
 
 /// Assumes "AB" exists.
@@ -2291,11 +2298,13 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
   if ("B" in move.parsedProperties!) {
     move.color = StoneColors.Black;
     [move.row, move.column] = parsedToModelCoordinates(move.parsedProperties!["B"][0]);
+    delete move.parsedProperties!["B"]; // general hygiene, but nothing should look at this now
     if (move.row === Board.NoIndex && move.column === Board.NoIndex)
       move.isPass = true;
   } else if ("W" in move.parsedProperties!) {
     move.color = StoneColors.White;
     [move.row, move.column] = parsedToModelCoordinates(move.parsedProperties!["W"][0]);
+    delete move.parsedProperties!["W"]; // general hygiene, but nothing should look at this now
     if (move.row === Board.NoIndex && move.column === Board.NoIndex)
       move.isPass = true;
   } else if (("AW" in move.parsedProperties!) || ("AB" in move.parsedProperties!) || 
@@ -2316,8 +2325,14 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
                                 genPrintNode(move, false, size).nodeString(false);  
     return null;
   }
-  if ("C" in move.parsedProperties!)
+  if ("C" in move.parsedProperties!) {
       move.comments = move.parsedProperties!["C"][0];
+      // Remove in case user deletes comment, game tree rendering still looks for parsed "C" prop
+      delete move.parsedProperties!["C"];
+  }
+  // general hygiene, set to null if empty
+  if (Object.keys(move.parsedProperties!).length === 0)
+    move.parsedProperties = null;
   return move;
 } //liftPropertiesToMove()
 
