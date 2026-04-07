@@ -816,9 +816,7 @@ gotoStart (): void {
   /// callers must add move to the board and handle cleaning it up if this returns null.
   ///
   private readyForRendering (move: Move): [Move | null, boolean] {
-    // debugAssert(move.parsedProperties !== null, 
-    //             "Only call readyForRendering on moves made from parsed nodes.");
-    debugAssert(! move.rendered, 
+    debugAssert(move.isLifted && ! move.rendered,
                 "Only call readyForRendering on unrendered moves after liftPropetiesToMove().");
     if (move.isEditNode) { // isEditNode has been lifted from properties though move is unrendered
       // Initialize edit node stone lists from parsed properties.
@@ -1284,10 +1282,10 @@ readyUnrenderedAdornments (move: Move): void {
 
   /// saveCurrentComment makes sure the current comment is persisted in the model.  UI code calls
   /// this for many commands, even escape, to make sure we have the comment, or before saving a file
-  /// to make sure the model is up to date.
+  /// to make sure the model is up to date.  This returns whether it modified the model.
   ///
-  saveCurrentComment(): void {
-    this.saveComment(this.currentMove);
+  saveCurrentComment(): boolean {
+    return this.saveComment(this.currentMove);
   }
 
   /// saveAndUpdateComments ensures the model captures any comment for the origin and
@@ -1307,24 +1305,27 @@ readyUnrenderedAdornments (move: Move): void {
 
   /// saveComment takes a move to update with the current comment from the UI.
   /// If move is null, the comment belongs to the game start or empty board.
-  /// React fucks with strings and modifies them to change line endigs randomly, so need to
-  /// compare them specially.
+  /// React fucks with strings and modifies them to change line endings randomly, so need to
+  /// compare them specially.  This returns if the model updated.
   ///
-  private saveComment (move: Move | null = null): void {
+  private saveComment (move: Move | null = null): boolean {
     const curComment = this.getComments() ?? "";
     if (move !== null) {
       const [same, newStr] = this.compareComments(move.comments, curComment);
       if (! same) {
         move.comments = newStr!;
         this.isDirty = true;
+        return true;
       }
     } else {
       const [same, newStr] = this.compareComments(this.comments, curComment);
       if (! same) {
         this.comments = newStr!;
         this.isDirty = true;
+        return true;
       }
     }
+    return false;
   }
 
   /// compareComments compares the string ignoring line endings and if different returns a repaired
@@ -2049,39 +2050,28 @@ function genPrintNode (move: Move, flipped: boolean, size: number): PrintNode {
   const props: Record<string, string[]> = move.parsedProperties !== null
                                             ? copyProperties(move.parsedProperties!) 
                                             : {}
-  // if rendered, move could be modified.  If not rendered, just use parsed data.
-  if (move.rendered) {
-     // Edit/setup nodes write as AB/AW/AE (no B/W).
+  if (move.isLifted) { // B/W/pass/comments/isEditNode in Move
     if (move.isEditNode) {
+      if (move.rendered) {
+        genPrintNodeEditStones(move, props, flipped, size);
+      }
+      // if not rendered, then AB/AW/AE still in props and not edited in game
       delete props["B"]; // really shouldn't be in props, but just in case
-      delete props["W"]; // same
-      if (move.addedBlackStones.length > 0) {
-        props["AB"] = move.addedBlackStones.map((m) => getParsedCoordinates(m, flipped, size));
-      } else {
-        delete props["AB"]; // could have parsed AB, so delete if no move.addedBlackStones
-      }
-      if (move.addedWhiteStones.length > 0) {
-        props["AW"] = move.addedWhiteStones.map((m) => getParsedCoordinates(m, flipped, size));
-      } else {
-        delete props["AW"]; // could have parsed AW, so delete if no move.addedWhiteStones
-      }
-      if (move.editDeletedStones.length > 0) {
-        props["AE"] = move.editDeletedStones.map((m) => getParsedCoordinates(m, flipped, size));
-      } else {
-        delete props["AE"]; // could have parsed AE, so delete if no move.editDeletedStones
-      }
-    } else { // normal move
-      // Color
-      const coord = getParsedCoordinates(move, flipped, size);
-        if (move.color === StoneColors.Black) props["B"] = [coord];
-        else props["W"] = [coord]; 
-    } // if isEditNode?
-    // Comments 
+      delete props["W"]; // ditto
+    } else {
+      const key = move.color === StoneColors.Black ? "B" : "W";
+      props[key] = [getParsedCoordinates(move, flipped, size)];
+      delete props[key === "B" ? "W" : "B"];
+      delete props["AB"]; // really shouldn't be in props, but just in case
+      delete props["AW"]; // ditto
+      delete props["AE"]; // ditto
+    }
     if (move.comments !== "") props["C"] = [move.comments];
-    else delete props["C"]; // could have parsed C, so delete if no move.comments
-    // Adornments
-    genAdornmentProps(move.adornments, props, flipped, size);
-  } // if rendered?
+    else delete props["C"]; // could have parsed C that user deleted, so delete
+    if (move.rendered) {
+      genAdornmentProps(move.adornments, props, flipped, size);
+    }
+  } // if isLifted?
   return new PrintNode(props);
 } // genPrintNode()
 
@@ -2197,7 +2187,8 @@ function createGameFromParsedAB(props: Record<string, string[]>): Move[] {
       m.isEditNodeStone = true;
       m.editParent = null;
     }
-    m.rendered = false;
+    m.rendered = false; // setting these two is kind of meaningless, no code should look at them
+    m.isLifted = false;
     return m;
   });
 }
@@ -2208,7 +2199,8 @@ function createGameFromParsedAW(props: Record<string, string[]>): Move[] {
   return props["AW"].map((coords) => {
     const [row, col] = parsedToModelCoordinates(coords);
     const m = new Move(row, col, StoneColors.White);
-    m.rendered = false;
+    m.rendered = false; // setting these two is kind of meaningless, no code should look at them
+    m.isLifted = false;
     return m;
   });
 }
@@ -2323,6 +2315,7 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
   } else { // Probably never hit this branch, but could be really erroneous SGF file.
     move.parsedBadNodeMessage = "Next nodes must be moves, don't handle arbitrary nodes yet -- " +
                                 genPrintNode(move, false, size).nodeString(false);  
+    move.isLifted = true;
     return null;
   }
   if ("C" in move.parsedProperties!) {
@@ -2333,6 +2326,7 @@ export function liftPropertiesToMove (move: Move, size : number) : Move | null {
   // general hygiene, set to null if empty
   if (Object.keys(move.parsedProperties!).length === 0)
     move.parsedProperties = null;
+  move.isLifted = true;
   return move;
 } //liftPropertiesToMove()
 
@@ -2669,52 +2663,37 @@ function genParserOutputMove (move: Move, size: number): Move {
   // Start from any existing parsed props (preserve unknown tags), else empty.
   const props: Record<string, string[]> = move.parsedProperties !== null 
                                           ? copyProperties(move.parsedProperties) : {};
-  // if rendered, move could be modified.  If not rendered, just use parsed data.
-  if (move.rendered) {
+  // Result is parser-style Move (row/col don’t matter when rendered=false; parsedProperties rule)
+  const res = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
+  res.isPass = false;  // Like the parser, no indexes makes isPass true, but this is a move, so false
+  res.rendered = false; // if isPass stays false, pasting in another game, makes all pass moves
+  res.isLifted = false;
+  res.parsedProperties = props;
+  if (move.isLifted) { // B/W/pass/comments/isEditNode in Move
     if (move.isEditNode) {
-      delete props["B"]; delete props["W"];
-      move.parsedBadNodeMessage = parserSignalBadMsg; // Parser does this, still used as flag
-      if (move.addedBlackStones.length > 0) {
-        // false flipped on all calls
-        props["AB"] = move.addedBlackStones.map((m) => getParsedCoordinates(m, false, size));
-      } else {
-        delete props["AB"];
+      if (move.rendered) {
+        genPrintNodeEditStones(move, props, false, size); // false is no flipped output
+        res.parsedBadNodeMessage = parserSignalBadMsg; // Parser does this, still used as flag
       }
-      if (move.addedWhiteStones.length > 0) {
-        props["AW"] = move.addedWhiteStones.map((m) => getParsedCoordinates(m, false, size));
-      } else {
-        delete props["AW"];
-      }
-      if (move.editDeletedStones.length > 0) {
-        props["AE"] = move.editDeletedStones.map((m) => getParsedCoordinates(m, false, size));
-      } else {
-        delete props["AE"];
-      }
+      // if not rendered, then AB/AW/AE in props and user couldn't have edited them
+      delete props["B"]; // really shouldn't be in props, but just in case
+      delete props["W"]; // ditto
     } else {
-      // Normal stone move
-      if (move.color === StoneColors.Black) {
-        props["B"] = [getParsedCoordinates(move, false, size)]; // false flipped
-      } else if (move.color === StoneColors.White) {
-        props["W"] = [getParsedCoordinates(move, false, size)]; // false flipped
-      } else {
-        delete props["B"]; delete props["W"];
-      }
-    } // if iseditnode else
-    // Color 
-
-    // Comments
-    if (move.comments !== "") props["C"] = [move.comments]; else delete props["C"];
-    // Adornments
-    genAdornmentProps(move.adornments, props, false, size); // false flipped
-  }
-  // Produce a parser-style Move (row/col don’t matter when rendered=false; parsedProperties rule)
-  const m = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor);
-  // m.isPass = false;  WHY DID I EVER SET THIS????
-  m.rendered = false;
-  m.parsedProperties = props;
-  m.parsedBadNodeMessage = null; //move.parsedBadNodeMessage ??????????????
-  // m.comments = props["C"]?.[0] ?? "";
-  return m;
+      const key = move.color === StoneColors.Black ? "B" : "W";
+      props[key] = [getParsedCoordinates(move, false, size)];
+      delete props[key === "B" ? "W" : "B"];
+      delete props["AB"]; // really shouldn't be in props, but just in case
+      delete props["AW"]; // ditto
+      delete props["AE"]; // ditto
+    }
+    // If not lifted, any "C" is in props, for lifted, need to put it back
+    if (move.comments !== "") props["C"] = [move.comments];
+    if (move.rendered) {
+      // if not rendered, then any adornments are in props and user couldn't have edited them
+      genAdornmentProps(move.adornments, props, false, size);
+    }
+  } // if isLIfted
+  return res;
 } // genParserOutputMove()
 
 /// genAdornmentProps updates props from adornments, clearing any previous state.  Building print
@@ -2740,3 +2719,28 @@ function genAdornmentProps (adornments: Adornment[], props: Record<string, strin
   }
   return props;
 } // genAdornmentProps()
+
+/// genPrintNodeEditStones updates props to be like parser output Moves for genPrintNodes and 
+/// genParserOutputMoves.
+///
+function genPrintNodeEditStones (move: Move, props: Record<string, string[]>, flipped: boolean,
+                                 size: number) {
+  delete props["B"]; // Shouldn't need these deletes, but just in case
+  delete props["W"];
+  if (move.addedBlackStones.length > 0) {
+    props["AB"] = move.addedBlackStones.map((m) => getParsedCoordinates(m, flipped, size));
+  } else {
+    delete props["AB"]; // could have parsed AB, so delete if no move.addedBlackStones
+  }
+  if (move.addedWhiteStones.length > 0) {
+    props["AW"] = move.addedWhiteStones.map((m) => getParsedCoordinates(m, flipped, size));
+  } else {
+    delete props["AW"];
+  }
+  if (move.editDeletedStones.length > 0) {
+    props["AE"] = move.editDeletedStones.map((m) => getParsedCoordinates(m, flipped, size));
+  } else {
+    delete props["AE"];
+  }
+}
+

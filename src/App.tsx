@@ -225,6 +225,11 @@ function AppContent({
                 boxSizing: "border-box",
                 resize: "vertical"
               }}
+              onBlur={() => {if (!g) return;
+                             if (g.saveCurrentComment()) {
+                               g.onChange();
+                               g.onTreeHighlightChange();
+                     }}}
             />
           </div>
 

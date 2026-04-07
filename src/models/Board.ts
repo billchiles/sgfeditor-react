@@ -166,6 +166,11 @@ export class Move { //implements IMoveNext {
   adornments: Adornment[];
   comments: string;
   rendered: boolean;
+  // isLifted denotes the state between a purely parsed node when some parsed properties have been
+  // lifted to the Move object's properties.  Properties that remain in parsedProperties are
+  // unrendered adornments and edit node properties.  There may also be unknown properties we just
+  // pass through to file writing.
+  isLifted: boolean;
   // raw SGF properties from a file, lifted to move when they are readied for rendering
   parsedProperties: Record<string, string[]> | null;
   // parsedBadNodeMessage has a conflated purpose.  Originally, it marked an SGF node as having
@@ -204,6 +209,7 @@ export class Move { //implements IMoveNext {
     this.deadStones = [];
     this.comments = "";
     this.rendered = true; // Assume move rendered, parsed game code sets it to false.
+    this.isLifted = true; // ditto
     this.parsedProperties = null;
     this.parsedBadNodeMessage = null;
     this.isEditNode = false;
@@ -233,27 +239,16 @@ export class Move { //implements IMoveNext {
   /// this access.
   ///
   colorMaybeUnrendered (): StoneColor {
-    if (this.rendered)
+    if (this.rendered || this.isLifted)
       return this.color;
-    // else {
-    //   if ("B" in this.parsedProperties!)
-    //     return StoneColors.Black;
-    //   else if ("W" in this.parsedProperties!)
-    //     return StoneColors.White;
-    //   else
-    //     return StoneColors.NoColor;
-    // }
     const props = this.parsedProperties;
-    if (props === null)
-      return this.color;
+    debugAssert(props !== null, "Unlifted/unrendered move should still have parsedProperties.");
     if ("B" in props)
       return StoneColors.Black;
     else if ("W" in props)
       return StoneColors.White;
     else
-      // Do not return NoColor, move object has correct color property by liftPropertiesToMove or
-      // by being created as tree view's start node or as an edit node.
-      return this.color; 
+      return StoneColors.NoColor; 
 } // colorMaybeUnrendered()
 
   /// isEditNodeMaybeUnrendered returns if move is an Editnode when it is possible it is not a 
@@ -267,7 +262,8 @@ export class Move { //implements IMoveNext {
     //        (! this.rendered && this.parsedBadNodeMessage === parserSignalBadMsg);
     if (this.isEditNode) return true;
     if (this.rendered) return false;
-    // Legacy sentinel used by older flows === no "B" and no "W"
+    // if isEditNode and rendered are false, then parsedProperties holds the final answer.
+    // Legacy sentinel used by older flows === no "B" and no "W", sort of hack short-circuit test
     if (this.parsedBadNodeMessage === parserSignalBadMsg) return true; // Parser output node flag
     // Could be cross game paste of parser-like generated nodes, so dig for AB/AW/AE in props.
     const p = this.parsedProperties;

@@ -177,6 +177,7 @@ export function parseNodeToMove (lexer: Lexer): Move {
   const move = new Move(Board.NoIndex, Board.NoIndex, StoneColors.NoColor)
   move.isPass = false; // no indexes in constructor sets pass to true, now false with no indexes.
   move.rendered = false;
+  move.isLifted = false;
   const props: Record<string, string[]> = {};
   while (lexer.hasData()) {
     const id = lexer.getPropertyId();
