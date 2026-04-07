@@ -1039,6 +1039,9 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
   setGames(newGames); 
   setGame(newGames[0]);
   newGames[0].setComments(newGames[0].comments);
+  const newCurrent = newGames[0];
+  newCurrent.setComments(newCurrent.currentMove !== null ? newCurrent.currentMove.comments : 
+                                                           newCurrent.comments);
 }
 
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the

@@ -1,11 +1,5 @@
 import type { FileBridge, KeyBindingBridge } from './bridges';
 
-/// Simple basename helper (Windows/macOS/Linux-safe)
-/// We keep it local to avoid importing Node path in the renderer bundle.
-function baseName (fullPath: string): string {
-  const slash = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
-  return slash >= 0 ? fullPath.slice(slash + 1) : fullPath;
-}
 
 /// Electron implementation skeleton for FileBridge.
 /// NOTE: This version intentionally returns minimal placeholders so the app compiles
@@ -23,7 +17,7 @@ export const fileBridgeElectron: FileBridge = {
     // If we already have a target (cookie is a path string), write in place
     if (typeof cookie === "string" && cookie !== "") {
       await window.electron!.writeText(cookie, data);
-      return { fileName: baseName(cookie), cookie };
+      return { fileName: cookie, cookie };
     }
     // Otherwise, fall back to Save As
     return this.saveAs(suggestedName, data);
@@ -33,7 +27,7 @@ export const fileBridgeElectron: FileBridge = {
     const path = await window.electron?.pickSaveFile(suggestedName);
     if (!path) return null;
     await window.electron!.writeText(path, data);
-    return { fileName: baseName(path), cookie: path };
+    return { fileName: path, cookie: path };
   },
 
   async pickOpenFile () {
@@ -64,6 +58,14 @@ export const fileBridgeElectron: FileBridge = {
     return await window.electron!.timestamp(cookie);
   },
 };
+
+/// Simple basename helper (Windows/macOS/Linux-safe)
+/// We keep it local to avoid importing Node path in the renderer bundle.
+// function baseName (fullPath: string): string {
+//   const slash = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
+//   return slash >= 0 ? fullPath.slice(slash + 1) : fullPath;
+// }
+
 
 /// Electron KeyBindingBridge:
 /// - Provide DOM keydown on/off so your existing useEffect cleanup works.
