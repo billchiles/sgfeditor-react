@@ -12,16 +12,16 @@ export interface FileBridge {
   // Save to an existing target if cookie is recognized by the platform.
   // Without cookie, platform may always prompt user to save, possibly returning a pathname or name.
   save (cookie: unknown | null, suggestedName: string, data: string): 
-      Promise<{ fileName: string; cookie: unknown | null } | null>;
+      Promise<{ filename: string; cookie: unknown | null } | null>;
   // Always prompt the user and return any cookie, pathname, or name.
   saveAs (suggestedName: string, data: string): 
-      Promise<{ fileName: string; cookie: unknown | null } | null>;
+      Promise<{ filename: string; cookie: unknown | null } | null>;
   // Shows a file-open picker and returns the file handle and a best-effort filename (no path in
   // in browsers). Returns null if the user cancels.
-  // pickOpenFile(accept?: string[]): Promise<{ cookie: unknown; fileName: string } | null>;
-  pickOpenFile (): Promise<{ cookie: unknown; fileName: string } | null>;
+  // pickOpenFile(accept?: string[]): Promise<{ cookie: unknown; filename: string } | null>;
+  pickOpenFile (): Promise<{ cookie: unknown; filename: string } | null>;
   // Shows a save-as picker and returns the file handle and name, null if user cancels.
-  pickSaveFile (suggestedName?: string): Promise<{ cookie: unknown; fileName: string } | null>;
+  pickSaveFile (suggestedName?: string): Promise<{ cookie: unknown; filename: string } | null>;
   // Read text from a previously returned cookie/handle. Returns null if unsupported.
   // Browser (File System Access API): cookie is a FileSystemFileHandle.
   // Fallback will return null.  Electron can implement.

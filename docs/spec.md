@@ -50,7 +50,7 @@ Provider-level bridge interfaces isolate host/platform behavior:
   * `open()`: read text via File Picker (or fallback to `<input type="file">`)
   * `save(handle?, dataFn)`: write via handle if present; else trigger picker; `dataFn` evaluated only on confirm
   * `saveAs(dataFn)`: force a picker; `dataFn` evaluated on confirm
-  * `pickOpenFile()` / `pickSaveFile()`: return `{ handle?, fileName? } | null`
+  * `pickOpenFile()` / `pickSaveFile()`: return `{ handle?, filename? } | null`
   * `readText(handle)`: read contents when you have a handle
   * `canPickFiles`: feature detect File System Access API (FS Access/OPFS)
 
@@ -229,6 +229,41 @@ Important fields:
 * parse lifecycle: `rendered`, `parsedProperties`, `parsedBadNodeMessage`
 * edit/setup state: `isEditNode`, `addedBlackStones`, `addedWhiteStones`,
   `editDeletedStones`, `isEditNodeStone`, `editParent`
+* manifestation lifecycle: `isLifted`
+
+### 4.2.1 Move lifecycle / hygiene model
+
+`Move` objects now have a three-stage lifecycle for SGF-derived state:
+
+1. **Parsed (raw)**
+   * `rendered === false`
+   * `isLifted === false`
+   * `parsedProperties` contains the SGF properties as parsed
+   * modeled fields (`row`, `column`, `color`, `isPass`, `comments`, `isEditNode`, etc.)
+     are not yet authoritative
+
+2. **Lifted (intermediate, not necessarily rendered)**
+   * `rendered === false`
+   * `isLifted === true`
+   * modeled SGF properties have been moved into live `Move` fields
+   * `parsedProperties` is no longer the source of truth for modeled properties
+   * `parsedProperties` may still contain:
+     * edit/setup payload not yet materialized into runtime lists (`AB` / `AW` / `AE`)
+     * adornment payload not yet materialized into runtime adornments
+     * unknown / pass-through SGF properties
+   * `parsedProperties` may be `null` when empty
+
+3. **Rendered**
+   * `rendered === true`
+   * `isLifted === true`
+   * live `Move` fields are authoritative for all modeled properties
+   * `parsedProperties` contains only unknown / pass-through properties, if any
+   * `parsedProperties` may be `null`
+
+Core invariant:
+
+* Once `isLifted === true`, modeled SGF properties must be read from the live `Move`,
+  not from `parsedProperties`.
 
 ### 4.3 Branch invariants
 
@@ -291,11 +326,29 @@ It maps SGF properties into `Move` fields:
 * B/W -> normal move semantics
 * AB/AW/AE (without B/W) -> edit/setup node semantics (`isEditNode`, pass-like coordinates)
 
+It also advances the node from **Parsed** to **Lifted** state:
+
+* sets `move.isLifted = true`
+* removes modeled properties from `parsedProperties` as they are lifted
+* may leave `parsedProperties` containing only:
+  * unknown SGF properties
+  * not-yet-materialized edit payload
+  * not-yet-materialized adornment payload
+* may set `parsedProperties = null` when no properties remain
+
 **Authoritative pass decision:** `liftPropertiesToMove(move, size)` computes coordinates from `B[...]` or `W[...]`. If those coordinates are empty (`""` → `NoIndex`), **it sets `move.isPass = true`**; otherwise the move becomes a normal point move with concrete `row/column` and color. 
 
 **Constructor vs parser:** The `Move` **constructor** keeps its current behavior for user-created moves: if you construct with `row/column = NoIndex`, the constructor sets `isPass = true`. This does **not** apply to parser-created moves because the parser immediately overrides `isPass` to `false` until `liftPropertiesToMove` runs.
 
 **Rationale:** This avoids rendering an “empty-coords” parser node as a pass by accident (e.g., pasted subtrees), and ensures the board advances only after `liftPropertiesToMove` interprets `B`/`W` properly.
+
+### 5.2.1 Hygiene rule for lifted nodes
+
+After `liftPropertiesToMove(...)` has run:
+
+* `parsedProperties` is preservation/pass-through storage only
+* code must not assume known modeled properties (such as `B`, `W`, `C`, etc.) are still present
+* callers must treat live `Move` fields as authoritative
 
 
 ### 5.3 Readiness contract (`readyForRendering`)
@@ -313,6 +366,13 @@ Responsibilities:
 * lift next/branches for future replay steps
 * mark `move.rendered = true`
 
+Rendered-state hygiene:
+
+* after `readyForRendering(...)`, all modeled runtime state must be available from the live `Move`
+* `parsedProperties` must not be consulted for modeled SGF semantics
+* `parsedProperties` may still retain only unknown/pass-through properties
+* if no such properties remain, `parsedProperties` may be `null`
+
 Constraint: do not introduce unintended persistent board mutations beyond intended replay/readiness semantics.
 
 ### 5.4 SGF write/print contract
@@ -324,11 +384,27 @@ Build `PrintNode`s from the current `Move` snapshot.  For each output node:
 * preserve unknown properties unless intentionally removed
 * recurse through `next`/`branches` to serialize
 
+Serialization hygiene rule:
+
+* if `move.isLifted === false`, `parsedProperties` is still the parsed/raw source
+* if `move.isLifted === true`, modeled SGF properties must be regenerated from live `Move` fields
+* `parsedProperties` contributes only preserved unknown/pass-through properties and any
+  not-yet-rendered payload that is still intentionally stored there
+
 Node writing rules:
 
 * normal move -> `B` or `W`
 * edit node -> `AB`/`AW`/`AE`, remove any `B`/`W`
 * include comments/adornments per runtime state
+
+Cross-game paste contract:
+
+* when generating parser-output moves for paste into another game, synthetic parser-style moves
+  must begin in the same **Parsed** lifecycle state as real parser output:
+  * `rendered = false`
+  * `isLifted = false`
+  * `isPass = false` until a later `liftPropertiesToMove(...)` determines pass vs point move
+  * `parsedProperties` contains the serialized node properties
 
 Root setup contract:
 
@@ -461,6 +537,22 @@ In edit mode:
   * Use `lastCommand` `{ type: 'CycleGame', cursor: number }`.
   * On each invocation, increment `cursor`, clamp to array length, pick the target index, and `setGame(target)`, then rebuild MRU.
   * Command generally reset `lastCommand` to `CommandTypes.NoMatter`.  Prompting to open files and checking dirty save of current game uses `lastCommand`, but that is legacy code now.
+
+### Switching games and dirty state
+
+When switching games (MRU rotation, open new file):
+
+* If current game is dirty:
+  * user is prompted Save / Don’t Save / Cancel
+
+* If user chooses:
+  * Save → autosave deleted
+  * Don’t Save → autosave retained
+
+### Difference from app close
+
+* Switching games preserves autosave (user may return)
+* App close deletes autosave (user is explicitly discarding session)
 
 ---
 
@@ -736,6 +828,42 @@ save:
   * Garbage collection: delete autosaves older than **7 days** (best-effort).
   * Cleanup: after successful **Save/Save As**, delete autosave for that game.
 
+### Autosave identity invariant
+
+Autosave identity is derived from **file base name only**, not full path:
+
+* Named games:
+  * `<filebase>-autosave.sgf`
+* Unnamed games:
+  * `unnamed-new-game-autosave.sgf`
+
+This avoids platform-specific path issues (Electron full paths vs browser handles).
+
+### Autosave lifecycle rules
+
+* Autosave does **not** clear `isDirty`
+* Autosave is a recovery mechanism only
+
+Autosave must be deleted when:
+
+* user performs explicit Save / Save As
+* user closes app and chooses:
+  * Don’t Save
+  * Cancel
+* app confirms clean shutdown
+
+Autosave may remain when:
+
+* user switches games (open / MRU rotation)
+* user declines save during game switch
+
+### Renderer ownership
+
+Autosave creation and deletion are **renderer responsibilities**
+via `AppStorageBridge`.
+
+Main process never manipulates autosave files directly.
+
 Open SGF file flow:
 
   1. `checkDirtySave` → prompt to Save/Discard/Cancel; if Save, run `saveSgf`.
@@ -819,9 +947,68 @@ Renderer policy:
 * Activation should behave like “Open…” command, except it never shows a file picker.
 * If a dirty game is open, the user gets the same Save/Discard/Cancel choice before switching files.
 
-
-
 ---
+
+## 15.5 App close / shutdown lifecycle (Electron)
+
+Closing the application (e.g., clicking the window close button) is mediated by the
+main process and requires coordination with the renderer.
+
+### Close handshake (main → preload → renderer → preload → main)
+
+1. **Main intercepts window close**
+   * `win.on("close", e)` always calls `e.preventDefault()` on first entry.
+   * A re-entrancy guard (`isClosing`) prevents duplicate execution.
+
+2. **Main queries renderer state**
+   * IPC: `app:query-close-state`
+   * Renderer returns:
+     ```ts
+     { isDirty: boolean, filename: string | null }
+     ```
+
+3. **Main decides prompt behavior**
+
+   * If `isDirty === false`
+     → proceed to close (no prompt)
+
+   * If `isDirty === true`
+     → show native dialog:
+       * Save
+       * Don’t Save
+       * Cancel
+
+4. **User choice handling**
+
+   * **Save**
+     * IPC: `app:save-before-close`
+     * Renderer performs save (including Save As if needed)
+     * If save fails or user cancels Save As → abort close
+
+   * **Don’t Save**
+     * IPC: `app:discard-autosave-before-close`
+     * Renderer deletes autosave for current game
+     * Close proceeds
+
+   * **Cancel**
+     * IPC: `app:discard-autosave-before-close`
+     * Renderer deletes autosave
+     * Close is aborted (app remains open)
+
+### Invariants
+
+* Main process **never mutates Game state directly**.
+* Renderer owns all save / autosave / model mutation logic.
+* Preload acts only as a relay (no business logic).
+* Close is only allowed after:
+  * user decision is resolved
+  * any required save or cleanup completes
+
+### Re-entrancy rule
+
+* `isClosing` must be set **after entering handler and before async work**
+* Must be reset to `false` if close is aborted
+
 
 ## 16) Ownership matrix (practical)
 

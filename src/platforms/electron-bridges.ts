@@ -17,7 +17,7 @@ export const fileBridgeElectron: FileBridge = {
     // If we already have a target (cookie is a path string), write in place
     if (typeof cookie === "string" && cookie !== "") {
       await window.electron!.writeText(cookie, data);
-      return { fileName: cookie, cookie };
+      return { filename: cookie, cookie };
     }
     // Otherwise, fall back to Save As
     return this.saveAs(suggestedName, data);
@@ -27,20 +27,20 @@ export const fileBridgeElectron: FileBridge = {
     const path = await window.electron?.pickSaveFile(suggestedName);
     if (!path) return null;
     await window.electron!.writeText(path, data);
-    return { fileName: path, cookie: path };
+    return { filename: path, cookie: path };
   },
 
   async pickOpenFile () {
     const path = await window.electron?.pickOpenFile();
-    // In Electron, fileName is the full path (used as the stable game identity).
-    return path ? { cookie: path, fileName: path } : null;
+    // In Electron, filename is the full path (used as the stable game identity).
+    return path ? { cookie: path, filename: path } : null;
 
   },
 
   async pickSaveFile (suggestedName) {
     const path = await window.electron?.pickSaveFile(suggestedName);
-    // In Electron, fileName is the full path (used as the stable game identity).
-    return path ? { cookie: path, fileName: path } : null;
+    // In Electron, filename is the full path (used as the stable game identity).
+    return path ? { cookie: path, filename: path } : null;
   },
 
   async readText (cookie) {

@@ -229,11 +229,11 @@ function createWindow () {
     isClosing = true;
     e.preventDefault(); // Always intercept close so we can decide what to do
     try {
-      const closeState = await requestRendererValue<{ isDirty: boolean, fileName: string | null }>(
+      const closeState = await requestRendererValue<{ isDirty: boolean, filename: string | null }>(
         win, "app:query-close-state", "app:query-close-state-result");
       console.log("closeState:", closeState);
       if (closeState?.isDirty) {
-        const label = closeState.fileName ?? "current game";
+        const label = closeState.filename ?? "current game";
         console.log("closeState in main:", closeState);
         console.log("ABOUT TO SHOW CLOSE PROMPT");
         const result = await dialog.showMessageBox(win, { // main proc, normal desktop app diaolog

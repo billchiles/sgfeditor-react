@@ -539,7 +539,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
         // no filehandle stashed, so prompt for name
         const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
         if (tmp === null) return false;
-        g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+        g.saveGameFileInfo(tmp.cookie, tmp.filename);
         g.isDirty = false;
         if (g === getDefaultGame()) setDefaultGame(null);
         await deleteResidualAutoSave(autoSaveSourceName, appStorageBridge);
@@ -998,30 +998,30 @@ async function doOpenButtonCmd (
   // down in doOpenGetFileGame.
   const doOpenContinuation = async () => {
     let fileHandle = null;
-    let fileName = "";
+    let filename = "";
     let data = "";
     if (fileBridge.canPickFiles()) { // Normal path
       const res = await fileBridge.pickOpenFile();
       if (res === null) return;  // User aborted.
       fileHandle = res.cookie;
-      fileName = res.fileName;
+      filename = res.filename;
     } else {
       // Can't just get file info, prompt user and open file, not normal path, defensive programming.
       const res = await fileBridge.open();
       if (res === null) return; // User aborted.
-      fileName = res.path!; // res !== null, path has value.
+      filename = res.path!; // res !== null, path has value.
       data = res.data;  // Don't bind cookie, we know it is null because can't pick files.
     }
-    // Now fileHandle is non-null, or data should have contents.  fileName is a path or filebase.
+    // Now fileHandle is non-null, or data should have contents.  filename is a path or filebase.
     // Check if file already open and in Games
     const games: Game[] = getGames();
-    const openidx = games.findIndex(g => g.filename === fileName);
+    const openidx = games.findIndex(g => g.filename === filename);
     if (openidx !== -1) {
       // Show existing game, updating games MRU and current game.
       addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
     } else {
       // TODO test failures and cleanups or no cleanup needed
-      await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, appStorageBridge,
+      await doOpenGetFileGame(fileHandle, filename, data, fileBridge, gameRef, appStorageBridge,
                               showMessage!,
                              {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames,
                               getDefaultGame, setDefaultGame, setLastCommand });
@@ -1042,29 +1042,29 @@ async function doOpenButtonCmd (
   // await checkDirtySave (gameRef.current, fileBridge, lastCmd, setLastCommand);
   // // Get file info from user
   // let fileHandle = null;
-  // let fileName = "";
+  // let filename = "";
   // let data = "";
   // if (fileBridge.canPickFiles()) { // Normal path
   //   const res = await fileBridge.pickOpenFile();
   //   if (res === null) return;  // User aborted.
   //   fileHandle = res.cookie;
-  //   fileName = res.fileName;
+  //   filename = res.filename;
   // } else {
   //   // Can't just get file info, prompt user and open file, not normal path, defensive programming.
   //   const res = await fileBridge.open();
   //   if (res === null) return; // User aborted.
-  //   fileName = res.path!; // res !== null, path has value.
+  //   filename = res.path!; // res !== null, path has value.
   //   data = res.data;  // Don't bind cookie, we know it is null because can't pick files.
   // }
-  // // Now fileHandle is non-null, or data should have contents.  fileName is a path or filebase.
+  // // Now fileHandle is non-null, or data should have contents.  filename is a path or filebase.
   // // Check if file already open and in Games
   // const games: Game[] = getGames();
-  // const openidx = games.findIndex(g => g.filename === fileName);
+  // const openidx = games.findIndex(g => g.filename === filename);
   // if (openidx !== -1) {
   //   // Show existing game, updating games MRU and current game.
   //   addOrGotoGame({idx: openidx}, gameRef.current, games, setGame, setGames, getDefaultGame, setDefaultGame);
   // } else {
-  //   await doOpenGetFileGame(fileHandle, fileName, data, fileBridge, gameRef, 
+  //   await doOpenGetFileGame(fileHandle, filename, data, fileBridge, gameRef, 
   //                          {getLastCreatedGame, setLastCreatedGame, setGame, getGames, setGames,
   //                           getDefaultGame, setDefaultGame });
   //   // drawgametree
@@ -1144,7 +1144,7 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
            } else {
              const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
              if (tmp !== null) {
-               g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+               g.saveGameFileInfo(tmp.cookie, tmp.filename);
                g.isDirty = false;
              // if just saved default game, then it is no longer a default game
              if (g === getDefaultGame()) setDefaultGame(null);
@@ -1195,7 +1195,7 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
 //       } else {
 //         const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
 //         if (tmp !== null) {
-//           g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+//           g.saveGameFileInfo(tmp.cookie, tmp.filename);
 //         }
 //       }
 //     }
@@ -1220,7 +1220,7 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
 /// data must have file contents of the file the user chose to open; otherwise, use fileHandle.
 ///
 async function doOpenGetFileGame (
-    fileHandle: unknown, fileName: string, data: string, fileBridge: FileBridge, 
+    fileHandle: unknown, filename: string, data: string, fileBridge: FileBridge, 
     gameref: React.MutableRefObject<Game>, appStorage: AppStorageBridge, 
     showMessage: ShowMessageDialogSig,
     cleanup: {getLastCreatedGame: () => Game | null, setLastCreatedGame: (g: Game | null) => void,
@@ -1233,7 +1233,7 @@ async function doOpenGetFileGame (
     try {
       cleanup.setLastCreatedGame(null);
       // THE NEXT LINE is the essence of this function.
-      await getFileGameCheckingAutoSave(fileHandle, fileName, fileBridge, data, appStorage,
+      await getFileGameCheckingAutoSave(fileHandle, filename, fileBridge, data, appStorage,
                                         showMessage,
                                         {gameRef: gameref, setGame: cleanup.setGame, 
                                          setLastCreatedGame: cleanup.setLastCreatedGame,
@@ -1279,7 +1279,7 @@ async function doOpenGetFileGame (
 /// for code in app.xaml.cs to call.  If fileHandle is null, then data must not be "".
 ///
 async function getFileGameCheckingAutoSave 
-    (fileHandle: unknown, fileName: string, fileBridge: FileBridge, data: string,
+    (fileHandle: unknown, filename: string, fileBridge: FileBridge, data: string,
      appStorage: AppStorageBridge, showMessage: ShowMessageDialogSig,
      gamemgt: {gameRef: React.MutableRefObject<Game>, setGame: (g: Game) => void,
                setLastCreatedGame: (g: Game | null) => void,
@@ -1287,7 +1287,7 @@ async function getFileGameCheckingAutoSave
                getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void}) {
   // Check auto save file exisitence and ask user which to use.
   const curgame = gamemgt.gameRef.current;
-  const autoSaveName = getAutoSaveName(fileName);
+  const autoSaveName = getAutoSaveName(filename);
   if (await appStorage.exists(autoSaveName)) {
     const autosSaveTime = await appStorage.timestamp(autoSaveName); 
     if (autosSaveTime !== null && autosSaveTime > (await fileBridge.getWriteDate(fileHandle) ?? 0) &&
@@ -1315,7 +1315,7 @@ async function getFileGameCheckingAutoSave
       const parts = nowCurrent.filename!.split(/[/\\]/); 
       nowCurrent.filebase = parts[parts.length - 1];
     } else {// Not using exiting auto save ...
-      await parseAndCreateGame(fileHandle, fileName, fileBridge, data, gamemgt.gameRef, 
+      await parseAndCreateGame(fileHandle, filename, fileBridge, data, gamemgt.gameRef, 
                          {curGame: curgame, setGame: gamemgt.setGame, 
                           setLastCreatedGame: gamemgt.setLastCreatedGame, getGames: gamemgt.getGames, 
                           setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
@@ -1323,7 +1323,7 @@ async function getFileGameCheckingAutoSave
     }
     await appStorage.delete(autoSaveName); // used it or didn't but don't need it now
   } else {// no auto saved file to worry about ...
-    await parseAndCreateGame(fileHandle, fileName, fileBridge, data, gamemgt.gameRef, 
+    await parseAndCreateGame(fileHandle, filename, fileBridge, data, gamemgt.gameRef, 
                        {curGame: curgame, setGame: gamemgt.setGame, 
                         setLastCreatedGame: gamemgt.setLastCreatedGame, getGames: gamemgt.getGames, 
                         setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
@@ -1337,7 +1337,7 @@ async function getFileGameCheckingAutoSave
 /// createGameFromParsedGame doesn't throw after calling createGame (and setting current game).
 /// Takes curgame for messaging callbacks.
 ///
-async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBridge: FileBridge,  
+async function parseAndCreateGame (fileHandle: unknown, filename: string, fileBridge: FileBridge,  
                                    data: string, gameRef : React.MutableRefObject<Game>,
                                    cleanup: {curGame: Game, setGame: (g: Game) => void,
                                              setLastCreatedGame: (g: Game | null) => void,
@@ -1364,7 +1364,7 @@ async function parseAndCreateGame (fileHandle: unknown, fileName: string, fileBr
                                            cleanup.getGames, cleanup.setGames,
                                            cleanup.getDefaultGame, cleanup.setDefaultGame);
   // 
-  gameRef.current.saveGameFileInfo(fileHandle, fileName); // same as g.saveGameFileInfo...
+  gameRef.current.saveGameFileInfo(fileHandle, filename); // same as g.saveGameFileInfo...
   return g; 
 } // parseAndCreateGame()
 
@@ -1399,14 +1399,14 @@ async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastComman
     g.isDirty = false;
     // if just saved default game, then it is no longer a default game
     if (g === getDefaultGame()) setDefaultGame(null);
-    const { fileName, cookie } = res;
+    const { filename, cookie } = res;
     // If saved file, remove any auto save
-    const autoSaveName = getAutoSaveName(fileName);
+    const autoSaveName = getAutoSaveName(filename);
     if (await appStorageBridge.exists(autoSaveName))
       await appStorageBridge.delete(autoSaveName); 
     // Save file info, signal UI, and set focus ...
-    if (fileName !== g.filename || cookie !== g.saveCookie) {
-      g.saveGameFileInfo(cookie, fileName);
+    if (filename !== g.filename || cookie !== g.saveCookie) {
+      g.saveGameFileInfo(cookie, filename);
     }
   }
   bumpVersion(); // update status area for is dirty and possible filename
@@ -1426,14 +1426,14 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
   // if just saved default game, then it is no longer a default game
   if (g === getDefaultGame()) setDefaultGame(null);
   // delete autosave file
-  const { fileName, cookie } = res;
+  const { filename, cookie } = res;
   // If saved file, remove any auto save
-  const autoSaveName = getAutoSaveName(fileName);
+  const autoSaveName = getAutoSaveName(filename);
   if (await appStorageBridge.exists(autoSaveName))
     await appStorageBridge.delete(autoSaveName); 
   // Save to model, signal UI, and focus
-  if (fileName !== g.filename || cookie !== g.saveCookie) {
-    g.saveGameFileInfo(cookie, fileName); 
+  if (filename !== g.filename || cookie !== g.saveCookie) {
+    g.saveGameFileInfo(cookie, filename); 
   }
   bumpVersion();
   focusOnRoot(); 

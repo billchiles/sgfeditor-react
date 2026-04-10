@@ -50,7 +50,7 @@ export const browserFileBridge: FileBridge = {
   },
 
   async save(cookie: unknown | null, suggestedName: string, data: string): 
-      Promise<{ fileName: string; cookie: unknown | null } | null> {
+      Promise<{ filename: string; cookie: unknown | null } | null> {
     // If we have a file handle, don't prompt user for name.
     // if (hasFS && cookie && typeof (cookie as any).createWritable === "function") {
     if (hasFS && cookie && (cookie as any).createWritable) {
@@ -59,7 +59,7 @@ export const browserFileBridge: FileBridge = {
       await w.write(data);
       await w.close();
       const name = (handle as any).name ?? ""; 
-      return { fileName: name, cookie: handle };
+      return { filename: name, cookie: handle };
     }
     // Otherwise, prompt user if can for where to write.
     if (hasFS) {
@@ -71,7 +71,7 @@ export const browserFileBridge: FileBridge = {
         await w.write(data);
         await w.close();
         const name = (handle as any).name ?? suggestedName;
-        return { fileName: name, cookie: handle };
+        return { filename: name, cookie: handle };
       } catch (err: any) {
         // Cancelled -> null
         return null;
@@ -85,11 +85,11 @@ export const browserFileBridge: FileBridge = {
     a.click();
     // Revoke the blob URL on the next tick so the click has time to start navigation.
     setTimeout(() => URL.revokeObjectURL(url), 0);
-    return { fileName: suggestedName, cookie: null };
+    return { filename: suggestedName, cookie: null };
   },
 
   async saveAs(suggestedName: string, data: string): 
-      Promise<{ fileName: string; cookie: unknown | null } | null> {
+      Promise<{ filename: string; cookie: unknown | null } | null> {
     if (hasFS) {
       try {
         const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
@@ -99,7 +99,7 @@ export const browserFileBridge: FileBridge = {
         await w.write(data);
         await w.close();
         const name = (handle as any).name ?? suggestedName;
-        return { fileName: name, cookie: handle };
+        return { filename: name, cookie: handle };
       } catch (err: any) {
         return null; // user canceled
       }
@@ -112,12 +112,12 @@ export const browserFileBridge: FileBridge = {
     a.click();
     // Clean up the object URL immediately after the click is dispatched.
     setTimeout(() => URL.revokeObjectURL(url), 0);
-    return { fileName: suggestedName, cookie: null };
+    return { filename: suggestedName, cookie: null };
   },
 
   // async pickOpenFile(accept: string[] = [".sgf", ".txt"]): 
   async pickOpenFile(): 
-      Promise<{ cookie: unknown; fileName: string } | null> {
+      Promise<{ cookie: unknown; filename: string } | null> {
     if (hasFS) {
       try {
         const [handle]: FileSystemFileHandle[] = await (window as any).showOpenFilePicker({
@@ -128,8 +128,8 @@ export const browserFileBridge: FileBridge = {
           excludeAcceptAllOption: false,
           multiple: false,});
         const file = await handle.getFile();
-        //return { cookie: handle, fileName: path ?? "unknown" };
-        return { cookie: handle, fileName: (handle as any).name ?? file.name };
+        //return { cookie: handle, filename: path ?? "unknown" };
+        return { cookie: handle, filename: (handle as any).name ?? file.name };
       } catch {
         return null;
       }
@@ -144,7 +144,7 @@ export const browserFileBridge: FileBridge = {
     //   input.onchange = () => {
     //     const f = input.files?.[0];
     //     if (!f) return resolve(null);
-    //     resolve({ cookie: null, fileName: f.name ?? "unknown" });
+    //     resolve({ cookie: null, filename: f.name ?? "unknown" });
     //   };
     //   input.click();
     // });
@@ -152,7 +152,7 @@ export const browserFileBridge: FileBridge = {
 
   // async pickSaveFile(suggestedName = "game01.sgf", accept: string[] = [".sgf"]):
   async pickSaveFile(suggestedName = "game01.sgf"):
-    Promise<{ cookie: unknown; fileName: string } | null> {
+    Promise<{ cookie: unknown; filename: string } | null> {
     if (hasFS) {
       try {
         const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
@@ -160,13 +160,13 @@ export const browserFileBridge: FileBridge = {
           // types: [{ description: "Files", accept: { "application/octet-stream": accept, "text/plain": accept } }],
           types: [{ description: "SGF", accept: { "text/plain": [".sgf"] } }], });
         const file = await handle.getFile();
-        return { cookie: handle, fileName: file.name ?? suggestedName };
+        return { cookie: handle, filename: file.name ?? suggestedName };
       } catch {
         return null;
       }
     }
     // OLD COMMENT: Fallback has no real save picker; we only “suggest” a name and return it
-    return null; //{ cookie: null, fileName: suggestedName };
+    return null; //{ cookie: null, filename: suggestedName };
   },
 
   async readText(cookie: unknown): Promise<string | null> {

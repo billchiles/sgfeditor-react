@@ -55,7 +55,7 @@
 ///          await fileBridge.save(game.saveCookie, game.filename!, data);
 ///        } else {
 ///          const tmp = await fileBridge.saveAs(game.filebase ?? "game01.sgf", data);
-///          if (tmp) game.saveGameFileInfo(tmp.cookie, tmp.fileName);
+///          if (tmp) game.saveGameFileInfo(tmp.cookie, tmp.filename);
 ///        }
 ///        game.isDirty = false;
 ///      },
@@ -67,7 +67,7 @@
 ///      onSecondaryClick: async () => {
 ///        const res = await fileBridge.pickOpenFile(); // safe here
 ///        if (!res) return;
-///        await openFromHandle(res.cookie, res.fileName);
+///        await openFromHandle(res.cookie, res.filename);
 ///      },
 ///    });
 /// AVOIDS
