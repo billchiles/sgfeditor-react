@@ -17,6 +17,15 @@ declare global { // doesn't pollute global scope due to export {}
       readText (path: string): Promise<string>;
       writeText (path: string, data: string): Promise<boolean>;
       timestamp (path: string): Promise<number>;
+      setCloseStateHandler? (
+        handler: () => { isDirty: boolean, filename: string | null }
+      ): () => void;
+      setSaveBeforeCloseHandler? (
+        handler: () => Promise<boolean> | boolean
+      ): () => void;
+      setDiscardAutosaveBeforeCloseHandler? (
+        handler: () => Promise<boolean> | boolean
+      ): () => void;
       onOpenFile? (handler: (path: string) => void): () => void;
       onFinalSaveRequest? (handler: () => Promise<void> | void): () => void;
     };

@@ -352,6 +352,17 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     const off = window.electron.onOpenFile((p) => { void openFileFromActivationPath(p); });
     return off;
   }, [openFileFromActivationPath]);
+  // Electron close app prompt to save support: let main ask whether current game is dirty and
+  // request to save before closing.
+  useEffect(() => {
+    if (! window.electron?.isElectron) return;
+    const electronAny = window.electron as typeof window.electron & {
+      queryCloseState?: () => Promise<{ isDirty: boolean, filename: string | null }>;
+      saveBeforeClose?: () => Promise<boolean>;
+    };
+    // no-op guard; handlers are installed by preload/main invoke path
+    void electronAny;
+  }, []);
   //
   // SETUP INITIAL STATE FOR GAME -- this runs once after initial render due to useEffect.
   // useEffect's run after the DOM has rendered.  useState runs first, when GameProvider runs.
@@ -495,6 +506,52 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
       async () => {await maybeAutoSave(gameRef.current, appStorageBridge);});
     return off; // clean up if effect runs again
   }, [gameRef, appStorageBridge]);
+  // Register renderer side callbacks so that main Electron process can query dirty/filename state
+  // and request saving.
+  useEffect(() => {
+    if (! window.electron?.setCloseStateHandler ||
+        ! window.electron?.setSaveBeforeCloseHandler ||
+        ! window.electron?.setDiscardAutosaveBeforeCloseHandler) return;
+    // registering callback get back a cleaning function, but we're closing so it doesn't matter
+    console.log("Registering close state handler");
+    const removeCloseStateHandler = window.electron.setCloseStateHandler(() => {
+      const g = gameRef.current;
+      g.saveCurrentComment();
+      return {
+        isDirty: g.isDirty,
+        filename: g.filename ?? g.filebase ?? null,
+      };
+    });
+    // registering callback get back a cleaning function, but we're closing so it doesn't matter
+    const removeSaveForCloseHandler = window.electron.setSaveBeforeCloseHandler(async () => {
+      const g = gameRef.current;
+      g.saveCurrentComment();
+      try {
+        const autoSaveSourceName = g.filebase;
+        if (g.saveCookie !== null) {
+          await fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
+          g.isDirty = false;
+          if (g === getDefaultGame()) setDefaultGame(null);
+          await deleteResidualAutoSave(autoSaveSourceName, appStorageBridge);
+          bumpVersion();
+          return true;
+        }
+        // no filehandle stashed, so prompt for name
+        const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
+        if (tmp === null) return false;
+        g.saveGameFileInfo(tmp.cookie, tmp.fileName);
+        g.isDirty = false;
+        if (g === getDefaultGame()) setDefaultGame(null);
+        await deleteResidualAutoSave(autoSaveSourceName, appStorageBridge);
+        bumpVersion();
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    return () => { removeCloseStateHandler(); removeSaveForCloseHandler(); };
+  }, [gameRef, fileBridge, getDefaultGame, setDefaultGame, bumpVersion]);  
   //
   // CMDDEPENDENCIES -- One object to pass to top-level commands that updates if dependencies change.
   // React takes functions anywhere it takes a value and invokes it to get the value if types match.
@@ -1716,7 +1773,7 @@ const browserMessageOrQuery: MessageOrQuery = {
 
 const AUTOSAVE_INTERVAL = 45_000;
 const AUTOSAVE_INACTIVITY_INTERVAL = 5_000;
-const UNNAMED_AUTOSAVE = "unnamed-new-game.sgf";
+const UNNAMED_AUTOSAVE = "unnamed-new-game-autosave.sgf";
 const UNNAMED_AUTOSAVE_TIMEOUT_HOURS = 12;
 const AUTOSAVE_APPSTORAGE_GC_DAYS = 7;  // 3?
 
@@ -1732,6 +1789,7 @@ async function maybeAutoSave(g: Game, appStorageBridge: AppStorageBridge): Promi
   const name = getAutoSaveName(g.filebase);
   // don't set isDirty to false because didn't dave user's file
   await appStorageBridge.writeText(name, data); // OPFS or fallback (localStorage)
+  console.log(`WROTE ${name}`);
 }
 
 /// getAutoSaveName:
@@ -1739,10 +1797,20 @@ async function maybeAutoSave(g: Game, appStorageBridge: AppStorageBridge): Promi
 ///  - Else take game.filebase (e.g., "foo.sgf") and produce "foo-autosave.sgf"
 function getAutoSaveName(name: string | null): string {
   if (name === null) return UNNAMED_AUTOSAVE;
+  const parts = name.split(/[/\\]/);
+  name = parts[parts.length - 1] || name;
   // Insert "-autosave" before the .sgf extension; if no .sgf, just append it.
   const m = name.match(/^(.*?)(\.sgf)$/i);
   return m ? `${m[1]}-autosave${m[2]}` : `${name}-autosave.sgf`;
 }
+
+async function deleteResidualAutoSave (name: string | null, 
+                                       appStorage: AppStorageBridge): Promise<void> {
+  const autoSaveName = getAutoSaveName(name);
+  if (await appStorage.exists(autoSaveName))
+    await appStorage.delete(autoSaveName);
+}
+
 
 /// looksLikeAutoSave makes sure it is a file SGF Editor saved based on our naming convention and
 /// file extension.
