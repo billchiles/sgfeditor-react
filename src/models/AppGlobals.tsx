@@ -311,7 +311,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     const lastCmd = getLastCommand();
     setLastCommand({ type: CommandTypes.NoMatter }); // checkDirtySave may change last cmd type
     await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
-                         getDefaultGame, setDefaultGame,
+                         getDefaultGame, setDefaultGame, false, // don't delete autosave if no save
                          openMessageDialog!, async () => { openNewGameDialog(); });
   }, [fileBridge, openNewGameDialog, getLastCommand, setLastCommand,appStorageBridge]);
   //
@@ -340,7 +340,8 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     };
     // Maybe save current dirty game, continue to open file game
     await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
-                         getDefaultGame, setDefaultGame, openMessageDialog!, doOpenContinuation);
+                         getDefaultGame, setDefaultGame, false, // don't delete autosave if no save
+                         openMessageDialog!, doOpenContinuation);
   }, [getLastCommand, setLastCommand, getGames, setGames, setGame, fileBridge, appStorageBridge,
       openMessageDialog, getLastCreatedGame, setLastCreatedGame,
       getDefaultGame, setDefaultGame, bumpVersion, bumpTreeLayoutVersion]);
@@ -1044,7 +1045,8 @@ async function doOpenButtonCmd (
   }; // whole body as doOpenContinuation
   // 
   await checkDirtySave(gameRef.current, fileBridge, lastCmd, setLastCommand, appStorageBridge,
-                       getDefaultGame, setDefaultGame, showMessage!, doOpenContinuation);
+                       getDefaultGame, setDefaultGame, false, // don't delete autosave if no save
+                       showMessage!, doOpenContinuation);
   //
   // WORKING VERSION WITH LAST CMD HACK TO AVOID BROWSER REFUSING TO OPEN FILES, before all the
   // continuations passed down through checkDirtySave to MessageDialog.
@@ -1116,9 +1118,13 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
 /// CheckDirtySave prompts whether to save the game if it is dirty. If saving, then it uses the
 /// game filename, or prompts for one if it is null. This is exported for use in app.tsx or
 /// process kick off code for file activation. It takes a game optionally for checking a game
-/// that is not the current game (when deleting games).  lastCommand is set by caller after fetching
-/// lastCmd passed in.  This leaves lastCommand as caller set, unless it needs to signal no prompt
-/// to save on subsequent call due to browser failing to open new/open dialog after asking to save.
+/// that is not the current game (when deleting games).  There is a flag to always delete auto save
+/// files so that new game and open file can switch to a new game and leave the current game dirty
+/// with an auto save file for safety, but close game can always clean up if user chose not to save.
+///
+/// LEGACY: lastCommand is set by caller after fetching lastCmd passed in.  This leaves lastCommand
+/// as caller set, unless it needs to signal no prompt to save on subsequent call due to browser 
+/// failing to open new/open dialog after asking to save. LEGACY from before adding continuation.
 ///
 /// MAJOR BROWSER / REACT issue:
 /// There is a browser (and maybe electron shell) issue with “transient user activation” rule where
@@ -1127,10 +1133,11 @@ export function addOrGotoGame (arg: { g: Game } | { idx: number }, curGame: Game
 /// and then calls like showOpenFilePicker / showSaveFilePicker may be ignored or blocked, so the 
 /// Open dialog (and sometimes your New Game modal timing) never shows.
 ///
-async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCommand,
-                               setLastCommand: (c: LastCommand) => void, appStorage: AppStorageBridge,
+async function checkDirtySave (g: Game, fileBridge: FileBridge, _lastCmd: LastCommand,
+                               _setLastCommand: (c: LastCommand) => void, appStorage: AppStorageBridge,
                                getDefaultGame: () => Game | null, 
                                setDefaultGame: (g: Game | null) => void,
+                               alwaysDeleteAutoSave: boolean,
                                message: ShowMessageDialogSig,
                                continuaton: () => Promise<void>): Promise<void> {
   // bind basename early before any save as or renaming to clean up autosave later
@@ -1142,11 +1149,11 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
   // the browser doesn't show the new or open dialog, and you have to invoke the command again and
   // try a different timing when you answer the prompt to save.  So, let's try not prompting the
   // second time the command is invoked.
-  if (g.isDirty && 
+  if (g.isDirty) { // && 
       // Don't prompt to save if user just denied saving and had to re-invoke new/open game
       // LEGACY: Now wired with continuation so don't lose user-initiated context to prompt,
       // so can prompt to save dirty and continue open dialog.  Don't really use lastCmd.type now.
-      ! (lastCmd.type === CommandTypes.SavePromptHack && lastCmd.cookie.dirtyGame === g)) {
+      // ! (lastCmd.type === CommandTypes.SavePromptHack && lastCmd.cookie.dirtyGame === g)) {
     await message("Game is unsaved.  Confirm saving game.",
       { title: "Confirm Saving Game", primary: "Save", secondary: "Don’t Save",
         onConfirm: async () => {
@@ -1164,22 +1171,27 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
              if (g === getDefaultGame()) setDefaultGame(null);
              }
            }
+          if (! g.isDirty) { // Save As branch above could leave file unsaved and dirty
+            const autoSaveName = getAutoSaveName(priorAutoSaveName);
+            if (await appStorage.exists(autoSaveName))
+              await appStorage.delete(autoSaveName);
+          }
            await continuaton(); // file opening, new game, etc.
            ranContinuation = true;
         },
         onCancel: async () => {
-          setLastCommand({ type: CommandTypes.SavePromptHack, cookie: { dirtyGame: g } })
+          // setLastCommand({ type: CommandTypes.SavePromptHack, cookie: { dirtyGame: g } })
+          // Close game means user is done and chose not to save, so no need to keep auto save.
+          if (alwaysDeleteAutoSave) {
+            const autoSaveName = getAutoSaveName(priorAutoSaveName);
+            if (await appStorage.exists(autoSaveName))
+              await appStorage.delete(autoSaveName);
+          }
           await continuaton(); // file opening, new game, etc.
           ranContinuation = true;
         },
       });
   } 
-  // Clean up autosave file to avoid dialog when re-opening the SGF file later.  Why?
-  // IF the user saved, then theyy don't need the auto save file.
-  // If the user didn't save, they don't care about the auto save file.
-  const autoSaveName = getAutoSaveName(priorAutoSaveName);
-  if (await appStorage.exists(autoSaveName))
-    await appStorage.delete(autoSaveName); 
   if (! ranContinuation) continuaton();
 } // checkDirtySave()
 //
@@ -1739,6 +1751,7 @@ async function closeGameCmd (game: Game, deps: CmdDependencies): Promise<void> {
   // one, then blow we make and set it.
   await checkDirtySave(game, deps.fileBridge,lastcmd, deps.setLastCommand, 
                        deps.appStorageBridge, deps.getDefaultGame, deps.setDefaultGame, 
+                       true, // delete auto save file regardless of whether user saves current game
                        deps.showMessage!, 
                        () => Promise.resolve()); // don't need user activation context
   // continue function here, no prompting user or awaiting, so don't need to pack into above lambda
