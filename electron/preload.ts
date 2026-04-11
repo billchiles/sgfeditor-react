@@ -19,7 +19,9 @@ const openFileListeners = new Set<(path: string) => void>();
 // Renderer supplies this handler for preload to call when main asks for the close state
 // These all differ from other save/saveas/check dirty because those flow from renderer to main, but
 // these start in main on close action and flow to renderer.
-let closeStateHandler: (() => { isDirty: boolean, filename: string | null }) | null = null;
+/// IPC.  Main owns the native close event and prompt policy.  Renderer owns Game state, saving,
+/// and autosave cleanup.  Preload stores renderer callbacks and relays messages between them.
+let closeStateHandler: (() => { dirtyCount: number, dirtyFilenames: string[] }) | null = null;
 // Renderer supplies this handler for preload to call when main wants to save, returns true if
 // close should continue, false if save failed or was cancelled.  False also means don't exit.
 let saveBeforeCloseHandler: (() => Promise<boolean> | boolean) | null = null;
@@ -40,7 +42,7 @@ ipcRenderer.on("app:open-file", (_event, filePath: string) => {
 });
 
 ipcRenderer.on("app:query-close-state", async () => {
-  const payload = closeStateHandler ? closeStateHandler() : { isDirty: false, filename: null };
+  const payload = closeStateHandler ? closeStateHandler() : { dirtyCount: 0, dirtyFilenames: [] };
   ipcRenderer.send("app:query-close-state-result", payload);
 });
 
@@ -88,11 +90,14 @@ contextBridge.exposeInMainWorld("electron", {
     return () => openFileListeners.delete(handler);
   },  
 
-   /// onFinalSaveRequest is an event for the UI/renderer, and GameProvider calls this with a handler
+  /// onFinalSaveRequest is an event for the UI/renderer, and GameProvider calls this with a handler
   /// that does the auto save.  This function wraps that autosave handler in a function that sends
   /// "app:flush-done" (keeps UI clean of IPC protocol).  This function then installs UI's handler's
   /// wrapper (listener) as the event handler for the "app:final-autosave" event (which main.ts's
   /// win.on("close"... sends to the UI).
+  ///
+  /// NOTE: DEAD.  The main.ts proc never fires this now in lieu of app:query-close-state,
+  /// app:save-before-close, and app:discard-autosave-before-close.
   ///
   onFinalSaveRequest: (handler: () => Promise<void> | void) => {
     const listener = async () => { try { await handler(); }
@@ -103,7 +108,7 @@ contextBridge.exposeInMainWorld("electron", {
     return () => ipcRenderer.removeListener("app:final-autosave", listener);
   },
 
-  setCloseStateHandler: (handler: () => { isDirty: boolean, filename: string | null }) => {
+  setCloseStateHandler: (handler: () => { dirtyCount: number, dirtyFilenames: string[] }) => {
     closeStateHandler = handler;
     return () => { if (closeStateHandler === handler) closeStateHandler = null; };
   },

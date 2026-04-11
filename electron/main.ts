@@ -189,6 +189,18 @@ ipcMain.handle("file:timestamp", async (_e, p: string) => (await fsp.stat(p)).mt
 //// Create the App's main window.
 ///
 
+/// CLOSING:
+/// 
+/// Closing uses RPC over Electron IPC:
+///   * app:query-close-state -- ask renderer for a summary of dirty open games
+///   * app:save-before-close -- ask renderer to save all dirty open games 
+///   * app:discard-autosave-before-close -- ask renderer to discard autosaves
+/// These close-related channels are a tiny app-specific request/reply layer built on top of
+/// Electron IPC.  We still use IPC underneath, but the renderer code talks in terms of app
+/// operations like "query close state" or "save before close" instead of raw ipc messages.
+/// Main owns the native window close event and prompt policy; renderer owns Game state,
+/// saving, and autosave cleanup.
+
 const devUrl = process.env.ELECTRON_START_URL || process.env.VITE_DEV_SERVER_URL;
 
 /// createWindow must be after the ipcMain.handle calls above.
@@ -222,54 +234,57 @@ function createWindow () {
     if (mainWindow === win) mainWindow = null;
   });
   let isClosing = false;
-  // Hook window close so we can prompt for the current game's dirty state.
+  // Hook window close so we can prompt for the open games' dirty state.
   win.on("close", async (e) => {
-    // Prevent re-entry (Electron may fire close multiple times)
+    // Prevent re-entry.  When we later call win.close() after a successful close handshake,
+    // Electron fires "close" again and we let that second pass fall through naturally.
     if (isClosing) return;
+    // Mark that main now owns this close transaction before any async/re-entrancy can occur.
     isClosing = true;
     e.preventDefault(); // Always intercept close so we can decide what to do
     try {
-      const closeState = await requestRendererValue<{ isDirty: boolean, filename: string | null }>(
-        win, "app:query-close-state", "app:query-close-state-result");
-      console.log("closeState:", closeState);
-      if (closeState?.isDirty) {
-        const label = closeState.filename ?? "current game";
-        console.log("closeState in main:", closeState);
-        console.log("ABOUT TO SHOW CLOSE PROMPT");
-        const result = await dialog.showMessageBox(win, { // main proc, normal desktop app diaolog
-          type: "question",
-          buttons: ["Save", "Don’t Save", "Cancel"],
-          defaultId: 0,
-          cancelId: 2,
-          noLink: true,
-          title: "Unsaved Game",
-          message: `Save changes to ${label}?`,
+      const closeState = 
+        await requestRendererValue<{ dirtyCount: number, dirtyFilenames: string[] }>(
+          win, "app:query-close-state", "app:query-close-state-result");
+      const dirtyCount = closeState?.dirtyCount ?? 0;
+      const dirtyFilenames = closeState?.dirtyFilenames ?? [];
+      if (dirtyCount > 0) {
+        const onlyOne = dirtyCount === 1;
+        const title = onlyOne ? "Unsaved Game" : "Unsaved Games";
+        const message = onlyOne ? `Save changes to ${dirtyFilenames[0]}?` : 
+                                  `Save changes to ${dirtyCount} games?`;
+        const unnamed = dirtyFilenames.indexOf("unnamed");
+        if (unnamed !== -1) dirtyFilenames[unnamed] += " ... (will open Save As dialog) ...";
+        const detail = ! onlyOne ? dirtyFilenames.join("\n") : undefined;
+        const result = await dialog.showMessageBox(win, { // main proc, normal desktop app dialog
+          type: "question", buttons: onlyOne ? ["Save", "Don’t Save", "Cancel App Close"] : 
+                                               ["Save All", "Don’t Save", "Cancel App Close"],
+          defaultId: 0, cancelId: 2, noLink: true,
+          title: title, message: message, detail: detail,
         });
-        console.log("CLOSE PROMPT RESULT:", result.response);
         if (result.response === 0) { // request renderer to save
           const saved = await requestRendererValue<boolean>(
-            // longer timeout for file dialog / disk write
-            win, "app:save-before-close", "app:save-before-close-result", 10000);
-          if (!saved) {
+            // 1m timeout for saving and any SaveAs dialogs, but if user takes longer, this call
+            // throws, and the catch block sets isClosing for user to click close again when done
+            win, "app:save-before-close", "app:save-before-close-result", 60000);
+          if (! saved) {
             isClosing = false;
-            return; // if failed or cancelled, abort
+            return; // if failed or user-cancelled SaveAs, abort app closing
           }
-        } else if (result.response === 1) { // explicitly said don't save, discard autosave
+        } else if (result.response === 1) { // user explicitly abandoned changes, discard autosaves
           await requestRendererValue<boolean>(
             win, "app:discard-autosave-before-close", "app:discard-autosave-before-close-result");
-        } else { // user cancelled after clicking to save, still discard autosave
-          await requestRendererValue<boolean>(
-            win, "app:discard-autosave-before-close", "app:discard-autosave-before-close-result");
+        } else { // user cancelled closing app, so preserve autosaves and keep app open
           isClosing = false;
           return;
         }
-      } else { // game not dirty, autosave should have been cleaned up, but make sure
+      } else { // no dirty games, autosave should have been cleaned up, but make sure
         await requestRendererValue<boolean>(
           win, "app:discard-autosave-before-close", "app:discard-autosave-before-close-result");
       }
       win.close();
     } catch (err) {
-      console.error("Error during close handling:", err);
+      console.error("Error during close handling?  Or user took longer to save, no problem:", err);
       isClosing = false;
     }
 });

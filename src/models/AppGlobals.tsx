@@ -399,7 +399,8 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
         // If we're here due to file activation, ignore any unnamed autosave.
         if (fileActivationHappenedRef.current) return;
         // If the user noodled on the defaut board, maybe they want to get that back.
-        if (! await appStorageBridge.exists(UNNAMED_AUTOSAVE)) return;
+        const unnamedExists = await appStorageBridge.exists(UNNAMED_AUTOSAVE);
+        if (! unnamedExists) return;
         const autoSaveTime = await appStorageBridge.timestamp(UNNAMED_AUTOSAVE);
         const autosaveAge = autoSaveTime !== null ? (Date.now() - autoSaveTime) 
                                                  : Number.POSITIVE_INFINITY;
@@ -484,6 +485,7 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   // BROWSER SHUTDOWN -- save on possible browser shutdown
   useEffect(() => {
     const finalAutoSave = () => {
+      if (window.electron?.isElectron) return; // Electon has final saving, this is browswer only
       // void fire-and-forget, browsers may ignore long async work here.
       void maybeAutoSave(gameRef.current, appStorageBridge);
     };
@@ -502,8 +504,10 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
   useEffect(() => {
     if (! window.electron?.onFinalSaveRequest) return;
     // When main.ts asks, do an autosave and then signal done
+    // NOTE: onFinalSaveRequest is DEAD.  The main.ts proc never fires this now in lieu of
+    // app:query-close-state, app:save-before-close, and app:discard-autosave-before-close.
     const off = window.electron.onFinalSaveRequest(
-      async () => {await maybeAutoSave(gameRef.current, appStorageBridge);});
+      async () => {await maybeAutoSave(gameRef.current, appStorageBridge); });
     return off; // clean up if effect runs again
   }, [gameRef, appStorageBridge]);
   // Register renderer side callbacks so that main Electron process can query dirty/filename state
@@ -512,46 +516,54 @@ export function GameProvider ({ children, getComment, setComment, openNewGameDia
     if (! window.electron?.setCloseStateHandler ||
         ! window.electron?.setSaveBeforeCloseHandler ||
         ! window.electron?.setDiscardAutosaveBeforeCloseHandler) return;
-    // registering callback get back a cleaning function, but we're closing so it doesn't matter
-    console.log("Registering close state handler");
+    // Register a callback and get back the cleanup function for this effect.
     const removeCloseStateHandler = window.electron.setCloseStateHandler(() => {
-      const g = gameRef.current;
-      g.saveCurrentComment();
+      const curGame = gameRef.current;
+      curGame.saveCurrentComment();
+      const dirtyFilenames = getDirtyGamesForAppClose(getGames()).map((g) => exhaustiveGameBasename(g));
       return {
-        isDirty: g.isDirty,
-        filename: g.filename ?? g.filebase ?? null,
+        dirtyCount: dirtyFilenames.length,
+        dirtyFilenames: dirtyFilenames,
       };
     });
-    // registering callback get back a cleaning function, but we're closing so it doesn't matter
+    // Main asks renderer to save dirty games before close.  Renderer owns Game state, save logic,
+    // save ordering, and autosave cleanup.  Main only decides whether it should ask for saving.
     const removeSaveForCloseHandler = window.electron.setSaveBeforeCloseHandler(async () => {
-      const g = gameRef.current;
-      g.saveCurrentComment();
-      try {
-        const autoSaveSourceName = g.filebase;
-        if (g.saveCookie !== null) {
-          await fileBridge.save(g.saveCookie, g.filename!, g.buildSGFString());
-          g.isDirty = false;
-          if (g === getDefaultGame()) setDefaultGame(null);
-          await deleteResidualAutoSave(autoSaveSourceName, appStorageBridge);
+      gameRef.current.saveCurrentComment();
+      const dirtyGames = getDirtyGamesForAppClose(getGames());
+      for (const g of dirtyGames) {
+        const ok = await saveGameBeforeClose(g, fileBridge, appStorageBridge,
+                                             getDefaultGame, setDefaultGame);
+        if (! ok) {
           bumpVersion();
-          return true;
+          return false;
         }
-        // no filehandle stashed, so prompt for name
-        const tmp = await fileBridge.saveAs("game01.sgf", g.buildSGFString());
-        if (tmp === null) return false;
-        g.saveGameFileInfo(tmp.cookie, tmp.filename);
-        g.isDirty = false;
-        if (g === getDefaultGame()) setDefaultGame(null);
-        await deleteResidualAutoSave(autoSaveSourceName, appStorageBridge);
-        bumpVersion();
-        return true;
-      } catch {
-        return false;
       }
+      bumpVersion();
+      return true;
     });
-
-    return () => { removeCloseStateHandler(); removeSaveForCloseHandler(); };
-  }, [gameRef, fileBridge, getDefaultGame, setDefaultGame, bumpVersion]);  
+    // Main only uses this path when the user chose "Don't Save" or when there are no dirty games
+    // and main wants renderer to clean up any stale autosaves before exit.
+    const removeDiscardAutosaveBeforeCloseHandler =
+      window.electron.setDiscardAutosaveBeforeCloseHandler(async () => {
+        const curGame = gameRef.current;
+        curGame.saveCurrentComment();
+        const games = getGames();
+        for (const g of games) {
+          const autoSaveName = getAutoSaveName(g.filebase);
+          const existed = await appStorageBridge.exists(autoSaveName);
+          if (existed)
+            await appStorageBridge.delete(autoSaveName);
+        }
+        return true;
+      });
+    // Return cleanup function for React to remove things when it needs to clean up
+    return () => {
+      removeCloseStateHandler();
+      removeSaveForCloseHandler();
+      removeDiscardAutosaveBeforeCloseHandler();
+    };
+  }, [gameRef, fileBridge, appStorageBridge, getGames, getDefaultGame, setDefaultGame, bumpVersion]);  
   //
   // CMDDEPENDENCIES -- One object to pass to top-level commands that updates if dependencies change.
   // React takes functions anywhere it takes a value and invokes it to get the value if types match.
@@ -1121,6 +1133,8 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
                                setDefaultGame: (g: Game | null) => void,
                                message: ShowMessageDialogSig,
                                continuaton: () => Promise<void>): Promise<void> {
+  // bind basename early before any save as or renaming to clean up autosave later
+  const priorAutoSaveName = g.filebase; 
   // Save the current comment back into the model
   g.saveCurrentComment();
   let ranContinuation = false;
@@ -1163,10 +1177,9 @@ async function checkDirtySave (g: Game, fileBridge: FileBridge, lastCmd: LastCom
   // Clean up autosave file to avoid dialog when re-opening the SGF file later.  Why?
   // IF the user saved, then theyy don't need the auto save file.
   // If the user didn't save, they don't care about the auto save file.
-  const autoSaveName = getAutoSaveName(g.filebase);
+  const autoSaveName = getAutoSaveName(priorAutoSaveName);
   if (await appStorage.exists(autoSaveName))
     await appStorage.delete(autoSaveName); 
-
   if (! ranContinuation) continuaton();
 } // checkDirtySave()
 //
@@ -1287,7 +1300,7 @@ async function getFileGameCheckingAutoSave
                getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void}) {
   // Check auto save file exisitence and ask user which to use.
   const curgame = gamemgt.gameRef.current;
-  const autoSaveName = getAutoSaveName(filename);
+  const autoSaveName = getAutoSaveName(filename); // autosave name based on filebase
   if (await appStorage.exists(autoSaveName)) {
     const autosSaveTime = await appStorage.timestamp(autoSaveName); 
     if (autosSaveTime !== null && autosSaveTime > (await fileBridge.getWriteDate(fileHandle) ?? 0) &&
@@ -1388,20 +1401,22 @@ async function doWriteGameCmd ({ gameRef, bumpVersion, fileBridge, setLastComman
     Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
+  // bind basename early before any save as or renaming to clean up autosave later
+  const priorAutoSaveName = g.filebase;
   // Update model
   g.saveCurrentComment();
   // Do the save
   const data = flipped ? g.buildSGFStringFlipped() : g.buildSGFString();
   const hint = flipped ? "flipped-game-view.sgf" : (g.filename ?? "game.sgf");
   const res = await fileBridge.save(flipped ? null : (g.saveCookie ?? null), hint, data);
-  if (!res) return; // user cancelled dialog when there was no saveCookie or filename.
+  if (! res) return; // user cancelled dialog when there was no saveCookie or filename.
   if (! flipped) {
     g.isDirty = false;
     // if just saved default game, then it is no longer a default game
     if (g === getDefaultGame()) setDefaultGame(null);
     const { filename, cookie } = res;
     // If saved file, remove any auto save
-    const autoSaveName = getAutoSaveName(filename);
+    const autoSaveName = getAutoSaveName(priorAutoSaveName); 
     if (await appStorageBridge.exists(autoSaveName))
       await appStorageBridge.delete(autoSaveName); 
     // Save file info, signal UI, and set focus ...
@@ -1418,17 +1433,19 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
                                 appStorageBridge }: CmdDependencies): Promise<void> {
   setLastCommand({ type: CommandTypes.NoMatter }); // Don't change behavior if repeatedly invoke.
   const g = gameRef.current;
+  // bind basename early before any save as or renaming to clean up autosave later
+  const priorAutoSaveName = g.filebase;
   g.saveCurrentComment();
   const data = g.buildSGFString();
   const res = await fileBridge.saveAs(g.filename ?? "game.sgf", data);
-  if (!res) return; // cancelled
+  if (! res) return; // cancelled
   g.isDirty = false;
   // if just saved default game, then it is no longer a default game
   if (g === getDefaultGame()) setDefaultGame(null);
   // delete autosave file
   const { filename, cookie } = res;
   // If saved file, remove any auto save
-  const autoSaveName = getAutoSaveName(filename);
+  const autoSaveName = getAutoSaveName(priorAutoSaveName); 
   if (await appStorageBridge.exists(autoSaveName))
     await appStorageBridge.delete(autoSaveName); 
   // Save to model, signal UI, and focus
@@ -1438,6 +1455,82 @@ async function saveAsCommand ({ gameRef, bumpVersion, fileBridge, setLastCommand
   bumpVersion();
   focusOnRoot(); 
 } // saveAsCommand()
+
+///
+//// App Closing Saving and Cleanups
+///
+
+/// exhaustiveGameBasename returns the basename to be shown in the native close prompt.  This tries
+/// extra hard, ignoring invariants, and testing heavily.  It uses "unnamed" for games without
+/// file names.
+///
+function exhaustiveGameBasename (g: Game): string {
+  if (g.filebase !== null && g.filebase !== undefined && g.filebase !== "") return g.filebase;
+  if (g.filename !== null && g.filename !== undefined && g.filename !== "") {
+    const parts = g.filename.split(/[/\\]/);
+    const base = parts[parts.length - 1];
+    if (base !== undefined && base !== "") return base;
+    return g.filename;
+  }
+  return "unnamed";
+}
+
+/// getDirtyGamesForClose returns dirty games, with games that have filenames/filehandles first and
+/// unnamed games last for SaveAs prompting.
+///
+function getDirtyGamesForAppClose (games: Game[]): Game[] {
+  const namedDirtyGames: Game[] = [];
+  const unnamedDirtyGames: Game[] = [];
+  for (const g of games) {
+    if (! g.isDirty) continue;
+    if (g.saveCookie !== null && g.filename !== null && g.filename !== "") {
+      namedDirtyGames.push(g);
+    } else {
+      unnamedDirtyGames.push(g);
+    }
+  }
+  return [...namedDirtyGames, ...unnamedDirtyGames];
+}
+
+/// saveGameBeforeClose reuses the normal renderer save behavior for one game during app close.
+/// It returns false when Save As is cancelled or when the save fails, which tells main to keep
+/// the app open.
+/// NOTE, we don't use DoWriteGameCommand because it affects lastCommandKind, saves the current
+/// comment edit box to the model, and does some other cleanup not needed here.
+///
+async function saveGameBeforeClose (
+    g: Game, fileBridge: FileBridge, appStorageBridge: AppStorageBridge,
+    getDefaultGame: () => Game | null, setDefaultGame: (g: Game | null) => void):
+    Promise<boolean> {
+  // bind basename early before any save as or renaming to clean up autosave later
+  const priorAutoSaveName = g.filebase;
+  try {
+    if (g.saveCookie !== null && g.filename !== null && g.filename !== "") {
+      await fileBridge.save(g.saveCookie, g.filename, g.buildSGFString());
+      g.isDirty = false;
+      // if (g === getDefaultGame()) setDefaultGame(null);   if can call save, this is not default
+      const autoSaveName = getAutoSaveName(priorAutoSaveName);
+      if (await appStorageBridge.exists(autoSaveName))
+        await appStorageBridge.delete(autoSaveName);
+      return true;
+    }
+    // No file handle or filename is stashed, so prompt for a name.
+    const suggestedFilename = g.filename !== null && g.filename !== undefined && g.filename !== "" ?
+                              g.filename :
+                              "game01.sgf";
+    const tmp = await fileBridge.saveAs(suggestedFilename, g.buildSGFString());
+    if (tmp === null) return false;
+    g.saveGameFileInfo(tmp.cookie, tmp.filename);
+    g.isDirty = false;
+    if (g === getDefaultGame()) setDefaultGame(null);
+    const autoSaveName = getAutoSaveName(priorAutoSaveName);
+    if (await appStorageBridge.exists(autoSaveName))
+      await appStorageBridge.delete(autoSaveName);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 ///
 //// Pet Commands for Common Editing
@@ -1781,15 +1874,13 @@ const AUTOSAVE_APPSTORAGE_GC_DAYS = 7;  // 3?
 /// the app storage.  This is lighterweight than the C# version where it shared normal writing code
 /// and optionally didn't save the games file info
 ///
-async function maybeAutoSave(g: Game, appStorageBridge: AppStorageBridge): Promise<void> {
-  if (! g.isDirty) return;
+async function maybeAutoSave (g: Game, appStorageBridge: AppStorageBridge): Promise<void> {
   g.saveCurrentComment();
   // NOTE: buildSGFString updates game's parsedGame; it is safe to call here by design. 
   const data = g.buildSGFString();
   const name = getAutoSaveName(g.filebase);
   // don't set isDirty to false because didn't dave user's file
   await appStorageBridge.writeText(name, data); // OPFS or fallback (localStorage)
-  console.log(`WROTE ${name}`);
 }
 
 /// getAutoSaveName:
@@ -1803,14 +1894,6 @@ function getAutoSaveName(name: string | null): string {
   const m = name.match(/^(.*?)(\.sgf)$/i);
   return m ? `${m[1]}-autosave${m[2]}` : `${name}-autosave.sgf`;
 }
-
-async function deleteResidualAutoSave (name: string | null, 
-                                       appStorage: AppStorageBridge): Promise<void> {
-  const autoSaveName = getAutoSaveName(name);
-  if (await appStorage.exists(autoSaveName))
-    await appStorage.delete(autoSaveName);
-}
-
 
 /// looksLikeAutoSave makes sure it is a file SGF Editor saved based on our naming convention and
 /// file extension.

@@ -18,7 +18,7 @@ declare global { // doesn't pollute global scope due to export {}
       writeText (path: string, data: string): Promise<boolean>;
       timestamp (path: string): Promise<number>;
       setCloseStateHandler? (
-        handler: () => { isDirty: boolean, filename: string | null }
+        handler: () => { dirtyCount: number, dirtyFilenames: string[] }
       ): () => void;
       setSaveBeforeCloseHandler? (
         handler: () => Promise<boolean> | boolean
@@ -27,6 +27,8 @@ declare global { // doesn't pollute global scope due to export {}
         handler: () => Promise<boolean> | boolean
       ): () => void;
       onOpenFile? (handler: (path: string) => void): () => void;
+      // NOTE: onFinalSaveRequest is DEAD.  The main.ts proc never fires this now in lieu of
+      // app:query-close-state, app:save-before-close, and app:discard-autosave-before-close.
       onFinalSaveRequest? (handler: () => Promise<void> | void): () => void;
     };
   }

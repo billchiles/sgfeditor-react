@@ -959,46 +959,61 @@ main process and requires coordination with the renderer.
 1. **Main intercepts window close**
    * `win.on("close", e)` always calls `e.preventDefault()` on first entry.
    * A re-entrancy guard (`isClosing`) prevents duplicate execution.
+   * `isClosing` means main has taken ownership of the current close transaction.
+ 
 
 2. **Main queries renderer state**
    * IPC: `app:query-close-state`
    * Renderer returns:
      ```ts
-     { isDirty: boolean, filename: string | null }
+     { dirtyCount: number, dirtyFilenames: string[] }
+   * `dirtyFilenames` contains display basenames, or `"unnamed"` for games without a saved filename.
+ 
      ```
 
 3. **Main decides prompt behavior**
 
-   * If `isDirty === false`
+   * If `isDirty === 0`
      → proceed to close (no prompt)
 
-   * If `isDirty === true`
+   * If `isDirty === 1`
      → show native dialog:
        * Save
        * Don’t Save
        * Cancel
 
+   * If `dirtyCount >= 2`
+     → show native dialog:
+       * Save All
+       * Don’t Save
+       * Cancel App Closing
+       * The dialog may list the dirty game basenames for user context.
+
 4. **User choice handling**
 
-   * **Save**
+   * **Save / Save All**
      * IPC: `app:save-before-close`
-     * Renderer performs save (including Save As if needed)
-     * If save fails or user cancels Save As → abort close
+     * Renderer recomputes dirty games and saves them sequentially
+     * Games with an existing save target are saved first
+     * Unnamed games are saved last so any Save As dialogs happen at the end
+     * Each successful save cleans up that game's residual autosave
+     * If save fails or user cancels Save As → abort close and keep autosaves for unsaved games
 
    * **Don’t Save**
      * IPC: `app:discard-autosave-before-close`
-     * Renderer deletes autosave for current game
+     * Renderer deletes autosaves for open games being abandoned by app close
      * Close proceeds
 
    * **Cancel**
-     * IPC: `app:discard-autosave-before-close`
-     * Renderer deletes autosave
+     * No autosave cleanup runs
      * Close is aborted (app remains open)
 
 ### Invariants
 
+* App close is a batch operation over all open games.
 * Main process **never mutates Game state directly**.
-* Renderer owns all save / autosave / model mutation logic.
+* Main owns native close interception and prompt policy.
+* Renderer owns authoritative dirty detection, save ordering, save execution, and autosave cleanup.
 * Preload acts only as a relay (no business logic).
 * Close is only allowed after:
   * user decision is resolved
@@ -1008,7 +1023,8 @@ main process and requires coordination with the renderer.
 
 * `isClosing` must be set **after entering handler and before async work**
 * Must be reset to `false` if close is aborted
-
+* Must not be reset on the successful path before the final `win.close()`, because the second
+  `close` event should fall through naturally
 
 ## 16) Ownership matrix (practical)
 
