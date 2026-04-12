@@ -361,9 +361,8 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
     const half = Math.max(geom.radius * 0.55, 4); // could try .65 for bigger
     const tri = Math.max(geom.radius * 0.75, 6); // could try .85 for bigger
     // Bigger letters for parity with shapes (fonts render optically smaller than outlines)
-    const letterFontSize = Math.max(geom.radius * 1.4, 12); // play with 1.3 or fontWeight 500
+    const letterFontSize = Math.max(geom.radius * 1.6, 6); // play with 1.3 or fontWeight 500
     // const fontSize = Math.max(geom.radius * 0.95, 9);
-
     for (const a of list) {
       const x = a.column - 1;
       const y = a.row - 1;
@@ -371,7 +370,7 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
       const cx = boardToPx.xs[x];
       const cy = boardToPx.ys[y];
       const stone = curBoard.moveAt(a.row, a.column);
-      const stroke = stone ? (stone.color === StoneColors.Black ? "#fff" : "#000") : "#000";
+      const stroke = stone ? (stone.color === StoneColors.Black ? "#fff" : "#000") : "#d4d1d1";
 
       if (a.kind === AdornmentKinds.Triangle) {
         // Up-pointing triangle
@@ -396,7 +395,7 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
             y={cy}
             fontFamily="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
             fontSize={letterFontSize}
-            fontWeight={500}
+            fontWeight={600}
             textAnchor="middle"
             dominantBaseline="middle"
             // small optical nudge so letters look centered on most fonts
