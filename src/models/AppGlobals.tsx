@@ -1315,15 +1315,11 @@ async function getFileGameCheckingAutoSave
   const autoSaveName = getAutoSaveName(filename); // autosave name based on filebase
   if (await appStorage.exists(autoSaveName)) {
     const autosSaveTime = await appStorage.timestamp(autoSaveName); 
+    const filebase = filename.split(/[/\\]/).pop() ?? filename;
     if (autosSaveTime !== null && autosSaveTime > (await fileBridge.getWriteDate(fileHandle) ?? 0) &&
-        await showMessage(`Found more recent auto saved file for ${(fileHandle as any).name}.`,
+        await showMessage(`Found more recent auto saved file for ${filebase}.`,
                           {title: "Confirm Opening Autosave", primary: "Open Autosave", 
                            secondary: "Open Older File"})) {
-        // Use this instead of showMessage/openMessageDialog because much simpler API, don't need
-        // to construct continuation lambdas for rest of function flow, just need to know yes/no
-        // await curgame.message!.confirm!(
-        //   `Found more recent auto saved file for ${(fileHandle as any).name}.  Confirm opening ` +
-        //   `it, OK for auto saved version, Cancel/Escape to open older original file.`)) {
       const autodata = await appStorage.readText(autoSaveName);
       if (autodata === null)
         throw new Error(
@@ -1334,11 +1330,8 @@ async function getFileGameCheckingAutoSave
                           setGames: gamemgt.setGames, getDefaultGame: gamemgt.getDefaultGame,
                           setDefaultGame: gamemgt.setDefaultGame});
       const nowCurrent = gamemgt.gameRef.current;
-      nowCurrent.isDirty = true; // actual file is not saved up to date
-      // Persist actual file name and handle for future save operations.
-      nowCurrent.filename = (fileHandle as any).name; // if there is a path, this is it.
-      const parts = nowCurrent.filename!.split(/[/\\]/); 
-      nowCurrent.filebase = parts[parts.length - 1];
+      nowCurrent.saveGameFileInfo(fileHandle, filename);
+      nowCurrent.isDirty = true; // autosave is newer than the on-disk file and "not saved"
     } else {// Not using exiting auto save ...
       await parseAndCreateGame(fileHandle, filename, fileBridge, data, gamemgt.gameRef, 
                          {curGame: curgame, setGame: gamemgt.setGame, 
@@ -1888,6 +1881,7 @@ const AUTOSAVE_APPSTORAGE_GC_DAYS = 7;  // 3?
 /// and optionally didn't save the games file info
 ///
 async function maybeAutoSave (g: Game, appStorageBridge: AppStorageBridge): Promise<void> {
+  if (! g.isDirty) return;
   g.saveCurrentComment();
   // NOTE: buildSGFString updates game's parsedGame; it is safe to call here by design. 
   const data = g.buildSGFString();
