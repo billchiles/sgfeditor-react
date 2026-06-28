@@ -370,7 +370,7 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
       const cx = boardToPx.xs[x];
       const cy = boardToPx.ys[y];
       const stone = curBoard.moveAt(a.row, a.column);
-      const stroke = stone ? (stone.color === StoneColors.Black ? "#fff" : "#000") : "#d4d1d1";
+      const stroke = stone ? (stone.color === StoneColors.Black ? "#fff" : "#000") : "#4b86eb";
 
       if (a.kind === AdornmentKinds.Triangle) {
         // Up-pointing triangle
@@ -399,7 +399,7 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
             textAnchor="middle"
             dominantBaseline="middle"
             // small optical nudge so letters look centered on most fonts
-            dy=".03em"
+            dy=".10em"
             fill={stroke}
           >
             {a.letter}
