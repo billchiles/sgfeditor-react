@@ -167,6 +167,22 @@ This produces an installer at:
 
 Execute the installer to fully eanble the app on Windows.
 
+ON A MAC ...
+
+Execute:
+```
+npm install
+npm run dist:mac
+```
+This produces:
+```
+.../dist/*.dmg
+.../dist/*.zip
+```
+Open the .dmg file and drag the app to Applications and launch the app from there one time.
+
+To set up file extensions, find an .sgf file, right click -> Get Info, under Open With ... choose this app, and click Change All
+
 ## One more way to run the app
 You can use the "npm run dev:electron" command to launch the electron shell hosting the app talking to the app's vite host server.  This also launches a debug tools window that you can close.  The live app updates if you modify sources due to vite watching sources and rebuilding.
 

@@ -110,12 +110,16 @@ Packaging / installer:
 
 * Packaging uses **electron-builder**.
 * Windows builds use **NSIS** so the installer can register the `.sgf` file association.
+* macOS builds use **DMG/ZIP** targets. The `.sgf` file association is emitted into the app bundle
+  metadata, and Finder double-click activation is handled by Electron's `open-file` event.
 * The app identity is distinct from the legacy C# app (`SGFEditor`) to avoid Start Menu / uninstall / association conflicts:
   * `build.productName = "SGFEditorR"`
   * `build.appId` is unique (reverse-DNS style)
   * `build.executableName = "SGFEditorR"`
 * Build commands (see `package.json` scripts):
   * `npm run dist:win` builds a Windows NSIS installer.
+  * `npm run dist:mac` builds macOS DMG/ZIP artifacts.
+  * `npm run dist:mac:dir` builds an unpacked macOS app for local testing.
   * Output artifacts are written under `dist/` (e.g. `dist/SGFEditorR-setup-<version>.exe`).
 * Icons:
   * Windows app/installer/association icons use a multi-size `.ico` file (PNG is not sufficient for Windows associations).

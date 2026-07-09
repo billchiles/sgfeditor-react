@@ -17,7 +17,9 @@
     "app:prod": "npm run build && npm run build:electron && npm run start:electron",
     "dist": "npm run build && npm run build:electron && electron-builder",
     "dist:win": "npm run build && npm run build:electron && electron-builder --win nsis",
-    "dist:dir": "npm run build && npm run build:electron && electron-builder --dir"
+    "dist:dir": "npm run build && npm run build:electron && electron-builder --dir",
+    "dist:mac": "npm run build && npm run build:electron && electron-builder --mac dmg zip",
+    "dist:mac:dir": "npm run build && npm run build:electron && electron-builder --mac dir"
   },
   "dependencies": {
     "react": "^19.1.1",
@@ -58,6 +60,11 @@
     "win": {
       "icon": "src/assets/filelogo50.ico",
       "target": ["nsis"]
+    },
+    "mac": {
+      "icon": "src/assets/filelogo50.icns",
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.games"
     },
     "nsis": {
       "perMachine": true,

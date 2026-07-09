@@ -59,8 +59,10 @@ app.on("open-file", (event, p) => {
 });
 
 app.whenReady().then(() => {
-  Menu.setApplicationMenu(null); // remove default app menus (Win/Linux; also fine on macOS)
-  createWindow();
+  if (process.platform !== "darwin") {
+    Menu.setApplicationMenu(null); // remove default app menus on Windows/Linux.
+  }
+ createWindow();
   // Windows/Linux initial activation (argv on first launch)
   const initial = extractSgfPathFromArgv(process.argv);
   if (initial) pendingOpenPath = initial;
@@ -203,6 +205,13 @@ ipcMain.handle("file:timestamp", async (_e, p: string) => (await fsp.stat(p)).mt
 
 const devUrl = process.env.ELECTRON_START_URL || process.env.VITE_DEV_SERVER_URL;
 
+// function getWindowIconPath (): string | undefined {
+//   if (process.platform === "darwin") {
+//     return undefined;
+//   }
+//   return path.join(process.cwd(), "src", "assets", "filelogo50.ico");
+// }
+
 /// createWindow must be after the ipcMain.handle calls above.
 ///
 function createWindow () {
@@ -210,8 +219,12 @@ function createWindow () {
   const win = new BrowserWindow({
     x: 140, y: 40, width: 1025, height: 600,
     title: "SGF Editor",
-    icon: path.join(process.cwd(), "src", "assets", "filelogo50.ico"),
-    autoHideMenuBar: true,
+    // icon: path.join(process.cwd(), "src", "assets", "filelogo50.ico"),
+    // autoHideMenuBar: true,
+    
+    icon: process.platform === "darwin" ? undefined 
+                                        : path.join(process.cwd(), "src", "assets", "filelogo50.ico"),
+    autoHideMenuBar: process.platform !== "darwin",
     webPreferences: {
       preload: preloadAbs, // path.join(__dirname, process.env.ELECTRON_PRELOAD_PATH || "preload.js"),
       nodeIntegration: false,
@@ -289,7 +302,9 @@ function createWindow () {
     }
 });
 
-  win.setMenuBarVisibility(false); // keeps users from using alt key to show menus.
+  if (process.platform !== "darwin") {
+    win.setMenuBarVisibility(false); // keeps users from using alt key to show menus.
+  }
 
   if (devUrl) {
     win.loadURL(devUrl);
