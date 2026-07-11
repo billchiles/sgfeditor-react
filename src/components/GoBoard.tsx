@@ -420,6 +420,21 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
     []
   );
 
+  // macOS treats Control-click as a secondary click and raises contextmenu instead of click.
+  // Route that event through the normal board click handling so Control-click still toggles
+  // a triangle adornment.
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      if (!e.ctrlKey) {
+        return;
+      }
+      e.preventDefault();
+      void handleClick(e);
+    },
+    [handleClick]
+  );
+
+
 
   // Now render ...
   return (
@@ -433,6 +448,7 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
         height={geom.sizePx}
         viewBox={`0 0 ${geom.sizePx} ${geom.sizePx}`}
         onMouseDown={preventSelectionMouseDown}
+        onContextMenu={handleContextMenu}
         onClick={handleClick}
         role="img"
         aria-label="Go board"
