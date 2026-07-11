@@ -167,7 +167,7 @@ This produces an installer at:
 
 Execute the installer to fully eanble the app on Windows.
 
-ON A MAC ...
+### ON A MAC ...
 
 Execute:
 ```
