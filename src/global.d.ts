@@ -10,6 +10,7 @@ declare global { // doesn't pollute global scope due to export {}
   interface Window { // merge defs with the DOM's Window interface.
     electron?: {
       isElectron: boolean; // in the web build, this is undefined
+      platform: string;
       ping(): Promise<string>;
       // Matching contextBridge.exposeInMainWorld('electron', { … }) from preload.ts ...
       pickOpenFile (): Promise<string | null>;

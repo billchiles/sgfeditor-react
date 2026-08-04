@@ -10,7 +10,7 @@ to your opponent.  You can also just use it as a Go board to play a game.
 The following describes commands and key bindings, but you can use commands
 from buttons in the upper right panel.
 
-QUICK REF KEYBINDINGS
+QUICK REF KEYBINDINGS (On macOS, command can be used in place of ctrl.)
  * esc -- should always put focus so that global keybindings work
  * Open Game -- c-o
  * New Game -- alt-n (browser), c-n (electron)
@@ -37,7 +37,7 @@ If you click on an adornment location twice, it toggles whether there is an ador
 
 AB/AW/AE EDIT MODE:
 F2 toggles Edit Mode (shift-F2 exits) in which left click places black stones or removes existing
-stones, and right click places white stones or removes existing stones.  This creates setup nodes
+stones, and shift click places white stones or removes existing stones.  This creates setup nodes
 in the middle of the game.
 
 KEEPING FOCUS ON BOARD FOR KEY BINDINGS
@@ -100,6 +100,6 @@ MISCELLANEOUS
       puts entire comment's text on clipboard.
    Ctrl-t changes the first occurrence of the current move's board coordinates in the comment
       to 'this'; for example, 'd6 is strong cut' changes to 'this is strong cut'.
-   Ctrl-m changes the first occurrence of board coordinates to 'marked stone',
+   Ctrl-alt-m changes the first occurrence of board coordinates to 'marked stone',
       'square marked stone', or a letter depending on what adornment is at that location.
 `;

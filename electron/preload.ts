@@ -60,6 +60,7 @@ ipcRenderer.on("app:discard-autosave-before-close", async () => {
 
 contextBridge.exposeInMainWorld("electron", {
   isElectron: true,
+  platform: process.platform,
 
   ping: (): Promise<string> =>
     ipcRenderer.invoke("ping"),

@@ -53,6 +53,12 @@ import { createPortal } from "react-dom";
 //   children: React.ReactNode;
 // };
 
+/// bookkeeping for stacked modal invocations and properly clearing model flag.  There is a timing
+/// issue if in the comment box and type c-n and prompts to save, React state has bogus modalOpen is
+/// true from save game and new game dialog lingering state.
+let openModalCount = 0;
+let bodyOverflowBeforeFirstModal = "";
+
 export default function Modal({ open, onClose, children, contentStyle, labelledById, }: 
                               { open: boolean; onClose: () => void; children: React.ReactNode;
                                 contentStyle?: React.CSSProperties;
@@ -61,9 +67,13 @@ export default function Modal({ open, onClose, children, contentStyle, labelledB
   const contentRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.dataset.modalOpen;
+    // const prev = document.body.dataset.modalOpen;
+    if (openModalCount === 0) {
+      bodyOverflowBeforeFirstModal = document.body.style.overflow;
+    }
+    openModalCount += 1;
     document.body.dataset.modalOpen = "true";
-    const prevOverflow = document.body.style.overflow;
+    // const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -93,8 +103,16 @@ export default function Modal({ open, onClose, children, contentStyle, labelledB
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
-      document.body.dataset.modalOpen = prev ?? "";
-      document.body.style.overflow = prevOverflow;
+      // document.body.dataset.modalOpen = prev ?? "";
+      // document.body.style.overflow = prevOverflow;
+      openModalCount = Math.max(0, openModalCount - 1);
+      if (openModalCount === 0) {
+        delete document.body.dataset.modalOpen;
+        document.body.style.overflow = bodyOverflowBeforeFirstModal;
+      } else {
+        document.body.dataset.modalOpen = "true";
+        document.body.style.overflow = "hidden";
+      }
     };
   }, [open, onClose]);
 

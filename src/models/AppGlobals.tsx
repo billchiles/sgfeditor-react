@@ -667,12 +667,17 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   // NOTE: order matters unless testing the state of every modifier.  If not, then test for keys
   // with more modifiers constraints first.
   // If a modal dialog is open, ignore global key bindings completely.
-  if (document.body.dataset.modalOpen === "true") return;
+  // if (document.body.dataset.modalOpen === "true") return; has timing issue if in comment box and
+  // type c-n and prompts to save, React state has bogus modalOpen === true lingering state
+  if (document.querySelector('[role="dialog"][aria-modal="true"]') !== null) return;
   // Need game in various places
   const curgame = deps.gameRef.current;
   // Collect some modifiers and letter we repeatedly look at
   const lower = e.key.toLowerCase();
-  const control = e.getModifierState("Control") || e.ctrlKey;  
+  // ctrl is king on pc, capslock === ctrl, on mac cmd is key, capslock === cmd, so ...
+  const control = e.getModifierState("Control") || e.ctrlKey ||
+                  (window.electron?.platform === "darwin" &&
+                   (e.getModifierState("Meta") || e.metaKey));
   const shift = e.getModifierState("Shift") || e.shiftKey;
   const alt = e.getModifierState("Alt") || e.altKey;
   // browser steals common keybindings, no way to hook them, so we test for alternate bindings
@@ -710,7 +715,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     curgame.exitEditMode();
     void doWriteGameCmd(deps, true); // true = flipped
   // OPEN FILE
-  } else if (e.ctrlKey && !e.shiftKey && lower === "o") {
+  } else if (control && ! e.shiftKey && lower === "o") {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     e.stopPropagation();
@@ -727,7 +732,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return;
   // NEW GAME -- browsers refuse to stop c-n for "new window" – use Alt+N for New Game.
   } else if ((browser && ! e.ctrlKey && ! e.shiftKey && ! e.metaKey && e.altKey && lower === "n") ||
-             (! browser && e.ctrlKey && lower === "n")) {
+             (! browser && control && lower === "n")) {
     //deps.setLastCommand( {type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
@@ -769,6 +774,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return;
   // PASS MOVE
   } else if (control && lower === "p") {
+    e.preventDefault(); // prevent c-p from invoking printing.
     const m = await curgame.makeMove(Board.NoIndex, Board.NoIndex);
     if (m !== null) {
       deps.bumpVersion();
@@ -795,7 +801,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return;
   // Common editing command -- replace the current moves indexes in the comment with "this"
   }
-    else if (control && !shift && !alt && !e.metaKey && e.code === "KeyT") {
+    else if (control && !shift && !alt && e.code === "KeyT") {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
@@ -803,7 +809,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     return;
   // Common editing command -- replace adornment indexed refs with "marked stone"
   }
-    else if (control && e.code === "KeyM") {
+    else if (control && alt && e.code === "KeyM")  {
     deps.setLastCommand({ type: CommandTypes.NoMatter });
     e.preventDefault();
     e.stopPropagation();
@@ -821,6 +827,7 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
   if (lower === "arrowleft" && curgame.canUnwindMove()) {
     curgame.exitEditMode();
     if (control) {
+      e.preventDefault(); // prevent browser handling
       // setup for loop so do not stop on current move if it has branches
       let move = curgame.unwindMove();
       let curmove = curgame.currentMove;
@@ -848,28 +855,28 @@ async function handleKeyPressed (deps: CmdDependencies, e: KeyboardEvent) {
     }
     return;
   }
-  if (lower === "arrowup" && ! e.ctrlKey) {
+  if (lower === "arrowup" && ! control) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     //curgame.exitEditMode();
     curgame.selectBranchUp(); // Calls onchange if needed.
     return;
   }
-  if (lower === "arrowdown" && ! e.ctrlKey&& curgame.canReplayMove()) {
+  if (lower === "arrowdown" && ! control && curgame.canReplayMove()) {
     deps.setLastCommand( {type: CommandTypes.NoMatter }); // Doesn't change  if repeatedly invoked
     e.preventDefault();
     //curgame.exitEditMode();
     curgame.selectBranchDown(); // Calls onchange if needed
     return;
   }
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && lower === "arrowup") {
+  if (control && ! shift && ! alt && lower === "arrowup") {
     e.preventDefault(); // called before await so browser scrolling etc blocked immediately.
     curgame.exitEditMode();
     await curgame.moveBranchUp();   // or curgame.()
     return;
   }
 
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && lower === "arrowdown") {
+  if (control && ! shift && ! alt && lower === "arrowdown") {
     e.preventDefault();
     curgame.exitEditMode();
     await curgame.moveBranchDown(); // or curgame.moveBranchOrderDown()

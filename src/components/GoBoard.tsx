@@ -145,17 +145,23 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
       debugAssert(curGame !== null, "Eh?! How can there be no game, but we're clicking?!");
       const curBoard = curGame.board;
       // Modifier-clicks toggle adornments and black/white stones in edit move mode.
-      const ctrl = e.ctrlKey || e.getModifierState("Control");
+      const ctrl = e.ctrlKey || e.getModifierState("Control") ||
+                   (window.electron?.platform === "darwin" &&
+                     (e.metaKey || e.getModifierState("Meta")));
       const shift = e.shiftKey || e.getModifierState("Shift");
       const alt = e.altKey || e.getModifierState("Alt");
       focusOnRoot(); // Put focus back on root before returning in case it is in the comment box
+      // Edit move mode changes left click (black) and left shift click (white), and clicking on an
+      // occupied point removes that stone.  square adornments need a new binding in edit move mode.
+      if (curGame.editMode && ctrl && shift) {
+        curGame.toggleAdornment(AdornmentKinds.Square, row, col);
+        return;
+      }
+      // Need previous test first so that simple ctrl test doesn't mask more specific test.
       if (ctrl) { curGame.toggleAdornment(AdornmentKinds.Triangle, row, col); return; }
       if (alt) { curGame.toggleAdornment(AdornmentKinds.Letter, row, col); return; }
-      // Edit move mode changes left click (black) and left shift click (white), and clicking on
-      // an occupied point removes that stone.
+      // Edit move mode changes clicking
       if (curGame.editMode) {
-        // square adornments need a new key binding in edit move move.
-        if (ctrl && shift) { curGame.toggleAdornment(AdornmentKinds.Square, row, col); return; }
         const color = shift ? StoneColors.White : StoneColors.Black;
         await curGame.editStoneClick(row, col, color); // editStoneClick bumps version
         return;
@@ -414,7 +420,8 @@ export default function GoBoard({ responsive = true, useStonesAndGrain = true}: 
   const preventSelectionMouseDown = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
       // You can make this unconditional; keeping it to modifiers is a bit gentler.
-      if (e.shiftKey || e.ctrlKey || e.altKey) 
+      if (e.shiftKey || e.ctrlKey || e.altKey ||
+          (window.electron?.platform === "darwin" && e.metaKey))
         e.preventDefault();
     },
     []

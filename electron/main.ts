@@ -71,8 +71,10 @@ app.whenReady().then(() => {
   });
 });
 
+/// This runs after close requested and win.close hook and saving games, etc.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // if (process.platform !== "darwin") app.quit();
+  app.quit(); // stop mac from keeping dead app running and making new random windows
 });
 
 /// requestOpenFile is used by second app instance detection to stash the file path, ensure main
